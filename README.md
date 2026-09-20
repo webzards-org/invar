@@ -35,28 +35,37 @@ any single ticket wants.)*
 
 ---
 
-> **Revision note.** This document supersedes the previous MVP design, which
-> was written when the tool was a standalone CLI named `scenera`. The CLI
-> command, the config file and the state directory are now `invar`,
-> `invar.yaml` and `.invar/`; the feature tag is `@invar` and the context
-> marker is `<!-- invar-context: v1 -->`.
+> **Revision note (v3).** This revision records the decisions made at the
+> start of implementation. The previous revision (v2) turned the standalone CLI
+> `scenera` into a Claude Code plugin containing the `invar` CLI, gated the Plan
+> *and* the scenarios, and added checksums, scenario deletion, external context
+> and hooks. All of that stands. What v3 changes:
 >
-> **Delivery form changed.** MVP ships as a **Claude Code plugin that contains
-> the CLI** (§13), not as a runtime-agnostic CLI. Hooks and an isolated
-> planning context are part of the protocol, not optional improvements. The CLI
-> remains the contract and holds all the logic — that is what keeps a second
-> runtime, or a separate plugin per language, cheap later (§13b, §14.2) — but
-> other runtimes are **not a supported target in MVP**.
+> - **Claude Code is the only runtime.** v2 still had `init` write `AGENTS.md`
+>   and `.cursor/rules/`; those are gone. The protocol reaches the agent only
+>   through Claude Code mechanisms — the planning sub-agent's system prompt, a
+>   `SessionStart` hook, and a protocol skill (§5c, §13).
+> - **Context delivery is specified (§5c).** v2 said `context show` assembles
+>   the sources but not how they reach each agent. Binding context is pushed
+>   deterministically; ticket-specific context is distilled into the Plan;
+>   external context is pulled through MCP only as a supplement.
+> - **The Plan carries its own implementation context** (`## Implementation
+>   context`, §4a) and records a `Lockfile-checksum` at approval, so Phase 2
+>   does not redo research Phase 1 already did and the developer approved.
+> - **The core CLI is written in Rust** (§14.2). Language adapters are separate
+>   processes speaking a JSON protocol over stdio, each written in the language
+>   of its ecosystem; the Python adapter is written in Python.
+> - **Test discovery is an adapter concern.** The one-feature-to-one-test-file
+>   rule (§4b) is a property of pytest-bdd, not of the core contract.
+> - **Repository layout and roadmap are new** (§15, §16): one monorepo organized
+>   around a `contracts/` directory, and milestones without dates.
+> - **Decision-log access is restricted by permission deny rules** in the
+>   project's `.claude/settings.json`, and only for `.invar/decisions/` — v2
+>   also hid `.invar/plans/`, which Phase 2 has to read (§13a).
 >
-> Six things changed in the flow: the approval gate now covers the Plan *and*
-> the scenarios (§3); `.feature` files carry an approval checksum (§4, with
-> canonicalization and check scope in §4d); `Status` no longer has
-> `superseded` (§4); deleting a scenario is a legitimate cycle outcome declared
-> in the Plan (§4c); framework and package context are new, separate,
-> versioned context sources with their own sync command (§5b, §8); and agent
-> hooks are specified (§13). §14 states two design constraints that shape the
-> whole thing and must not be designed around later: an **external context API
-> with an MCP front end** (§14.1) and **multi-language support** (§14.2).
+> §14 still states the two constraints that shape everything and must not be
+> designed around later: an **external context API with an MCP front end**
+> (§14.1) and **multi-language support** (§14.2).
 
 
 ## 1. Purpose
@@ -76,11 +85,11 @@ present (whether authored by FastKit, hand-written, or by another tool).
 | **Scenario** | A single behavior specification, written in Gherkin (`Given/When/Then`), stored as a `.feature` file. The unit of work for the whole pipeline. |
 | **Scenario Agent** (Phase 1) | Claude Code operating under the Phase 1 instructions, in a **planning sub-agent with its own context** (§13a). Converses to clarify intent, then drafts a Plan and the Scenario files, which are approved together at one gate. Does not write implementation code. |
 | **Codegen Agent** (Phase 2) | The main session operating under the Phase 2 instructions. Takes an approved Plan + `confirmed` Scenario (+ context, if present) and produces implementation code and its matching behavioral test. Does **not** read the decision log (§7) — enforced by context separation, not instruction. |
-| **Plugin** | The delivery form of the whole system: a Claude Code plugin bundling the `invar` CLI, the hook definitions (§13), the instruction files, and the planning sub-agent. What the developer installs. |
-| **CLI** (`invar`) | The binary inside the plugin. Holds **all** the logic and is the only component that renders a verdict. Runnable on its own, which is why it also runs in CI where no agent exists (§13b). |
-| **Instruction files** | Agent-facing protocol files written by `invar init` (`CLAUDE.md`, `AGENTS.md`, `.cursor/rules/`). They state the two phases, when to stop and ask, what may be written in each phase, and which command to call when. The plugin's hooks fire the commands; the instruction files carry the reasoning the hooks cannot. |
+| **Plugin** | The delivery form of the whole system: a Claude Code plugin bundling the `invar` CLI binary, the hook definitions (§13), the planning sub-agent (§13a), and the protocol skill. What the developer installs. |
+| **CLI** (`invar`) — the *core* | The Rust binary inside the plugin. Holds **all** language-neutral logic and is the only component that renders a verdict; language-specific operations are delegated to a language adapter (§14.2). Runnable on its own, which is why it also runs in CI where no agent exists (§13b). |
+| **Protocol** | The agent-facing rules of the two phases: when to stop and ask, what may be written in each phase, which command to call when, and why the gate exists. Delivered only through Claude Code mechanisms — the planning sub-agent's system prompt (Phase 1), a `SessionStart` hook (the short list of rules that must hold in every session), and a protocol skill (longer explanations, loaded on demand). A `CLAUDE.md` at the plugin root is not loaded by Claude Code, so the plugin ships none and `init` writes none (§5c, §13). |
 | **Ticket** | The unit of work entering the pipeline — a JIRA (or equivalent) issue pasted by the developer. Its id (e.g. `PROJ-412`) links the Plan, the branch, and the decision entry. |
-| **Plan** | The prose specification derived from a Ticket, **written by the agent** and stored at `.invar/plans/<TICKET>-<slug>/spec.md` (structure: §4a). Carries what Gherkin cannot: ticket context, scope, open questions and answers, rejected alternatives, and any scenario the cycle intends to delete (§4c). Approved by the developer at the gate, consumed by the Codegen Agent, and **deleted within the same PR** once the cycle passes (§12). |
+| **Plan** | The prose specification derived from a Ticket, **written by the agent** and stored at `.invar/plans/<TICKET>-<slug>/spec.md` (structure: §4a). Carries what Gherkin cannot: ticket context, scope, open questions and answers, rejected alternatives, the ticket-specific implementation context Phase 2 needs (§5c), and any scenario the cycle intends to delete (§4c). Approved by the developer at the gate, consumed by the Codegen Agent, and **deleted within the same PR** once the cycle passes (§12). |
 | **Project context** — `AI_CONTEXT.md` | Optional, machine-readable file describing **this project's own** architectural conventions (layer boundaries, naming, module import rules). Its presence activates the extended lint rule set, so its content is *binding* and must be the project's own decisions — never generic framework advice (§5a). May be FastKit's published version, hand-authored, or derived from the existing code with developer confirmation. Absence is a valid, supported state. |
 | **Business context** — `BUSINESS_CONTEXT.md` | Optional, machine-readable file describing business rules the *application* must obey — distinct from `AI_CONTEXT.md`, which describes how *code* must be structured. Read by **both** agents. Two categories: **Invariants** (always true, e.g. "every tenant-scoped model must be filtered by `account_id`") and **Regional/parameterized facts** (vary by a parameter such as country or plan tier). Owned and maintained by the developer or team; `invar` never generates its content (§5). Absence — and an empty-but-marked file — are valid, supported states. |
 | **Framework context** | External, read-only context for the *framework* at the exact installed version (e.g. "in this version use `@field_validator`, not `@validator`"). Answers what a model trained on mixed versions gets wrong. A separate source, never merged into `AI_CONTEXT.md` (§5b). |
@@ -91,13 +100,15 @@ present (whether authored by FastKit, hand-written, or by another tool).
 | **Ubiquitous language check** | A *non-mechanical* category, explicitly excluded from lint: whether a name (`reserve_stock`, `Invoice`, `settle`) matches the business domain's actual vocabulary. Lint can flag naming *inconsistency* across modules but cannot verify domain-correctness — that remains a human/Scenario Agent review concern. |
 | **Decision log** | An insert-only, human-readable record of what was built and why, stored as one file per entry under `.invar/decisions/`. Read by the Scenario Agent as *advisory* (non-binding) context. Written as the last step of a cycle, after implementation. Linear and chronological in MVP; a weighted decision graph is post-MVP (§7). |
 | **Config file** | Single YAML file (`invar.yaml`) at project root controlling infrastructure hints, lint rule overrides, language selection, and pipeline behavior. |
-| **Language adapter** | The three-to-four language-specific operations behind an explicit interface: dependency discovery, test discovery, test execution, lint. Everything else in `invar` is language-neutral (§14.2). |
+| **Language adapter** | A separate executable implementing the four language-specific operations — dependency discovery, test discovery, test execution, lint — behind a JSON protocol over stdin/stdout. Written in the language of its ecosystem (the Python adapter is Python). Complete when it passes the conformance suite. Everything else in `invar` is language-neutral (§14.2). |
+| **Contracts** | The versioned, documented definitions every component reads: the on-disk formats (§14.3) and the adapter protocol (§14.2). Stored in `contracts/` (§15) — the only place components meet. |
+| **Implementation context** | The ticket-specific distillate of all context sources, written by the Scenario Agent into the Plan (§4a) and approved with it. Phase 2's primary source of framework, package and convention guidance (§5c). |
 
 ## 3. Pipeline (two-phase loop)
 
 Both phases run inside Claude Code, driven by the plugin (§13): its hooks fire
-the deterministic commands at the right events, its instruction files state the
-protocol, and its planning sub-agent isolates Phase 1. The CLI renders every
+the deterministic commands at the right events, the protocol reaches the
+agent through Claude Code mechanisms (§5c), and its planning sub-agent isolates Phase 1. The CLI renders every
 verdict. `invar` still calls no LLM of its own (§11).
 
 ```
@@ -126,6 +137,7 @@ Developer
    │
    ▼
    drafts Plan → .invar/plans/<TICKET>-<slug>/spec.md
+   │  incl. ## Implementation context — distilled, ticket-specific (§4a)
    │  `invar plan validate` — mechanical, agent-callable, run in-phase
    │
    ▼
@@ -138,8 +150,10 @@ Developer
    │     (loop back to [1] if rejected)
    ▼
 [2] Codegen Agent
-   │  reads: approved Plan + confirmed Scenario + AI_CONTEXT.md +
-   │         BUSINESS_CONTEXT.md + framework/package context + invar.yaml
+   │  reads: approved Plan (incl. Implementation context) + confirmed
+   │         Scenario + invar.yaml
+   │  receives: AI_CONTEXT.md + BUSINESS_CONTEXT.md via SessionStart hook
+   │  may pull: framework/package context via MCP, as a supplement (§5c)
    │  does NOT read: .invar/decisions/
    │  writes: implementation code + generated pytest-bdd step definitions
    │  may NOT write: any confirmed .feature file (§4)
@@ -157,6 +171,8 @@ Developer
    │     · the Plan body against its Approved-checksum — only while the Plan
    │       exists. A Plan absent *with* a matching decision entry is a closed
    │       cycle, not a failure; absent *without* one is a hard error.
+   │     · lockfile vs. the Plan's Lockfile-checksum — a warning, never
+   │       a failure (§4a)
    │  b) Lint check (structural) — base rules always; extended rules if a
    │     recognized AI_CONTEXT.md is present
    │  c) Behavioral test run — after confirming exactly one pytest-bdd test
@@ -285,6 +301,7 @@ Status: draft              # draft | approved
 Approved-by:               # written by `invar plan approve`, never by the agent
 Approved-at:
 Approved-checksum:
+Lockfile-checksum:         # written by `invar plan approve`, never by the agent
 ---
 
 ## Ticket
@@ -308,6 +325,20 @@ The list of .feature files this Plan will produce.
 ## Scenarios to delete
 Existing .feature files this cycle removes, each with its test file and a
 one-line reason. Empty in most cycles. See §4c.
+
+## Implementation context
+The ticket-specific guidance Phase 2 needs, each item labelled with its
+source and version. A distillate, never a copy of the context files (§5c).
+```
+
+Example of the last section:
+
+```markdown
+## Implementation context
+- pydantic 2.7.1 (published: 2.7.0, compatible): use `@field_validator`,
+  not `@validator`
+- AI_CONTEXT: no SQLAlchemy imports in `router.py`
+- BUSINESS_CONTEXT invariant: every tenant-scoped query filters by `account_id`
 ```
 
 Rules for this format:
@@ -317,6 +348,21 @@ Rules for this format:
 - `Approved-by` / `Approved-at` / `Approved-checksum` are written **only** by
   `invar plan approve`, from git config. An agent that fills them in itself
   is out of protocol; see the honesty note below.
+- `Lockfile-checksum` is written by `invar plan approve` together with the
+  approval: the canonical digest of the project's lockfile at that moment
+  (which file that is, is an adapter concern, §14.2). It sits in the header
+  and is not part of the body checksum.
+- **`## Implementation context` is a distillate, not a copy.** It holds only
+  what this ticket needs — the one framework rule, package API or convention
+  the change actually touches — each item labelled with its origin and, for
+  external context, the published version, installed version and match
+  class, exactly as `context show` labels it (§5b). Because it is part of
+  the body, `Approved-checksum` covers it: the guidance Phase 2 follows is
+  guidance a human approved, frozen with the rest of the specification. A
+  Plan that pastes whole context files in defeats both purposes. It spends
+  the token budget twice, and it becomes too long to be genuinely read at
+  the gate — which is how a gate turns into a click. The section is
+  required; when a ticket touches no context source it says so explicitly.
 - **Open questions / answers** and **Rejected alternatives** are the sections
   that justify the Plan's existence. Everything else could be inferred from
   the ticket and the diff; these two cannot, and they are what a reviewer and
@@ -343,7 +389,22 @@ This does not make forgery impossible — nothing enforced inside the repo can �
 but it does make the common failure mode (agent edits the Plan after approval
 and proceeds) mechanically detectable rather than invisible.
 
+**Lockfile drift is a warning, never a failure.** If the lockfile changes
+between approval and verification — a dependency upgraded mid-cycle, a
+rebase onto a branch that did — the Implementation context may describe a
+version that is no longer installed. `invar generate` compares the current
+lockfile digest with `Lockfile-checksum` and warns, naming both. It does
+not block: the tests judge whether the code works against what is
+installed, and a blocking check here would fire on every routine rebase.
+
 ## 4b. Locating a Scenario's pytest-bdd test — `.feature` → test file
+
+> **Scope.** This section describes the **Python adapter**. The core's
+> contract with any adapter is narrower: *is this scenario wired to an
+> executable test, and how is it run?* (§14.2). The one-feature-to-one-file
+> rule below is a property of how pytest-bdd binds features. Behat,
+> cucumber-js and godog run feature files directly with globally registered
+> steps, and their adapters will answer the same question differently.
 
 `invar generate` (§8) needs to confirm a `.feature` file is actually wired to
 a pytest-bdd test before it can run the suite as verification evidence. There
@@ -745,6 +806,56 @@ first sync.
 
 The registry this command talks to is specified in §14.1.
 
+## 5c. Context delivery — how each source reaches each agent
+
+`invar context show` assembles the sources (§5b). This section fixes how they
+reach the agent, because Claude Code offers mechanisms of very different
+strength, and a binding rule delivered through an optional mechanism is not
+binding in practice.
+
+A skill loads only its name and description up front; the body is read when
+the agent judges it relevant. That is the right mechanism for long
+explanations and the wrong one for anything that must always hold. A
+`CLAUDE.md` at the plugin root is not loaded at all. The plugin therefore
+chooses a channel by the size and standing of what it delivers:
+
+| Content | Size | Channel | Guarantee |
+|---|---|---|---|
+| `AI_CONTEXT.md`, `BUSINESS_CONTEXT.md` | small | `SessionStart` hook running `invar context show --binding` | Deterministic — in every session, no agent decision involved |
+| Critical protocol rules | small | Same hook, short summary | Deterministic |
+| Phase 1 protocol | medium | Planning sub-agent's system prompt (§13a) | Always applied in Phase 1 |
+| Ticket-specific framework, package and convention guidance | variable | Plan's `## Implementation context` (§4a) | Approved at the gate, checksummed |
+| External context the Plan did not anticipate | variable | MCP pull (§14.1) | Voluntary — a supplement only |
+| Longer protocol explanations | large | Protocol skill | Voluntary — loaded on demand |
+
+**Phase 1 selects; Phase 2 receives a distillate.** Loading context for every
+installed dependency would spend the context window on packages the ticket
+never touches. Instead, the planning sub-agent's system prompt requires it to
+run `context show` for the modules and packages the ticket touches, and to
+write what matters into the Plan's Implementation context. Phase 2 reads the
+Plan. The expensive research happens once, in a context that is discarded
+afterwards (§13a), and what Phase 2 follows is what a human approved — not
+what an agent decided to load.
+
+Phase 2 still reads the code it modifies. The Plan removes *research* —
+searching the repository, inferring conventions, guessing versions — not the
+reading of target files.
+
+**Binding context is also pushed, as a safety net.** Phase 1 can miss
+something. `AI_CONTEXT.md` and the business Invariants are small enough to
+reach every session regardless, so an omission from the Plan does not remove
+them from Phase 2's view.
+
+**The decision log is never pushed.** `--binding` excludes it by
+construction; it reaches only the planning sub-agent (§7, §13a).
+
+**None of this is a boundary.** Delivery improves the first attempt: fewer
+iterations, fewer tokens, fewer hallucinated APIs. Correctness is still
+decided on disk — an ignored convention fails lint, an ignored Invariant is
+visible at the gate and in the scenario's test, a hallucinated API fails the
+tests (§11). A context source that fails to arrive degrades quality; it
+cannot falsify a verdict.
+
 ## 6. Config file — `invar.yaml`
 
 ```yaml
@@ -962,14 +1073,15 @@ pipeline runnable in CI where no agent exists, and what makes a second runtime
 rewrite.
 
 ```bash
-invar init                      # scaffolds specs/, .invar/, invar.yaml,
-                                  # instruction files, hook config; writes
+invar init                      # scaffolds specs/, .invar/, invar.yaml;
+                                  # writes
                                   # AI_CONTEXT.md and BUSINESS_CONTEXT.md as
                                   # EMPTY marked files (never their content);
                                   # writes .gitattributes entries pinning
                                   # .feature and plan files to LF (§4d) and
-                                  # adds .invar/decisions|plans to the
-                                  # agent ignore config (§13a); then performs
+                                  # adds a Read deny rule for
+                                  # .invar/decisions/ to .claude/settings.json
+                                  # (§13a); then performs
                                   # the first `context sync`
 invar doctor                    # checks setup preconditions: marker files
                                   # recognized, bdd_features_base_dir set,
@@ -982,6 +1094,9 @@ invar context sync              # fetches/caches framework + package context
 invar context show [--module m] # prints the assembled context — all sources,
                                   # each labelled with origin and version,
                                   # plus decision entries within budget
+invar context show --binding    # AI_CONTEXT.md + BUSINESS_CONTEXT.md only;
+                                  # never the decision log. Used by the
+                                  # SessionStart hook (§5c)
 invar scenario validate <n>     # checks a .feature file: @invar tag,
                                   # metadata block, one behavior per Scenario
 invar scenario confirm <n>      # marks Status: confirmed and writes
@@ -999,6 +1114,7 @@ invar generate <n> [--tests-path p]  # verifies code the agent just wrote:
                                   # --tests-path narrows what pytest runs
                                   # (§4b); omitted, the entire tests_dir runs.
                                   # A cycle is only closed by a full run.
+                                  # Warns, never fails, on lockfile drift.
 invar lint check [--ci]         # verification only, independent of generation
 invar decision record           # writes a decision entry; called
                                   # automatically by `generate`, available
@@ -1009,7 +1125,8 @@ invar plan validate <ticket>    # mechanical: path, directory-name shape,
                                   # complete header, required sections.
                                   # Agent-callable, run inside Phase 1.
 invar plan approve <ticket>     # the human gate: records Approved-by /
-                                  # Approved-at + body checksum. Refuses if
+                                  # Approved-at + body checksum +
+                                  # Lockfile-checksum. Refuses if
                                   # `plan validate` does not pass.
 invar clean-spec [ticket] [--dry-run]  # deletes plans under .invar/plans/;
                     [--force] [--merged] # never touches specs/ or
@@ -1020,6 +1137,9 @@ invar clean-spec [ticket] [--dry-run]  # deletes plans under .invar/plans/;
 
 ## 9. Explicitly out of scope for MVP
 
+- **Agent runtimes other than Claude Code** — no `AGENTS.md`, no
+  `.cursor/rules/`, no compatibility testing. Portability is a property of
+  the CLI (§13b), not a feature.
 - Chat UI and diagram-based scenario authoring (CLI + `.feature` files only)
 - `invar` calling an LLM itself — the developer's own agent is the runtime (§11)
 - Automatic ticket fetching from JIRA or similar — the developer pastes the
@@ -1146,10 +1266,21 @@ invar clean-spec [ticket] [--dry-run]  # deletes plans under .invar/plans/;
       mandatory clarifying question whenever a scenario touches a
       Regional/parameterized fact, and the Codegen Agent implements the stated
       enforcement mechanism for at least one Invariant
-- [ ] `invar init` writes instruction files (`CLAUDE.md`, `AGENTS.md`,
-      `.cursor/rules/`) describing the two-phase protocol
+- [ ] The protocol reaches the agent only through Claude Code mechanisms —
+      the planning sub-agent's system prompt, the `SessionStart` hook and
+      the protocol skill; `init` writes no agent instruction files (§5c)
+- [ ] Every session receives `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`
+      through the `SessionStart` hook, and never the decision log (§5c)
+- [ ] The Scenario Agent writes `## Implementation context` into the Plan,
+      each item labelled with origin and version; `plan validate` fails
+      when the section is missing (§4a)
+- [ ] `plan approve` records `Lockfile-checksum`; `generate` warns, and
+      never fails, when the lockfile changed since approval (§4a)
+- [ ] The core never links adapter code: the Python adapter is a separate
+      process speaking the protocol defined in `contracts/`, and passes the
+      conformance suite (§14.2, §15)
 - [ ] Installing the plugin is the only setup step: it brings the CLI, the
-      hooks, the instruction files and the planning sub-agent, and the full
+      hooks, the protocol skill and the planning sub-agent, and the full
       loop is completable without the developer wiring anything by hand
 - [ ] Phase 1 runs in the planning sub-agent, and the main session never
       receives the decision log
@@ -1196,8 +1327,9 @@ What the plugin supplies:
 3. **Hooks** — the commands fire on the right events rather than on the agent's
    memory (§13)
 4. **Planning sub-agent** — isolates Phase 1's context (§13a)
-5. **Instruction files** — written by `init`, carrying what hooks cannot: when
-   to stop and ask, what may be written in each phase, why the gate exists
+5. **Protocol delivery** — the sub-agent's system prompt, the `SessionStart`
+   hook and the protocol skill carry what hooks cannot: when to stop and ask,
+   what may be written in each phase, why the gate exists (§5c)
 
 **The cost, still stated plainly:** the agent is not controlled, only guided.
 Hooks improve *when* things run and the sub-agent improves *what a phase can
@@ -1287,7 +1419,11 @@ things, and none of them is optional in MVP:
 | `invar` CLI | All the logic. The only component that renders a verdict. |
 | Hooks (§13, below) | Fire the commands at the right events |
 | Planning sub-agent (§13a) | Isolates Phase 1's context |
-| Instruction files | Carry the protocol's reasoning, written by `init` |
+| Protocol skill | Longer protocol explanations, loaded on demand (§5c) |
+
+Claude Code does not load a `CLAUDE.md` from the plugin root; plugins
+contribute context through skills, agents and hooks. The plugin ships no
+`CLAUDE.md`, and what must always be in context is pushed by a hook (§5c).
 
 One install, no manual wiring, no relaying of command output by hand. That
 friction — `plan approve`, then `scenario confirm`, then `generate`, then
@@ -1306,6 +1442,8 @@ put it: on disk.
 
 | Event | Command | Blocking? |
 |---|---|---|
+| `SessionStart` | `invar context show --binding` + protocol summary | No |
+| Planning sub-agent stops (`SubagentStop`) | `invar plan validate` | No — result returned to the sub-agent |
 | Before planning (Phase 1) | `invar context sync` | No |
 | After a code edit (Phase 2) | `invar lint check` | No |
 | During Phase 2 iteration | `invar generate <n> --tests-path <current>` | No |
@@ -1358,9 +1496,12 @@ wording overstated it.** The Phase 2 session has the repository on disk and its
 own search tools; nothing stops a grep from reaching `.invar/decisions/`. Two
 things keep that acceptable:
 
-- `invar init` adds `.invar/decisions/` and `.invar/plans/` to the
-  agent's ignore configuration (`.claudeignore` or the runtime's equivalent),
-  so the main session's file search does not surface them. That is a real
+- `invar init` adds a Read deny rule for `.invar/decisions/` to the
+  project's `.claude/settings.json` permissions, so file reads and searches
+  do not surface it. The planning sub-agent still receives the log — through
+  the output of `invar context show`, never by reading the files. (v2 also
+  hid `.invar/plans/`; that was a mistake, since Phase 2's primary input is
+  the Plan.) That is a real
   reduction in accidental reads, which is the actual failure mode — an agent
   grepping for a symbol and pulling in a decision entry, not an agent deciding
   to go looking.
@@ -1369,10 +1510,11 @@ things keep that acceptable:
 
 The distinction matters beyond this paragraph: §11's rule is that no boundary
 that *matters* may live anywhere but on disk. This one does not qualify, which
-is precisely why an ignore file is an adequate answer here and would not be for
+is precisely why a deny rule is an adequate answer here and would not be for
 the approval gate.
 
-This works only if the Plan is genuinely self-sufficient (§4a). If Phase 2 has
+This works only if the Plan is genuinely self-sufficient (§4a) — which is
+what `## Implementation context` exists for (§5c). If Phase 2 has
 to re-read the context sources, the isolation is nominal and the budget is
 spent twice. That is a test of the Plan format, not a new design.
 
@@ -1454,6 +1596,12 @@ First phase is author-published context only. Community use-case entries are
 out of scope (§9) until the standing hierarchy and version-range filtering
 exist.
 
+**Implementation.** The registry is a **FastAPI service in its own
+repository** — unlike everything else it is deployed, not installed, and has
+its own release cadence (§15). The MCP server lives in the monorepo and is
+registered in the plugin's `.mcp.json`; whether it is a subcommand of the
+core binary or a separate executable is decided at M6 (§16).
+
 ### 14.2 Multi-language from the start — three-to-four seams
 
 FastAPI is the first target, not the only one. The cheap insurance is that
@@ -1463,16 +1611,32 @@ exists. Four operations do:
 
 | Seam | Python (MVP) | Notes |
 |---|---|---|
-| Dependency discovery | `uv.lock` / `poetry.lock` / installed distributions | Feeds `context sync` (§5b) |
-| Test discovery | `scenarios(...)` string match (§4b) | pytest-bdd convention |
+| Dependency discovery | `uv.lock` / `poetry.lock` / installed distributions | Feeds `context sync` (§5b) and `Lockfile-checksum` (§4a) |
+| Test discovery | `scenarios(...)` / `@scenario(...)` string match (§4b) | The core only asks: is this scenario wired, and how is it run? |
 | Test execution | `pytest` under `tests_dir` | Full suite by default |
 | Lint | AST + import graph | Base and extended rule sets |
 
-**These four must sit behind an explicit interface, not be scattered through
-the commands.** With the interface, a Laravel or Node adapter is new code in
-four places and a core rewrite (Rust, if performance or distribution ever
-demands it) is mechanical. Without it, both are rewrites. This is the one thing
-in this document that is genuinely expensive to retrofit and free to do now.
+**These four sit behind a process boundary, not a module interface.** An
+adapter is a separate executable; the core starts it and exchanges JSON
+messages over stdin/stdout, one request and one response per operation, with
+the message shapes defined as JSON Schemas in `contracts/` (§15). Three
+reasons:
+
+- Each operation is best done inside its own ecosystem: Python's `ast` for
+  Python lint, `nikic/php-parser` for PHP, `go/ast` for Go. A process boundary
+  lets each adapter be written in the language it analyses.
+- The core and the adapters can be released, rewritten or replaced
+  independently; neither links the other.
+- The contract is testable on its own. The **conformance suite** (§15) is a set
+  of fixture projects and expected protocol exchanges; an adapter is complete
+  when it passes it, and the core needs to know nothing else about it.
+
+The interface is shaped by what the core needs, not by how pytest-bdd works.
+Test discovery in particular answers *is this scenario wired to an executable
+test, and how is it run* — for pytest-bdd that is the one-file binding of §4b;
+for Behat, cucumber-js or godog, which run feature files directly, it is
+something else. This is the one thing in this document that is genuinely
+expensive to retrofit and free to do now.
 
 `language:` in `invar.yaml` (§6) selects the adapter. Absent means `python`.
 
@@ -1482,27 +1646,27 @@ over the same CLI and the same on-disk formats (§14.3), is probably cleaner
 than one plugin that branches. Nothing here needs deciding now — it is only
 worth stating that §13b's thin-shell rule is what keeps that option open.
 
-**The CLI's implementation language is deliberately not decided here.** A
-statically-linked binary would remove the "install Python first" barrier for a
-PHP or Node developer, which is a distribution argument and a real one.
-Performance is *not* an argument: of the four seams, test execution dominates
-the clock and no rewrite touches it, and `context sync` is a no-op on an
-unchanged lockfile. Extended lint rules are also per-project by design (§5a),
-which a compiled core cannot accept without a declarative rule DSL — a separate
-undertaking, and guesswork before we know which rules people actually write.
-The trigger for reopening this is **a second language arriving**, not a desire
-for a faster CLI, and the decision is cheap to defer precisely because of the
-seams above and the formats in §14.3.
+**The core is written in Rust.** The deciding argument is distribution: a
+statically linked binary removes the "install Python first" barrier for a PHP,
+Node or Go developer, and the plugin ships one binary per platform.
+Performance was never the argument — test execution dominates the clock and
+runs in the adapter's ecosystem regardless. The earlier objection, that
+per-project extended lint rules (§5a) cannot live in a compiled core,
+disappears with the process boundary: lint lives in the adapter, in the
+language it analyses. The core itself is deliberately plain — it reads and
+writes files, parses YAML headers and markdown sections, hashes, and shells out
+to `git` rather than linking a git library. It needs no async runtime.
 
 ### 14.3 The real contract is the on-disk format
 
 Every present and future surface — CLI, plugin, MCP server, registry, a
-possible Rust core, other-language adapters — reads the same four artifacts:
+possible Rust core, other-language adapters — reads the same artifacts:
 
 - the `.feature` metadata block (§4)
 - the Plan header and required sections (§4a)
 - `.invar/decisions/*.md` entry format (§7)
 - `invar.yaml` (§6)
+- the adapter protocol (§14.2)
 
 As long as these are stable and documented, the pieces can be built in any
 order and can coexist during a transition. From here on, a change to any of
@@ -1510,6 +1674,82 @@ them is a change to a public contract: made deliberately, with the reason
 recorded, not as a side effect of an implementation edit.
 
 New keys may be added at any time under one rule: **an absent key means the
-previous behavior.** That is what makes the additions in this revision —
-`language`, `context`, `Confirmed-checksum`, `## Scenarios to delete` —
-non-breaking, and what keeps the next ones non-breaking too.
+previous behavior.** That is what makes the additions of v2 — `language`,
+`context`, `Confirmed-checksum`, `## Scenarios to delete` — and of v3 —
+`Lockfile-checksum` — non-breaking, and what keeps the next ones
+non-breaking too. `## Implementation context` is a new *required* section,
+which is safe for a different reason: Plans are consumable and do not outlive
+their cycle (§12), so no existing Plan is ever read under the new rule.
+
+## 15. Repository layout
+
+**One monorepo while the contracts are still moving.** Orthogonality comes
+from what the parts talk through, not from where their code lives. While the
+formats in §14.3 change weekly, a change across three repositories is three
+PRs and a release-ordering problem, and the end-to-end CI run (§10) needs
+every part in one place.
+
+```
+invar/
+├── contracts/        # the public contract — nothing bypasses it
+│   ├── schemas/      # JSON Schema: adapter protocol, invar.yaml, decision entry
+│   ├── formats/      # .feature metadata block, Plan header and sections (§14.3)
+│   └── fixtures/     # shared inputs/outputs every component tests against
+├── core/             # Rust — the invar CLI
+├── adapters/
+│   └── python/       # Python — dependency/test discovery, pytest, lint
+├── plugin/           # Claude Code plugin — .claude-plugin/, hooks/, agents/, skills/
+├── mcp/              # MCP server — a client of the CLI and the registry (§14.1)
+├── conformance/      # the suite every adapter must pass
+└── e2e/              # the full loop on a sample FastAPI project, no agent
+```
+
+Rules:
+
+- **Components never import each other.** The core starts adapters as
+  processes; the plugin and the MCP server call the CLI. They meet only in
+  `contracts/`.
+- **A PR that touches `contracts/` is a contract change** (§14.3): deliberate,
+  with the reason recorded.
+- **One release pipeline** builds the per-platform core binaries and the plugin
+  that ships them, as a matched pair.
+
+**When to split.** A component leaves the monorepo when it gains a life of its
+own, not before. The context registry (§14.1) — a deployed service with its
+own cadence — lives in its own repository from the start. An adapter moves out
+when others maintain it: a PHP adapter as a Composer package, taking the
+conformance suite as a test dependency. The rest moves when the contracts have
+been stable long enough that a change in one part rarely requires a change in
+another. Because everything already meets in `contracts/`, the move is
+mechanical: relocate the directory, publish the schemas as a versioned
+package.
+
+## 16. Roadmap
+
+Milestones, not dates. This is a side project and also a vehicle for learning
+Rust, Claude Code plugin development, FastAPI services and MCP, so each
+milestone is demonstrable on its own and most of them teach one of those.
+
+| Milestone | Delivers | Done when |
+|---|---|---|
+| **M0 — Foundations** | Rust basics; a minimal plugin with one hook; first draft of `contracts/` | A toy plugin logs every edited file; a toy Rust CLI prints the §4d digest of a file |
+| **M1 — Core gate** | Canonicalization and checksums; `plan validate/approve`; `scenario validate/confirm` incl. `--plan`; `Lockfile-checksum` | Every gate refusal in §10 is covered by a test |
+| **M2 — Python adapter** | Adapter protocol; dependency and test discovery; pytest execution; `generate` without lint | `generate` passes and fails correctly on the e2e sample project |
+| **M3 — Cycle closure** | Decision log; `failed` reset (§4c); `clean-spec`; `context show` incl. `--binding`, local sources only | The full loop runs in CI with no agent (§10) |
+| **M4 — Lint** | Base rules; one inter-module rule on the runtime import graph (§6) | Extended rules activate from a marked `AI_CONTEXT.md` |
+| **M5 — Plugin** | Planning sub-agent; hooks; protocol skill; context delivery (§5c) | A ticket goes from pasted text to a closed cycle inside Claude Code with no manual wiring |
+| **M6 — Registry + MCP** | FastAPI registry (§14.1); `context sync` against it; MCP server | Package context arrives labelled `exact` / `compatible` / `stale` and reaches a Plan's Implementation context |
+
+Until M6, `context sync` reads local sources only — the local override that
+§14.1 says always wins. The mechanism exists from M3; M6 adds the remote
+source behind it.
+
+**Open questions**, each to be decided before the milestone that needs it:
+
+- Rename `invar generate` to `invar verify`? It verifies code the agent wrote
+  and generates nothing, and the name may mislead both developer and agent.
+  Before M2.
+- Who seeds the registry with author-published context for FastAPI, Pydantic
+  and SQLAlchemy while no package author has published any? Before M6.
+- Is the MCP server a subcommand of the core binary or a separate executable?
+  Before M6.
