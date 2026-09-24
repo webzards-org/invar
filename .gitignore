@@ -1,0 +1,31 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node (plugin / mcp tooling, if any)
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+*.swp
+
+# Local environment
+.env
+.env.local
+
+# Invar's own state, when this repo is used as a test subject
+.invar/plans/
