@@ -1,0 +1,25 @@
+# docs/
+
+Project documentation.
+
+- [`DESIGN.md`](DESIGN.md) — the design document (currently revision v3). All
+  section references in this repository (§4d, §13a, …) point into it.
+
+## Belongs here
+
+Documents about the system as a whole: the design document, architecture
+decisions, and later the roadmap and task breakdowns.
+
+## Must not
+
+- **No component documentation.** Each component's `README.md` lives with the
+  component, so it is read and updated together with its code.
+- **No specifications other components depend on.** Anything the core, an
+  adapter, the plugin or the MCP server must agree on is a contract and belongs
+  in `contracts/` (§14.3). This directory explains; it does not define.
+
+## Changing the design document
+
+A behavior change lands in `DESIGN.md` in the same PR that changes the
+behavior. When a decision is reversed, the revision note at the top records what
+changed and why — the document's history is part of its value.
