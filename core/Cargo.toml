@@ -1,0 +1,26 @@
+[package]
+name = "invar"
+version = "0.1.0"
+edition = "2024"
+description = "Spec-driven generate-and-verify loop: the CLI that renders every verdict"
+license = "MIT"
+repository = "https://github.com/webzards-org/invar"
+
+[[bin]]
+name = "invar"
+path = "src/main.rs"
+
+# Dependencies stay few and boring on purpose (§14.2). The core reads and
+# writes files, parses YAML headers and markdown sections, hashes, and shells
+# out to `git`. No async runtime, no git library.
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+sha2 = "0.10"
+
+# serde + a YAML crate arrive with M1-4 (Plan header parsing), not before.
+
+[dev-dependencies]
+assert_cmd = "2"    # end-to-end CLI tests: run the real binary
+predicates = "3"    # assertions over its output
+tempfile = "3"      # throwaway project trees

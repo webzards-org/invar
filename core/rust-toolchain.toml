@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned so every machine and CI run use the same compiler. Bump deliberately,
+# in its own PR, never as a side effect of another change.
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
