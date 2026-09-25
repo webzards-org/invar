@@ -34,12 +34,52 @@ Deliberately plain: reads and writes files, parses YAML headers and markdown
 sections, hashes, and shells out to `git` rather than linking a git library.
 No async runtime. Dependencies stay few and boring.
 
+```
+core/src/
+├── main.rs      # argument parsing and dispatch only
+├── cli/         # one module per subcommand; arguments and `run`, no logic
+├── format/      # .feature and Plan parsing (M1-3, M1-4)
+├── digest/      # canonicalization and hashing (M1-1, M1-2)
+└── fs/          # path resolution, project root discovery
+```
+
+The split between `digest/` and `format/` is deliberate: canonicalization takes
+text and returns text, while deciding where a header ends and a body begins is
+format knowledge. Fixtures in `contracts/fixtures/` test the first on its own,
+which only works if the second never leaks into it (§4d).
+
+## Errors
+
+`anyhow` at the CLI boundary while the surface is still moving: subcommands
+return `anyhow::Result<()>`, add context with `.context("…")`, and `main`
+prints the full chain and exits non-zero. Failing loudly is a requirement, not
+a convenience (§10).
+
+Typed errors (`thiserror`) arrive once the surface stabilises — roughly when
+the gate is complete and callers start needing to *distinguish* failures rather
+than report them: a hook that treats "scenario not confirmed" differently from
+"file not found", or the MCP server translating a failure into a structured
+response. Until then a typed error model would be rewritten more often than it
+is read.
+
+## Toolchain
+
+`rust-toolchain.toml` pins the compiler, so every machine and every CI run use
+the same one. Bump it deliberately, in its own PR.
+
+`Cargo.lock` **is committed**: this crate produces a binary, and the point of
+the lockfile is that a build from a given commit resolves to the same
+dependency versions everywhere — including in CI, which is the standing proof
+that the loop runs without an agent (§13b).
+
 ## Working on it
 
 ```bash
+cargo run -- --version     # build and run in one step
+cargo build --release      # the binary the plugin ships
+cargo test                 # unit tests plus the CLI tests in tests/
 cargo fmt --check
 cargo clippy -- -D warnings
-cargo test
 ```
 
-All three must pass before a PR.
+The last three must pass before a PR.
