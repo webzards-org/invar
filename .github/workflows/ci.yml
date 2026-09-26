@@ -1,0 +1,63 @@
+name: CI
+
+# CI is a design position, not housekeeping. §13b makes this run the standing
+# proof that no logic leaked out of the CLI into the plugin: there is no agent
+# and no plugin here, so anything that only works with the plugin loaded is
+# behavior CI does not have. From M3 onward the e2e suite runs here too, and
+# that is what turns §10's "the full loop runs with no agent" into a test
+# rather than a claim.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A new push to the same branch supersedes the previous run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Fail on warnings everywhere, not only in the clippy step.
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  core:
+    name: core (Linux)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        # The crate lives in core/; rustup reads core/rust-toolchain.toml from
+        # here and installs the pinned compiler by itself.
+        working-directory: core
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          rustup show active-toolchain
+          cargo --version
+
+      # Caches ~/.cargo (registry, git checkouts) and core/target, keyed on
+      # Cargo.lock and the toolchain. Without it every run recompiles clap and
+      # sha2 from scratch.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      # Ordered cheapest-first, so an obvious failure reports in seconds.
+      # Every step is independent: each one failing fails the job.
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Build
+        run: cargo build --locked
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked

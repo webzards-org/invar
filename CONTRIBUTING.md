@@ -71,3 +71,20 @@ docs(contracts): specify the .feature header/body boundary
 - Acceptance criteria of the linked issue are all ticked
 - Anything that changed a documented behavior is reflected in
   `docs/DESIGN.md`, in the same PR
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push and pull request: format, build,
+clippy and tests, against the compiler pinned in `core/rust-toolchain.toml`.
+All four must pass.
+
+Two conventions worth knowing:
+
+- **`--locked`.** Build and test refuse to update `Cargo.lock`. A dependency
+  bump is then a deliberate commit, never something CI does silently.
+- **Warnings are errors.** `RUSTFLAGS: -D warnings` applies to every step, not
+  only to clippy. A warning that CI tolerates is a warning nobody reads.
+
+CI has no agent and no plugin, which is the point (§13b). From M3 the e2e suite
+runs here too, and a change that only works inside Claude Code will fail here —
+that is the mechanism working, not the pipeline being wrong.
