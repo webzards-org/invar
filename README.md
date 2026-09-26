@@ -1,5 +1,7 @@
 # Invar
 
+[![CI](https://github.com/webzards-org/invar/actions/workflows/ci.yml/badge.svg)](https://github.com/webzards-org/invar/actions/workflows/ci.yml)
+
 > A Claude Code plugin that brings a spec-driven, two-phase generate-and-verify
 > loop to any FastAPI project.
 
