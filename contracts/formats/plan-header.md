@@ -100,7 +100,7 @@ part of the body (see D-1).
 | `Module` | yes | `^[a-z][a-z0-9_]*$`, or `global` | Agent |
 | `Status` | yes | `draft` or `approved`, lowercase, exactly | `plan approve` sets `approved`; `decision record --type failed` sets `draft`; the agent writes `draft` on creation |
 | `Approved-by` | key present always; value only when `Status: approved` | Non-empty; a git `user.name` | **Command only** (`plan approve`) |
-| `Approved-at` | key present always; value only when `Status: approved` | RFC 3339 timestamp with offset, e.g. `2026-08-14T09:30:12+02:00` | **Command only** (`plan approve`) |
+| `Approved-at` | key present always; value only when `Status: approved` | `YYYY-MM-DD` | **Command only** (`plan approve`) |
 | `Approved-checksum` | key present always; value only when `Status: approved` | `sha256:` + 64 lowercase hex, over the **body** | **Command only** (`plan approve`) |
 | `Lockfile-checksum` | key present always; value optional even when approved | `sha256:` + 64 lowercase hex, or empty | **Command only** (`plan approve`) |
 
@@ -260,12 +260,16 @@ forgotten section must not look the same. This matters most for
 `## Scenarios to delete`, where "nothing to delete" and "the agent did not
 consider deletions" have very different consequences (§4c).
 
+**D-6 — Dates, not timestamps.** `Approved-at` and `Confirmed-at` are both
+`YYYY-MM-DD`. These fields are read by a developer checking when an approval
+happened, not by a machine ordering events — the decision log's timestamped
+filenames already carry ordering (§7). A date is what a human can verify
+against their own memory of the day; the extra precision would be there for a
+reader that does not exist.
+
 ## 8. Open questions
 
-**OQ-1 — `Approved-at` is a timestamp, `Confirmed-at` is a date.** See
-`feature-metadata.md`, OQ-1. Decide once, before M1-9 and M1-10.
-
-**OQ-2 — Re-approving an already approved Plan.** `plan approve` on a Plan
+**OQ-1 — Re-approving an already approved Plan.** `plan approve` on a Plan
 whose body changed after approval: refuse and require an explicit flag, or
 re-approve and issue a new checksum? The safe default is to refuse, since a
 silent re-approval is indistinguishable from the failure mode the checksum
@@ -335,7 +339,7 @@ Ticket: PROJ-412
 Module: orders
 Status: approved
 Approved-by: rade
-Approved-at: 2026-08-14T09:30:12+02:00
+Approved-at: 2026-08-14
 Approved-checksum: sha256:1f4ac0de5b7e4d2f8a9c3b1e6d0f7a25c8b4e93f1a6d2c07b5e8f43a9d1c6b20
 Lockfile-checksum: sha256:9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b87
 ---
@@ -349,7 +353,7 @@ Ticket: PROJ-412
 Module: orders
 Status: approved
 Approved-by: rade
-Approved-at: 2026-08-14T09:30:12+02:00
+Approved-at: 2026-08-14
 Approved-checksum:
 Lockfile-checksum:
 ---
