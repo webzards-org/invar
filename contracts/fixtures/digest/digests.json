@@ -1,0 +1,206 @@
+{
+  "schema": "invar.digest-fixtures/v1",
+  "version": "1.0.0",
+  "algorithm": "sha256",
+  "digest_format": "sha256:<64 lowercase hex>",
+  "canonicalization": "docs/DESIGN.md section 4d, steps 1-4. Step 5 (body extraction) is a format concern and is not exercised by these fixtures.",
+  "contract": "Every file in a group must produce that group's expected_digest, and no two groups may share one. Digests are regenerated deliberately, never as part of a code change.",
+  "groups": [
+    {
+      "name": "simple",
+      "description": "Two plain lines. Every file here differs only in line endings or in trailing whitespace, so all of them must produce one digest. This is the group that proves a mixed Windows/Unix team gets the same checksum for identical content.",
+      "expected_digest": "sha256:e49c81e2d2f84e259d40e2fb8192f3bcd198b355184845d76d8f58807d0d78ee",
+      "canonical_byte_length": 11,
+      "files": [
+        {
+          "path": "simple/lf.txt",
+          "bytes": 11,
+          "note": "LF terminators; already canonical"
+        },
+        {
+          "path": "simple/crlf.txt",
+          "bytes": 13,
+          "note": "CRLF terminators (Windows, or core.autocrlf=true)"
+        },
+        {
+          "path": "simple/cr.txt",
+          "bytes": 11,
+          "note": "lone CR terminators (classic Mac)"
+        },
+        {
+          "path": "simple/mixed.txt",
+          "bytes": 12,
+          "note": "CRLF and LF mixed in one file"
+        },
+        {
+          "path": "simple/no-final-newline.txt",
+          "bytes": 10,
+          "note": "no terminator on the last line"
+        },
+        {
+          "path": "simple/trailing-spaces.txt",
+          "bytes": 15,
+          "note": "trailing spaces on every line"
+        },
+        {
+          "path": "simple/trailing-tabs.txt",
+          "bytes": 14,
+          "note": "trailing tabs"
+        },
+        {
+          "path": "simple/trailing-blank-lines.txt",
+          "bytes": 14,
+          "note": "three blank lines at end of file"
+        },
+        {
+          "path": "simple/bom-lf.txt",
+          "bytes": 14,
+          "note": "UTF-8 BOM, LF"
+        },
+        {
+          "path": "simple/bom-crlf-trailing-ws.txt",
+          "bytes": 21,
+          "note": "BOM, CRLF, trailing whitespace and a trailing blank line at once"
+        }
+      ]
+    },
+    {
+      "name": "empty",
+      "description": "An empty result canonicalizes to the EMPTY STRING, not to a single newline (README, D-1). Its digest is the well-known sha256 of zero bytes, which makes this group a self-check on the implementation.",
+      "expected_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "canonical_byte_length": 0,
+      "files": [
+        {
+          "path": "empty/empty.txt",
+          "bytes": 0,
+          "note": "zero bytes"
+        },
+        {
+          "path": "empty/newlines-only.txt",
+          "bytes": 3,
+          "note": "only line terminators"
+        },
+        {
+          "path": "empty/whitespace-only.txt",
+          "bytes": 8,
+          "note": "only whitespace, no content"
+        },
+        {
+          "path": "empty/bom-only.txt",
+          "bytes": 3,
+          "note": "a BOM and nothing else"
+        },
+        {
+          "path": "empty/bom-and-blanks.txt",
+          "bytes": 9,
+          "note": "BOM plus blank lines"
+        }
+      ]
+    },
+    {
+      "name": "interior-blank-lines",
+      "description": "Blank lines INSIDE the text are content and are preserved. This group must not share a digest with 'simple' -- if it does, the implementation is collapsing blank lines everywhere instead of only at the end.",
+      "expected_digest": "sha256:0e937c34625ef864d694878f01fd96318893d29014a51536006dacd150d809ec",
+      "canonical_byte_length": 12,
+      "files": [
+        {
+          "path": "interior-blank-lines/lf.txt",
+          "bytes": 12,
+          "note": "one blank line between the two lines"
+        },
+        {
+          "path": "interior-blank-lines/crlf.txt",
+          "bytes": 15,
+          "note": "same content, CRLF"
+        },
+        {
+          "path": "interior-blank-lines/crlf-trailing-ws.txt",
+          "bytes": 23,
+          "note": "the interior blank line carries spaces; it stays a blank line"
+        }
+      ]
+    },
+    {
+      "name": "leading-blank-lines",
+      "description": "Leading blank lines are preserved; only TRAILING ones are stripped. This asymmetry is the reason both format contracts start a body at its first non-blank line.",
+      "expected_digest": "sha256:397ccbc7e23564037108ba00e0bcc64ddec116f6d3cf69edd77bf9e9cba5801d",
+      "canonical_byte_length": 12,
+      "files": [
+        {
+          "path": "leading-blank-lines/lf.txt",
+          "bytes": 12,
+          "note": "one blank line at the start"
+        },
+        {
+          "path": "leading-blank-lines/crlf-ws.txt",
+          "bytes": 20,
+          "note": "leading blank line with spaces kept; trailing blank line stripped"
+        }
+      ]
+    },
+    {
+      "name": "indentation",
+      "description": "Leading whitespace on a line is content; trailing whitespace is not. Gherkin is indented, so getting this backwards would change the digest of every .feature body.",
+      "expected_digest": "sha256:d29346375e6106e9ba006b4d5d2587df627e2dcbde869f30035f0447b72a0367",
+      "canonical_byte_length": 22,
+      "files": [
+        {
+          "path": "indentation/lf.txt",
+          "bytes": 22,
+          "note": "spaces and a tab as indentation"
+        },
+        {
+          "path": "indentation/crlf-trailing-ws.txt",
+          "bytes": 31,
+          "note": "same indentation, trailing whitespace added"
+        }
+      ]
+    },
+    {
+      "name": "non-ascii",
+      "description": "Multi-byte UTF-8 must survive canonicalization byte for byte. Serbian Latin and Cyrillic, plus an emoji, so a byte-oriented trailing-whitespace strip that splits a code point shows up here.",
+      "expected_digest": "sha256:e9a7c381add6ce46baff9797ecf3b9f77d87bcc5232ba71014ea027e6e1fb770",
+      "canonical_byte_length": 50,
+      "files": [
+        {
+          "path": "non-ascii/lf.txt",
+          "bytes": 50,
+          "note": "LF"
+        },
+        {
+          "path": "non-ascii/crlf.txt",
+          "bytes": 53,
+          "note": "CRLF"
+        },
+        {
+          "path": "non-ascii/bom-crlf-ws.txt",
+          "bytes": 61,
+          "note": "BOM, CRLF, trailing whitespace, trailing blank line"
+        }
+      ]
+    },
+    {
+      "name": "feature-body",
+      "description": "A realistic .feature body -- the actual thing a Confirmed-checksum is computed over (section 4). Proves the equivalence on real content, not only on toy input.",
+      "expected_digest": "sha256:e5b40effe55851397416ab04c0f270704a9931290c1ba2515393b7c6d11384cb",
+      "canonical_byte_length": 213,
+      "files": [
+        {
+          "path": "feature-body/lf.feature",
+          "bytes": 213,
+          "note": "LF"
+        },
+        {
+          "path": "feature-body/crlf.feature",
+          "bytes": 217,
+          "note": "CRLF"
+        },
+        {
+          "path": "feature-body/crlf-no-final-newline.feature",
+          "bytes": 215,
+          "note": "CRLF and no terminator on the last line"
+        }
+      ]
+    }
+  ]
+}
