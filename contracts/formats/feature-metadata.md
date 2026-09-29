@@ -168,13 +168,14 @@ across the Plan directory name, the branch and the decision entry, all matched
 by plain substring (§4a, §4b, §12). A permissive pattern makes those matches
 ambiguous; JIRA-style ids are the overwhelming case.
 
+**D-6 — Dates, not timestamps.** `Confirmed-at` is `YYYY-MM-DD`, matching
+`Approved-at` in `plan-header.md` (D-6 there). The field is read by a developer
+checking when an approval happened; ordering is carried by the decision log's
+timestamped filenames (§7), not by these fields.
+
 ## 7. Open questions
 
-**OQ-1 — `Confirmed-at` is a date, `Approved-at` is a timestamp.** §4 shows
-`2026-08-03` for a scenario and §7 shows `2026-08-14T09:30:12` for a decision
-entry. A date is enough for a human record and a timestamp is enough for
-ordering, so neither is wrong, but the asymmetry is arbitrary. Decide before
-M1-9 and M1-10 write these fields; changing it afterwards is a contract change.
+None open in version 1.0.0.
 
 ## 8. Examples
 

@@ -20,7 +20,10 @@ components meet (§14.3, §15).
 
 - **No executable code.** Specifications, schemas and data only. A contract
   that is expressed as an implementation is not a contract — it is one
-  implementation's behavior.
+  implementation's behavior. One narrow exception is recorded in
+  `fixtures/digest/README.md` (D-3): fixture bytes that no editor can preserve
+  are materialized by a script, which produces and verifies data and is never
+  a reference the core may defer to.
 - **No component-specific content.** If only the Python adapter cares, it
   belongs in `adapters/python/`.
 - **No silent change.** A PR touching this directory is a public-contract
@@ -37,5 +40,10 @@ and what keeps the next ones non-breaking too.
 
 Fixtures test canonicalization, so they must be exempt from any repo-wide
 formatting or whitespace tooling — a hook that "fixes" trailing whitespace in a
-fixture destroys exactly what it verifies. Expected digests are regenerated
+fixture destroys exactly what it verifies. `fixtures/digest/.gitattributes`
+sets `* -text -diff` for that reason. Expected digests are regenerated
 deliberately, never automatically.
+
+| Set | Covers | Written for |
+|---|---|---|
+| `fixtures/digest/` | Canonicalization and digests (§4d) | M1-1, M1-2 |

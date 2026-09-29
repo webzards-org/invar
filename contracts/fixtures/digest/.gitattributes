@@ -1,0 +1,16 @@
+# Digest fixtures: git must not touch a single byte.
+#
+# `-text` disables ALL end-of-line conversion for these paths. Without it,
+# `core.autocrlf=true` on a Windows clone rewrites crlf.txt and cr.txt on
+# checkout, the fixtures stop describing what they claim to describe, and the
+# suite proves the opposite of what it was written for.
+#
+# `-diff` marks them binary for diffing: a diff of trailing whitespace is
+# unreadable anyway, and marking them binary stops a reviewer's tooling from
+# offering to "clean" them.
+* -text -diff
+
+# Keep the tooling and metadata in this directory normal.
+digests.json text eol=lf
+README.md text eol=lf
+tools/generate.py text eol=lf
