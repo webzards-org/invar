@@ -4,8 +4,15 @@ The Claude Code plugin — the delivery form of the system, and what the
 developer installs (§13). One install, no manual wiring: the CLI binary, the
 hooks, the planning sub-agent and the protocol skill arrive together.
 
-Arrives in milestone M5. Until then this directory holds the M0-6 spike and its
-notes.
+Arrives in milestone M5. Until then this directory holds the M0-6 spike and
+its notes:
+
+- [`NOTES.md`](NOTES.md) — what the spike established about plugin mechanics:
+  file layout, local installation, reload rules, debugging, and what a hook
+  receives and returns. Read this before starting M5.
+- `spike-m0-6/` — the throwaway plugin itself. A `PostToolUse` hook that logs
+  every edited path, rehearsing the shape M5 uses for `invar lint check`.
+  **Disposable**: delete it once the real plugin exists.
 
 ## Belongs here
 
