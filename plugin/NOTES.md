@@ -338,7 +338,58 @@ line-oriented editor is concerned. Irrelevant for real use — `init` pins
 `*.feature` and Plan files to `text eol=lf` (§4d) — and relevant only when
 poking at the digest fixtures, which is what §9 now warns against.
 
-## 9. Verification checklist
+## 9. Verified on 2026-09-30
+
+The spike ran and the hook fired. What this confirms, as observed rather than
+read:
+
+- **`timeout` is a valid command-hook field.** `claude plugin validate` passed
+  with `"timeout": 5` set.
+- **Exec form works as documented.** `/hooks` showed the command as
+  `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/log-edit.py`, unexpanded in the
+  display, and it resolved correctly at run time.
+- **`--plugin-dir` loads in place and the id is `@inline`.** `/hooks` reported
+  `Plugin: invar-spike@inline`, and the debug log named the source as the
+  working-tree path, not a cache copy:
+  `Read hooks.json for plugin invar-spike (enabled=true): .../plugin/spike-m0-6/hooks/hooks.json`
+- **`systemMessage` reaches the developer, prefixed with the hook's identity.**
+  The transcript line was
+  `PostToolUse:Edit says: [invar-spike] Edit -> /tmp/hook-test.txt`. Claude Code
+  adds the `PostToolUse:Edit says:` prefix, so a hook's own message does not
+  need to name its event.
+- **`CLAUDE_PLUGIN_DATA` is exported to hook processes, including for an
+  `@inline` plugin.** The script's fallback path was never used. The directory
+  was `~/.claude/plugins/data/invar-spike-inline/`: the plugin id
+  `invar-spike@inline` with `@` replaced by `-`, which is the documented rule
+  for forming `<plugin-id>` (every character other than a letter, digit, `_` or
+  `-` is replaced by `-`). The log line was
+  `2026-09-30T07:59:33\t<session>\tEdit\t/tmp/hook-test.txt`.
+- **A hook script's own code needs no reload; its configuration does.**
+  `hooks/hooks.json` is read at session start or `/reload-plugins`, but the
+  script it names runs as a fresh process on every invocation, so editing the
+  script takes effect on the next hook fire. For M5 this means iterating on hook
+  *behavior* is fast, and only changing which events are hooked costs a reload.
+- **Stdout is parsed strictly, and the debug log shows each stage.** Useful
+  lines to grep for next time:
+
+  ```
+  [DEBUG] Hooks: Checking first line for async: {"systemMessage": "..."}
+  [DEBUG] Hooks: Parsed initial response: {"systemMessage":"..."}
+  [DEBUG] Successfully parsed and validated hook JSON output
+  [DEBUG] Hook PostToolUse:Edit (PostToolUse) success:
+  ```
+
+  Note the first line: **only the first line of stdout is examined** to decide
+  whether the response is async. A hook that prints anything before its JSON
+  breaks that check, which is the mechanism behind the "shell profile prints a
+  banner" failure mode in §5.
+
+- **`Hooks: Found 0 total hooks in registry` is normal and not an error.** It
+  appears repeatedly between turns; it refers to a separate poll for async hook
+  responses, not to hook registration. Registration is the earlier
+  `Registered 1 hooks from 1 plugins`.
+
+## 10. Verification checklist
 
 > **Do not test on the digest fixtures.** They are contract data with
 > deliberately unusual bytes (`contracts/fixtures/digest/`), and an edit
@@ -355,7 +406,11 @@ The spike is done when all of these hold:
       transcript actually shows the `Edit` tool succeeding** — if `Edit` failed
       and Claude fell back to `Bash`, the hook correctly did not fire, and the
       spike has not been demonstrated (see §8)
-- [ ] The log file named by `log-edit.py --where` contains one line per edit
+- [ ] The log file under `~/.claude/plugins/data/<id>/edits.log` contains one
+      line per edit. `log-edit.py --where` run from a shell prints the *fallback*
+      path instead, because `CLAUDE_PLUGIN_DATA` exists only inside the hook
+      process; find the real one with
+      `find ~/.claude/plugins/data -name edits.log`
 - [ ] Breaking the script on purpose (`raise` at the top of `main`) does **not**
       break the session — the edit still succeeds
 
