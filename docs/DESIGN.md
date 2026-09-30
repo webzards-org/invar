@@ -849,6 +849,15 @@ them from Phase 2's view.
 **The decision log is never pushed.** `--binding` excludes it by
 construction; it reaches only the planning sub-agent (§7, §13a).
 
+**There is a hard size limit on the push channel.** A hook's
+`additionalContext` is capped at 10,000 characters; beyond that the content is
+written to a file and only its path is passed on, which Claude is not asked to
+read. `invar context show --binding` must therefore stay well inside that
+budget, and the CLI checks it rather than trusting it — silently exceeding it
+would mean binding context stops arriving while everything still appears to
+work. This is also a second reason the channel carries only `AI_CONTEXT.md` and
+the Invariants, and never package context.
+
 **None of this is a boundary.** Delivery improves the first attempt: fewer
 iterations, fewer tokens, fewer hallucinated APIs. Correctness is still
 decided on disk — an ignored convention fails lint, an ignored Invariant is
