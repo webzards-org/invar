@@ -388,6 +388,21 @@ read:
   appears repeatedly between turns; it refers to a separate poll for async hook
   responses, not to hook registration. Registration is the earlier
   `Registered 1 hooks from 1 plugins`.
+- **A crashing hook is loud but harmless — verified deliberately.** With a
+  `raise` planted at the top of `main`, the edit still went through and the
+  transcript showed:
+
+  ```
+  ⎿  PostToolUse:Edit hook error
+  ⎿  Failed with non-blocking status code: Traceback (most recent call last):
+  ```
+
+  Two things worth having in writing. The session continued and the file was
+  written, which is the property §13 depends on. And the traceback was surfaced
+  in the transcript rather than buried — an uncaught exception exits non-zero,
+  which the docs describe as going to the debug log only, but in practice the
+  developer sees it. So a broken hook does not fail silently, and the real hooks
+  do not need to build their own error reporting on top.
 
 ## 10. Verification checklist
 
@@ -396,22 +411,22 @@ read:
 > corrupts them — which `generate.py --check` will then report as a failure.
 > Use a throwaway file: `echo hi > /tmp/hook-test.txt` and edit that.
 
-The spike is done when all of these hold:
+The spike is done when all of these hold. **All verified 2026-09-30.**
 
-- [ ] `claude plugin validate ./plugin/spike-m0-6` passes
-- [ ] `claude --plugin-dir plugin/spike-m0-6` starts, and `/hooks` lists the
+- [x] `claude plugin validate ./plugin/spike-m0-6` passes
+- [x] `claude --plugin-dir plugin/spike-m0-6` starts, and `/hooks` lists the
       `PostToolUse` hook with matcher `Write|Edit`
-- [ ] Asking Claude to edit a throwaway file produces an
+- [x] Asking Claude to edit a throwaway file produces an
       `[invar-spike] Edit -> …` line in the transcript. **Check that the
       transcript actually shows the `Edit` tool succeeding** — if `Edit` failed
       and Claude fell back to `Bash`, the hook correctly did not fire, and the
       spike has not been demonstrated (see §8)
-- [ ] The log file under `~/.claude/plugins/data/<id>/edits.log` contains one
+- [x] The log file under `~/.claude/plugins/data/<id>/edits.log` contains one
       line per edit. `log-edit.py --where` run from a shell prints the *fallback*
       path instead, because `CLAUDE_PLUGIN_DATA` exists only inside the hook
       process; find the real one with
       `find ~/.claude/plugins/data -name edits.log`
-- [ ] Breaking the script on purpose (`raise` at the top of `main`) does **not**
+- [x] Breaking the script on purpose (`raise` at the top of `main`) does **not**
       break the session — the edit still succeeds
 
 That last one is the point of the whole exercise: whatever the hook does, the
