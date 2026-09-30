@@ -1459,6 +1459,14 @@ put it: on disk.
 | End of Phase 2 | `invar generate <n>` (full suite) | Yes — fails loudly, writes the decision entry |
 | — | `plan approve`, `scenario confirm` | **Never hooked** |
 
+**"After a code edit" is narrower than it sounds.** A `PostToolUse` hook
+matches on the *tool* that ran, so a matcher of `Write|Edit` does not see a file
+changed through a shell — a heredoc, `sed -i`, a formatter, a code generator.
+The M0-6 spike found this by accident and `plugin/NOTES.md` records the three
+options. The MVP position is to accept the gap, because the in-flight lint is
+advisory and `invar generate` lints everything at the end of the cycle; it is
+recorded here so it is a decision and not an oversight.
+
 **Nothing in-flight blocks.** A sync with no network, a package with no context
 entry, a lint failure mid-edit — all ordinary. The hook reports to the agent
 and the developer and the work continues. A hook that halts an editing session
