@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin.json",
+  "name": "invar-spike",
+  "displayName": "Invar spike (M0-6)",
+  "version": "0.0.1",
+  "description": "Throwaway spike that logs the path of every edited file through a PostToolUse hook. Rehearses the mechanism the real invar plugin uses for lint (§13). Not the real plugin.",
+  "author": {
+    "name": "Radomir Brkovic"
+  },
+  "license": "MIT",
+  "keywords": ["spike", "invar"]
+}

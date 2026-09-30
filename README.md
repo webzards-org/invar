@@ -18,8 +18,10 @@ references throughout this repository (§4d, §13a, …) point into it.
 
 ## Status
 
-Pre-implementation. Milestone **M0 — Foundations** is in progress; see the
-roadmap in §16 of the design document.
+Pre-implementation. Milestone **M0 — Foundations** is complete: the layout and
+contracts exist, CI runs, and `plugin/NOTES.md` records what the plugin-mechanics
+spike established. **M1 — Core gate** is next; see the roadmap in §16 of the
+design document.
 
 ## Layout
 

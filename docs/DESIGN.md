@@ -849,6 +849,15 @@ them from Phase 2's view.
 **The decision log is never pushed.** `--binding` excludes it by
 construction; it reaches only the planning sub-agent (§7, §13a).
 
+**There is a hard size limit on the push channel.** A hook's
+`additionalContext` is capped at 10,000 characters; beyond that the content is
+written to a file and only its path is passed on, which Claude is not asked to
+read. `invar context show --binding` must therefore stay well inside that
+budget, and the CLI checks it rather than trusting it — silently exceeding it
+would mean binding context stops arriving while everything still appears to
+work. This is also a second reason the channel carries only `AI_CONTEXT.md` and
+the Invariants, and never package context.
+
 **None of this is a boundary.** Delivery improves the first attempt: fewer
 iterations, fewer tokens, fewer hallucinated APIs. Correctness is still
 decided on disk — an ignored convention fails lint, an ignored Invariant is
@@ -1449,6 +1458,14 @@ put it: on disk.
 | During Phase 2 iteration | `invar generate <n> --tests-path <current>` | No |
 | End of Phase 2 | `invar generate <n>` (full suite) | Yes — fails loudly, writes the decision entry |
 | — | `plan approve`, `scenario confirm` | **Never hooked** |
+
+**"After a code edit" is narrower than it sounds.** A `PostToolUse` hook
+matches on the *tool* that ran, so a matcher of `Write|Edit` does not see a file
+changed through a shell — a heredoc, `sed -i`, a formatter, a code generator.
+The M0-6 spike found this by accident and `plugin/NOTES.md` records the three
+options. The MVP position is to accept the gap, because the in-flight lint is
+advisory and `invar generate` lints everything at the end of the cycle; it is
+recorded here so it is a decision and not an oversight.
 
 **Nothing in-flight blocks.** A sync with no network, a package with no context
 entry, a lint failure mid-edit — all ordinary. The hook reports to the agent
