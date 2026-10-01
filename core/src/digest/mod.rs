@@ -20,21 +20,17 @@
 //! came from. Keeping the two apart is what lets the fixtures in
 //! `contracts/fixtures/` test canonicalization on its own.
 //!
+//! Hashing is the last step: [`digest`] takes canonical text and renders its
+//! SHA-256 as `sha256:<64 lowercase hex>`, the form recorded in every
+//! `*-checksum` field. The two steps stay separate functions so a caller can
+//! show *what* was hashed, not only the result.
+//!
 //! The shared expectations live in `contracts/fixtures/digest/`; the tests in
 //! `tests.rs` run every fixture there through this module.
-//!
-//! Arrives in M1-1 (`canonicalize`) and M1-2 (`digest`). Digests are recorded
-//! as `sha256:<hex>`.
 
-// Nothing in the binary calls into this module until `invar hash` lands in
-// M1-2. `expect` rather than `allow`: the moment M1-2 wires it in, the
-// expectation goes unfulfilled and the compiler asks for this line to go.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "called by `invar hash` from M1-2 onward")
-)]
+use std::fmt::{self, Write as _};
 
-use std::fmt;
+use sha2::{Digest as _, Sha256};
 
 #[cfg(test)]
 mod tests;
@@ -115,3 +111,24 @@ impl fmt::Display for InvalidUtf8 {
 }
 
 impl std::error::Error for InvalidUtf8 {}
+
+/// The prefix every recorded digest carries. It names the algorithm, so a
+/// future change of algorithm is visible in the data rather than silent.
+const PREFIX: &str = "sha256:";
+
+/// SHA-256 of canonical text, rendered as `sha256:<64 lowercase hex>` (§4d).
+///
+/// Expects text that has already been through [`canonicalize`]; it does not
+/// canonicalize again, so what is hashed is exactly what was passed in.
+pub fn digest(canonical_text: &str) -> String {
+    let hash = Sha256::digest(canonical_text.as_bytes());
+
+    let mut rendered = String::with_capacity(PREFIX.len() + 2 * hash.len());
+    rendered.push_str(PREFIX);
+    for byte in hash {
+        // `{:02x}` is lowercase hex, zero-padded: 0x0a renders as "0a", never
+        // "a" or "0A". Both would produce a digest that never matches.
+        write!(rendered, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    rendered
+}
