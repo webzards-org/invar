@@ -25,7 +25,13 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Print the canonical digest of a file (§4d).
+    /// Print the canonical digest of a whole file (§4d).
+    ///
+    /// The whole file is hashed: its entire content is canonicalized (UTF-8,
+    /// BOM, line endings, trailing whitespace) and run through SHA-256. A
+    /// `Confirmed-checksum` or `Approved-checksum` covers only the body below a
+    /// header, so this command run on a `.feature` or a Plan does not
+    /// reproduce that field.
     Hash(hash::Args),
     // The rest of the surface (§8) arrives with M1:
     //   scenario validate | confirm      M1-6, M1-10, M1-11

@@ -1,33 +1,28 @@
-//! Tests for canonicalization (§4d), M1-1.
+//! Tests for canonicalization and digests (§4d), M1-1 and M1-2.
 //!
-//! Two halves. The fixture test runs every file in
-//! `contracts/fixtures/digest/` through `canonicalize_bytes` and checks it
-//! against `digests.json` — the shared contract that any other implementation
-//! is verified against too. The unit tests below it pin down each rule on its
-//! own, so a failure names the rule that broke rather than a digest.
+//! Two halves. The fixture tests run every file in
+//! `contracts/fixtures/digest/` through `canonicalize_bytes` and `digest` and
+//! check them against `digests.json` — the shared contract that any other
+//! implementation is verified against too. The unit tests below pin down each
+//! rule on its own, so a failure names the rule that broke rather than a
+//! digest.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
-use super::{InvalidUtf8, canonicalize, canonicalize_bytes};
+use super::{InvalidUtf8, canonicalize, canonicalize_bytes, digest};
+
+/// SHA-256 of zero bytes: the digest of the empty canonical form (D-1).
+const EMPTY_DIGEST: &str =
+    "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 // --- fixtures ---------------------------------------------------------------
 
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/fixtures/digest")
-}
-
-/// SHA-256 written out here rather than through the module, because `digest`
-/// is M1-2. A group's content is defined only by its digest and length, so
-/// hashing is the only way to check "canonicalizes to its group's content".
-fn sha256_hex(text: &str) -> String {
-    Sha256::digest(text.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 struct Group {
@@ -102,7 +97,7 @@ fn canonicalize_all_fixtures() -> Vec<(String, String)> {
                     group.canonical_byte_length,
                 );
                 assert_eq!(
-                    format!("sha256:{}", sha256_hex(&canonical)),
+                    digest(&canonical),
                     group.expected_digest,
                     "{path}: canonical form does not match group `{}`: {canonical:?}",
                     group.name,
@@ -128,6 +123,69 @@ fn canonicalize_all_fixtures() -> Vec<(String, String)> {
 #[test]
 fn every_fixture_canonicalizes_to_its_groups_content() {
     canonicalize_all_fixtures();
+}
+
+#[test]
+fn every_fixture_digests_to_its_groups_expected_digest() {
+    // The contract test of M1-2, in one place: walk every group and every
+    // file, hash the bytes, compare against `expected_digest`, then check
+    // that no two groups share one.
+    let groups = load_groups();
+
+    // Pinned counts, so a digests.json that silently lost a group or a file
+    // fails here instead of quietly testing less. Adding a fixture is a
+    // contract change (fixtures README), and updating these numbers is part
+    // of it.
+    let file_count: usize = groups.iter().map(|group| group.files.len()).sum();
+    assert_eq!(groups.len(), 7, "digests.json should list 7 groups");
+    assert_eq!(file_count, 28, "digests.json should list 28 files");
+
+    let mut walked = 0;
+    for group in &groups {
+        for (path, _) in &group.files {
+            // Bytes, never a line-oriented reader (see above).
+            let bytes = fs::read(fixtures_dir().join(path))
+                .unwrap_or_else(|err| panic!("reading fixture {path}: {err}"));
+            let canonical =
+                canonicalize_bytes(&bytes).unwrap_or_else(|err| panic!("{path}: {err}"));
+
+            assert_eq!(
+                digest(&canonical),
+                group.expected_digest,
+                "{path} does not hash to group `{}`'s expected digest",
+                group.name,
+            );
+            walked += 1;
+        }
+    }
+    assert_eq!(walked, 28, "every listed file should have been hashed");
+
+    // Distinctness: equivalence alone is satisfied by an implementation that
+    // collapses different content into one digest.
+    let mut seen = HashSet::new();
+    for group in &groups {
+        assert!(
+            seen.insert(group.expected_digest.as_str()),
+            "group `{}` shares its digest with another group",
+            group.name,
+        );
+    }
+}
+
+#[test]
+fn empty_group_yields_the_sha256_of_zero_bytes() {
+    let group = load_groups()
+        .into_iter()
+        .find(|group| group.name == "empty")
+        .expect("digests.json has an `empty` group");
+    assert_eq!(group.expected_digest, EMPTY_DIGEST);
+
+    for (path, _) in &group.files {
+        let bytes = fs::read(fixtures_dir().join(path))
+            .unwrap_or_else(|err| panic!("reading fixture {path}: {err}"));
+        let canonical = canonicalize_bytes(&bytes).unwrap_or_else(|err| panic!("{path}: {err}"));
+        assert_eq!(digest(&canonical), EMPTY_DIGEST, "{path}");
+    }
 }
 
 #[test]
@@ -285,4 +343,42 @@ fn invalid_utf8_message_is_clear() {
     let message = canonicalize_bytes(b"alpha\x80").unwrap_err().to_string();
     assert!(message.contains("not valid UTF-8"), "{message}");
     assert!(message.contains("offset 5"), "{message}");
+}
+
+// --- digest -----------------------------------------------------------------
+
+#[test]
+fn digest_of_empty_text_is_the_sha256_of_zero_bytes() {
+    assert_eq!(digest(""), EMPTY_DIGEST);
+}
+
+#[test]
+fn digest_matches_a_known_sha256_vector() {
+    // FIPS 180-2, the standard "abc" test vector.
+    assert_eq!(
+        digest("abc"),
+        "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+}
+
+#[test]
+fn digest_is_prefixed_lowercase_hex_of_fixed_length() {
+    for text in ["", "alpha\n", "Београд ☕\n"] {
+        let rendered = digest(text);
+        let hex = rendered
+            .strip_prefix("sha256:")
+            .unwrap_or_else(|| panic!("no `sha256:` prefix: {rendered}"));
+        assert_eq!(hex.len(), 64, "{rendered}");
+        assert!(
+            hex.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')),
+            "not lowercase hex: {rendered}"
+        );
+    }
+}
+
+#[test]
+fn digest_does_not_canonicalize_on_its_own() {
+    // What is hashed is exactly what was passed in; canonicalizing is the
+    // caller's job. Otherwise `invar hash` could not show what it hashed.
+    assert_ne!(digest("alpha\r\n"), digest("alpha\n"));
 }
