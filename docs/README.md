@@ -4,6 +4,8 @@ Project documentation.
 
 - [`DESIGN.md`](DESIGN.md) — the design document (currently revision v3). All
   section references in this repository (§4d, §13a, …) point into it.
+- [`TASKS-M1.md`](TASKS-M1.md) — the M1 milestone broken into issues, with the
+  decisions each one must close.
 
 ## Belongs here
 
