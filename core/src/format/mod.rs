@@ -3,10 +3,10 @@
 //! Four artifacts are the system's public contract, and this module is where
 //! the core reads them:
 //!
-//! - the `.feature` metadata block (§4)          — M1-3
-//! - the Plan header and required sections (§4a) — M1-4
-//! - decision entries (§7)                       — M3
-//! - `invar.yaml` (§6)                           — M1-8 onward
+//! - `invar.yaml` (§6)                           — M1-3, [`config`]
+//! - the Plan header and required sections (§4a) — M1-6
+//! - decision entries (§7)                       — M1-11
+//! - the `.feature` metadata block (§4)          — the feature-tests milestone
 //!
 //! The specifications live in `contracts/formats/`; this module implements
 //! them and must not drift from them. A change here that changes what a file
@@ -21,3 +21,5 @@
 //! Gherkin is parsed only as far as the core needs: the metadata block and the
 //! `Scenario:` lines. Steps are the adapter's concern, never the core's
 //! (§14.2).
+
+pub mod config;

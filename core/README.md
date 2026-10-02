@@ -38,7 +38,7 @@ No async runtime. Dependencies stay few and boring.
 core/src/
 ├── main.rs      # argument parsing and dispatch only
 ├── cli/         # one module per subcommand; arguments and `run`, no logic
-├── format/      # .feature and Plan parsing (M1-3, M1-4)
+├── format/      # invar.yaml (M1-3) and Plan parsing (M1-6); .feature later
 ├── digest/      # canonicalization and hashing (M1-1, M1-2)
 └── fs/          # path resolution, project root discovery
 ```

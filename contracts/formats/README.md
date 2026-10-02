@@ -8,8 +8,9 @@ contracts: changing one is a deliberate, versioned PR (see `../README.md`).
 |---|---|---|
 | `feature-metadata.md` | The `.feature` metadata block and header/body boundary (§4) | M1-3 |
 | `plan-header.md` | The Plan YAML header and required sections (§4a, §5c) | M1-4 |
+| `invar-yaml.md` | `invar.yaml`: the keys M1 reads, the §6 keys it ignores, value rules (§6) | M1-3 |
 
-Still to be written: the decision-entry format (§7, M3) and `invar.yaml` (§6).
+Still to be written: the decision-entry format (§7, M3).
 
 ## Why the boundary rules carry so much weight
 
