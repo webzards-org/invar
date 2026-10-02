@@ -33,10 +33,13 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
+use crate::fs::ProjectRoot;
+
 #[cfg(test)]
 mod tests;
 
-/// The config file's name. Its directory is the project root (M1-4).
+/// The config file's name. Its directory is the project root, which
+/// [`crate::fs`] finds and builds every path from (M1-4).
 pub const FILE_NAME: &str = "invar.yaml";
 
 /// Default for `context.binding_limit` (§3.4).
@@ -209,13 +212,16 @@ impl std::error::Error for ConfigError {
 ///
 /// The entry point for every command (§3.1). Use [`load`] only where the
 /// mode does not matter.
-pub fn load_for_command(project_root: &Path) -> Result<Loaded, ConfigError> {
-    load(project_root)?.require_light_mode()
+pub fn load_for_command(root: &ProjectRoot) -> Result<Loaded, ConfigError> {
+    load(root)?.require_light_mode()
 }
 
 /// Read `invar.yaml` from the project root. Accepts `scenarios: true`.
-pub fn load(project_root: &Path) -> Result<Loaded, ConfigError> {
-    let path = project_root.join(FILE_NAME);
+///
+/// The root was found *because* the file is there, so `Missing` means it was
+/// removed in between — rare, but reported as what it is.
+pub fn load(root: &ProjectRoot) -> Result<Loaded, ConfigError> {
+    let path = root.config_file();
     let bytes = std::fs::read(&path).map_err(|source| match source.kind() {
         io::ErrorKind::NotFound => ConfigError::Missing { path: path.clone() },
         _ => ConfigError::Unreadable {

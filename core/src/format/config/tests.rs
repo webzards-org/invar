@@ -12,6 +12,7 @@ use super::{
     Config, ConfigError, Context, DEFAULT_BINDING_LIMIT, FILE_NAME, Git, Loaded, Review, Warning,
     load, load_for_command, parse, parse_bytes,
 };
+use crate::fs::ProjectRoot;
 
 fn path() -> PathBuf {
     PathBuf::from("/project").join(FILE_NAME)
@@ -357,7 +358,7 @@ fn invalid_utf8_is_an_error_with_its_offset() {
 #[test]
 fn a_missing_file_is_its_own_error_naming_invar_init() {
     let root = tempfile::tempdir().unwrap();
-    let err = load(root.path()).unwrap_err();
+    let err = load(&ProjectRoot::for_test(root.path())).unwrap_err();
     assert!(matches!(err, ConfigError::Missing { .. }), "{err:?}");
     let message = err.to_string();
     assert!(message.contains("invar init"), "{message}");
@@ -369,7 +370,7 @@ fn an_unreadable_file_is_not_reported_as_missing() {
     // A directory where the file should be: present, but not readable as one.
     let root = tempfile::tempdir().unwrap();
     fs::create_dir(root.path().join(FILE_NAME)).unwrap();
-    let err = load(root.path()).unwrap_err();
+    let err = load(&ProjectRoot::for_test(root.path())).unwrap_err();
     assert!(matches!(err, ConfigError::Unreadable { .. }), "{err:?}");
     assert!(!err.to_string().contains("invar init"), "{err}");
 }
@@ -378,9 +379,12 @@ fn an_unreadable_file_is_not_reported_as_missing() {
 fn load_reads_the_file_in_the_project_root() {
     let root = tempfile::tempdir().unwrap();
     fs::write(root.path().join(FILE_NAME), "review:\n  offer: true\n").unwrap();
-    let loaded = load(root.path()).unwrap();
+    let loaded = load(&ProjectRoot::for_test(root.path())).unwrap();
     assert!(loaded.config.review.offer);
-    assert_eq!(loaded.path, root.path().join(FILE_NAME));
+    assert_eq!(
+        loaded.path,
+        root.path().canonicalize().unwrap().join(FILE_NAME)
+    );
 }
 
 // --- scenarios: true --------------------------------------------------------
@@ -391,10 +395,15 @@ fn scenarios_true_is_read_but_refused_by_commands() {
     fs::write(root.path().join(FILE_NAME), "scenarios: true\n").unwrap();
 
     // The reader accepts it: the file is valid (D-4).
-    assert!(load(root.path()).unwrap().config.scenarios);
+    assert!(
+        load(&ProjectRoot::for_test(root.path()))
+            .unwrap()
+            .config
+            .scenarios
+    );
 
     // A command refuses it, saying why and what to do.
-    let err = load_for_command(root.path()).unwrap_err();
+    let err = load_for_command(&ProjectRoot::for_test(root.path())).unwrap_err();
     assert!(
         matches!(err, ConfigError::ScenariosNotSupported { .. }),
         "{err:?}"
@@ -408,16 +417,21 @@ fn scenarios_true_is_read_but_refused_by_commands() {
 fn light_mode_passes_the_command_check() {
     let root = tempfile::tempdir().unwrap();
     fs::write(root.path().join(FILE_NAME), "scenarios: false\n").unwrap();
-    assert!(!load_for_command(root.path()).unwrap().config.scenarios);
+    assert!(
+        !load_for_command(&ProjectRoot::for_test(root.path()))
+            .unwrap()
+            .config
+            .scenarios
+    );
 
     // Absent means false, so an empty file passes too.
     fs::write(root.path().join(FILE_NAME), "").unwrap();
-    assert!(load_for_command(root.path()).is_ok());
+    assert!(load_for_command(&ProjectRoot::for_test(root.path())).is_ok());
 }
 
 #[test]
 fn load_for_command_still_reports_a_missing_file_as_missing() {
     let root = tempfile::tempdir().unwrap();
-    let err = load_for_command(root.path()).unwrap_err();
+    let err = load_for_command(&ProjectRoot::for_test(root.path())).unwrap_err();
     assert!(matches!(err, ConfigError::Missing { .. }), "{err:?}");
 }
