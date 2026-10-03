@@ -10,6 +10,7 @@
 //! with the exit code being right.
 
 mod cli;
+mod diagnostics;
 mod digest;
 mod format;
 mod fs;
