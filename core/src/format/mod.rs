@@ -4,7 +4,7 @@
 //! the core reads them:
 //!
 //! - `invar.yaml` (§6)                           — M1-3, [`config`]
-//! - the Plan header and required sections (§4a) — M1-6
+//! - the Plan header and required sections (§4a) — M1-6, [`plan`]
 //! - decision entries (§7)                       — M1-11
 //! - the `.feature` metadata block (§4)          — the feature-tests milestone
 //!
@@ -23,3 +23,4 @@
 //! (§14.2).
 
 pub mod config;
+pub mod plan;
