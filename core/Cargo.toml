@@ -11,8 +11,8 @@ name = "invar"
 path = "src/main.rs"
 
 # Dependencies stay few and boring on purpose (§14.2). The core reads and
-# writes files, parses YAML headers and markdown sections, hashes, and shells
-# out to `git`. No async runtime, no git library.
+# writes files, parses `invar.yaml`, flat Plan headers and markdown sections,
+# hashes, and shells out to `git`. No async runtime, no git library.
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
@@ -23,9 +23,11 @@ sha2 = "0.10"
 # (contracts/formats/invar-yaml.md, D-1). Deserialize only — the core does not
 # emit YAML.
 #
-# The Plan header deliberately does NOT go through serde: unknown keys and
-# comments must survive a write byte for byte, which a serde round trip
-# cannot do. It gets a line-oriented parser of its own (M1-6).
+# These two are for `invar.yaml` only. The Plan header deliberately does NOT
+# go through serde or any YAML crate: unknown keys and comments must survive a
+# write in their original positions (plan-header.md D-2), and a serde round
+# trip drops both. `format/plan` reads it line by line instead and writes it
+# back byte for byte.
 serde = { version = "1", features = ["derive"] }
 serde-saphyr = { version = "1.3", default-features = false, features = ["deserialize"] }
 
