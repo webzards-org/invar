@@ -2,14 +2,14 @@
 //!
 //! One module per subcommand. A subcommand module owns its arguments and a
 //! `run` function; it does not own the logic — that lives in `digest`,
-//! `format` and (later) the modules for the gate. Keeping the split means a
-//! command can be called from a test, from CI or from a hook and behave
-//! identically (§13b).
+//! `format` and `gate`. Keeping the split means a command can be called from
+//! a test, from CI or from a hook and behave identically (§13b).
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod hash;
+mod plan;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -33,9 +33,12 @@ pub enum Command {
     /// header, so this command run on a `.feature` or a Plan does not
     /// reproduce that field.
     Hash(hash::Args),
+    /// Work with the Plan of a ticket: `.invar/plans/<TICKET>-<slug>/spec.md`.
+    #[command(subcommand)]
+    Plan(plan::Command),
     // The rest of the surface (§8) arrives with M1:
-    //   scenario validate | confirm      M1-6, M1-10, M1-11
-    //   plan validate | approve          M1-7, M1-9
+    //   plan approve                     M1-9
+    //   scenario validate | confirm      later (scenarios mode)
     //   init                             M1-13
     //   doctor, context, generate,
     //   lint, decision, clean-spec       M2+
@@ -45,6 +48,7 @@ impl Cli {
     pub fn run(self) -> Result<()> {
         match self.command {
             Command::Hash(args) => hash::run(args),
+            Command::Plan(command) => plan::run(command),
         }
     }
 }
