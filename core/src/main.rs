@@ -14,6 +14,7 @@ mod diagnostics;
 mod digest;
 mod format;
 mod fs;
+mod gate;
 
 use std::process::ExitCode;
 
