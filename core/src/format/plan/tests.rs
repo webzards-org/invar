@@ -1,5 +1,5 @@
 //! Tests for Plan parsing and writing (M1-6), against
-//! `contracts/formats/plan-header.md` v1.1.0.
+//! `contracts/formats/plan-header.md` v1.2.0.
 //!
 //! The valid Plan used throughout is the contract's own example 9.1, read out
 //! of the Markdown, so the contract and the parser cannot drift apart.

@@ -41,6 +41,8 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::format::config;
 
+pub mod plans;
+
 #[cfg(test)]
 mod tests;
 

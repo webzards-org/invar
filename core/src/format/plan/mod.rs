@@ -1,6 +1,6 @@
 //! The Plan: `.invar/plans/<TICKET>-<slug>/spec.md` (§4a).
 //!
-//! Implements `contracts/formats/plan-header.md` v1.1.0; section numbers and
+//! Implements `contracts/formats/plan-header.md` v1.2.0; section numbers and
 //! decision ids below (`§4.1`, `D-2`) point into it.
 //!
 //! **Reading** splits the file into four parts — opening delimiter, header,

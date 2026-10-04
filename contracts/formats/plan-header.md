@@ -1,6 +1,6 @@
 # Contract: Plan header and required sections
 
-**Version:** 1.1.0 — light mode; see §10 for what changed and why
+**Version:** 1.2.0 — whole-segment Plan lookup; see §10 for what changed and why
 **Status:** stable
 **Implements:** §4a (Plan document structure), §4d (Checksums), §5c (Context
 delivery), §12 (Plan lifecycle); light mode L-1, L-2, L-5
@@ -50,8 +50,15 @@ not an integrity failure (§4d).
 - The directory name is the join key across the Plan, the branch and the
   decision entry, matched by plain substring (§4a, §12). `plan validate` fails
   loudly when the shape does not match.
-- Lookup by ticket is a substring match over directory names. Zero matches and
-  more than one match are distinct, loud errors — never a guess.
+- Lookup by ticket is a substring match over directory names, on **whole
+  segments**: the query must not have a letter or digit directly before or
+  after it in the name (D-10). `PROJ-412`, `412` and `reserve-stock` all find
+  `PROJ-412-reserve-stock`; `PROJ-41` does not. Matching is case-sensitive.
+- Zero matches, more than one match, a single match whose name does not have
+  the shape above, and a single match without a `spec.md` are distinct, loud
+  errors — never a guess. A malformed name that matches counts as a match:
+  next to a well-formed one, the lookup is ambiguous, not resolved by
+  preferring either.
 
 ## 3. Encoding and line endings
 
@@ -390,6 +397,16 @@ do not exist in this mode. They are ordinary additional sections, which is
 also what makes switching modes later a change of required headings, not of
 parsing.
 
+**D-10 — Lookup matches whole segments** (1.2.0). Plain substring matching
+lets `PROJ-41` find `PROJ-412-reserve-stock`. When `PROJ-41` has a Plan of its
+own the lookup is ambiguous and fails loudly; when it has none, the lookup
+returns `PROJ-412`'s Plan with complete confidence — one specification
+approved, another implemented, and no ambiguity check can catch it because
+there is only one match. Requiring a non-alphanumeric character (or the end of
+the name) on both sides of the match closes that hole and keeps everything
+substring matching is used for: a full ticket id, its number alone, or a word
+of the slug.
+
 ## 8. Open questions
 
 **OQ-1 — Re-approving an already approved Plan.** `plan approve` on a Plan
@@ -583,6 +600,22 @@ There is nothing for the developer to approve the change against, nothing for
 validate` reports it as an empty required section, naming the heading.
 
 ## 10. Version history
+
+**1.2.0 — whole-segment lookup (M1-7).**
+
+- Plan lookup by ticket matches whole segments of the directory name, not any
+  substring (§2, D-10). `PROJ-41` no longer finds `PROJ-412-…`.
+- The distinct lookup errors are listed in §2: none, several, malformed name,
+  missing `spec.md`.
+
+**Why:** implementing the lookup exposed that plain substring matching can
+resolve one ticket to another ticket's Plan without any ambiguity to report —
+the exact failure the lookup exists to prevent.
+
+**Compatibility:** every query that found a single Plan under 1.1.0 and was a
+full ticket id still finds the same Plan. A query that relied on a partial
+match inside a segment (`PROJ-41` for `PROJ-412`) now reports no match instead
+of a wrong one.
 
 **1.1.0 — light mode (M1-5).**
 
