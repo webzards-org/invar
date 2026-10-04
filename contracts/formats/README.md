@@ -7,7 +7,7 @@ contracts: changing one is a deliberate, versioned PR (see `../README.md`).
 | File | Version | Specifies | Implemented by |
 |---|---|---|---|
 | `invar-yaml.md` | 1.0.0 | `invar.yaml`: the keys M1 reads, the §6 keys it ignores, value rules (§6) | M1-3 |
-| `plan-header.md` | 1.1.0 | The Plan header and required sections, per mode (§4a, §5c) | M1-6 (parsing); read by M1-8 to M1-10 |
+| `plan-header.md` | 1.2.0 | The Plan header and required sections, per mode (§4a, §5c) | M1-6 (parsing), M1-7 (lookup); read by M1-8 to M1-10 |
 | `feature-metadata.md` | 1.0.0 | The `.feature` metadata block and header/body boundary (§4) | The feature-tests milestone (deferred from M1, L-1) |
 
 Still to be written: the decision-entry format (§7, M1-11).
