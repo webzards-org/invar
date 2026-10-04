@@ -17,19 +17,19 @@
 //! has no Plan of its own — a single, confident, wrong match that no
 //! ambiguity check can catch.
 
-// No command looks a Plan up yet: the first are `plan validate` and
-// `plan approve` (M1-8, M1-9). `expect` rather than `allow`, so the compiler
-// asks for this line to go once one of them does.
+// `plan validate` (M1-8) uses `find`; `open`, which needs a valid Plan, is
+// for `plan approve` (M1-9). `expect` rather than `allow`, so the compiler
+// asks for this line to go once it is used.
 #![cfg_attr(
     not(test),
-    expect(dead_code, reason = "used by the plan commands from M1-8 onward")
+    expect(dead_code, reason = "`open` is used by `plan approve` from M1-9")
 )]
 
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::format::plan::{Header, Mode, Plan, PlanError};
+use crate::format::plan::{Mode, Plan, PlanError};
 
 use super::ProjectRoot;
 
@@ -137,7 +137,7 @@ pub fn find(root: &ProjectRoot, query: &str) -> Result<PlanDir, LookupError> {
 pub fn open(root: &ProjectRoot, query: &str, mode: Mode) -> Result<(PlanDir, Plan), LookupError> {
     let dir = find(root, query)?;
     let plan = Plan::read(&dir.spec_path(), mode).map_err(LookupError::Plan)?;
-    if let Some(problem) = ticket_mismatch(&dir, plan.header()) {
+    if let Some(problem) = ticket_mismatch(&dir.name, &dir.ticket, &plan.header().ticket) {
         return Err(LookupError::TicketMismatch {
             spec: dir.spec_path(),
             problem,
@@ -149,16 +149,23 @@ pub fn open(root: &ProjectRoot, query: &str, mode: Mode) -> Result<(PlanDir, Pla
 /// The header's `Ticket` must equal the directory's `<TICKET>` (§5.1). `None`
 /// when they agree; otherwise the problem, worded for a person or an agent to
 /// act on. `plan validate` (M1-8) reports it alongside the Plan's own
-/// problems.
-pub fn ticket_mismatch(dir: &PlanDir, header: &Header) -> Option<String> {
-    (header.ticket != dir.ticket).then(|| {
+/// problems, so it takes plain values rather than a valid Plan.
+pub fn ticket_mismatch(dir_name: &str, dir_ticket: &str, header_ticket: &str) -> Option<String> {
+    (header_ticket != dir_ticket).then(|| {
         format!(
-            "the header says `Ticket: {}`, but the directory `{}` is for `{}`. One of \
-             them is wrong: fix the header, or rename the directory — the directory \
-             name is what the branch and the decision entry are matched by",
-            header.ticket, dir.name, dir.ticket
+            "the header says `Ticket: {header_ticket}`, but the directory `{dir_name}` is \
+             for `{dir_ticket}`. One of them is wrong: fix the header, or rename the \
+             directory — the directory name is what the branch and the decision entry \
+             are matched by"
         )
     })
+}
+
+/// Every Plan directory name under `.invar/plans/`, sorted, whatever its
+/// shape; `None` when `.invar/plans/` does not exist. Used by
+/// `plan validate --all-drafts` (M1-8).
+pub fn list(root: &ProjectRoot) -> Result<Option<Vec<String>>, LookupError> {
+    directory_names(&root.plans_dir())
 }
 
 /// `<TICKET>-<slug>` → `(TICKET, slug)` (§2): an uppercase ticket id
