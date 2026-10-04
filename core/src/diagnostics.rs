@@ -10,11 +10,12 @@
 //! message says what to change, not only what is wrong, because the output is
 //! read by an agent as often as by a person (M1-8).
 
-// The first reader is `plan validate` (M1-8); until then only the Plan
-// parser uses it, which the binary does not call yet.
+// `plan validate` (M1-8) prints it; `finish` has no caller in the binary
+// yet. `expect` rather than `allow`, so the compiler asks for this line to go
+// once it does.
 #![cfg_attr(
     not(test),
-    expect(dead_code, reason = "printed by the plan commands from M1-8 onward")
+    expect(dead_code, reason = "`finish` has no caller in the binary yet")
 )]
 
 use std::fmt;
