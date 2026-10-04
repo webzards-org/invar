@@ -1,6 +1,6 @@
 # Contract: Plan header and required sections
 
-**Version:** 1.2.0 — whole-segment Plan lookup; see §10 for what changed and why
+**Version:** 1.2.1 — which command checks which rule; see §10 for what changed and why
 **Status:** stable
 **Implements:** §4a (Plan document structure), §4d (Checksums), §5c (Context
 delivery), §12 (Plan lifecycle); light mode L-1, L-2, L-5
@@ -140,6 +140,17 @@ approval is stale, and `plan check` refuses — and with it `invar done`
 - `Ticket` must equal the `<TICKET>` part of the directory name.
 - *When `scenarios: true`:* every `.feature` file confirmed against this Plan
   carries the same `Ticket`.
+
+**Form and approval are checked by different commands** (D-11).
+`plan validate` checks **form**: the path and directory name (§2), encoding
+and structure (§3, §4), the presence of every required key and the format of
+every non-empty value (§5), `Ticket` against the directory name (above), and
+the required sections (§6). It does not look at whether the Plan is approved:
+the first two rules above — the approval values against `Status` — are
+checked by `plan check` (M1-10), which `invar done` runs, and by
+`plan approve` before it approves (M1-9). A draft with empty approval values
+is therefore valid, and so is the Plan of example 9.3 as far as
+`plan validate` is concerned.
 
 ### 5.2 `Lockfile-checksum`
 
@@ -407,6 +418,16 @@ the name) on both sides of the match closes that hole and keeps everything
 substring matching is used for: a full ticket id, its number alone, or a word
 of the slug.
 
+**D-11 — `plan validate` checks form, not approval** (1.2.1). The validator
+runs while the Plan is being written — by the planner after each draft and by
+the hook when the planner stops (M1-8, M1-17). At that point the Plan is a
+draft by definition, and the approval values belong to `plan approve`, which
+the agent never runs. Checking them there would only ever fire on an agent
+that wrote `Status: approved` itself, and the place that has to catch that is
+the one that guards the code: `plan check`, run by `invar done`. Keeping the
+two apart also means a body edited after approval surfaces as a stale
+approval from `plan check`, with its own wording, instead of as a form error.
+
 ## 8. Open questions
 
 **OQ-1 — Re-approving an already approved Plan.** `plan approve` on a Plan
@@ -530,7 +551,8 @@ Approved-checksum:
 Without it nothing can detect a body edited after approval, so the Plan asserts
 an approval that cannot be checked — which is the exact state §4a's honesty
 note exists to prevent. Most likely cause: an agent writing the status itself
-instead of running `plan approve`.
+instead of running `plan approve`. Reported by `plan check`; `plan validate`
+checks form only and accepts it (§5.1, D-11).
 
 ### 9.4 Invalid (`scenarios: true`) — missing section, and an ambiguous empty list
 
@@ -600,6 +622,18 @@ There is nothing for the developer to approve the change against, nothing for
 validate` reports it as an empty required section, naming the heading.
 
 ## 10. Version history
+
+**1.2.1 — which command checks which rule (M1-8).**
+
+- §5.1 states that `plan validate` checks form and `plan check` checks the
+  approval values against `Status` (D-11). Example 9.3 says which command
+  rejects it.
+
+**Why:** §5.1 listed every consistency rule without saying who enforces it,
+and M1-8 fixes `plan validate` to form only. Without the note, example 9.3
+reads as a case `plan validate` must fail.
+
+**Compatibility:** no rule changed; only where each is checked is stated.
 
 **1.2.0 — whole-segment lookup (M1-7).**
 

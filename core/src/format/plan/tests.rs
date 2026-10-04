@@ -1,5 +1,5 @@
 //! Tests for Plan parsing and writing (M1-6), against
-//! `contracts/formats/plan-header.md` v1.2.0.
+//! `contracts/formats/plan-header.md` v1.2.1.
 //!
 //! The valid Plan used throughout is the contract's own example 9.1, read out
 //! of the Markdown, so the contract and the parser cannot drift apart.
@@ -830,4 +830,53 @@ fn the_body_digest_survives_a_crlf_checkout() {
         digest(&canonicalize(lf.body())),
         digest(&canonicalize(crlf.body()))
     );
+}
+
+// --- check: everything readable despite problems (M1-8) ---------------------
+
+#[test]
+fn check_of_a_valid_plan_has_no_problems_and_reads_ticket_and_status() {
+    let checked = Plan::check(&valid(), Mode::Light);
+    assert!(checked.problems.is_empty(), "{}", checked.problems);
+    assert_eq!(checked.ticket, Some(("SHOP-214".to_owned(), 2)));
+    assert_eq!(checked.status, Some(Status::Draft));
+}
+
+#[test]
+fn check_reads_ticket_and_status_when_other_fields_are_wrong() {
+    // A broken `Module` and a missing section: the Plan is invalid, but the
+    // ticket and the status are still known, so `plan validate` can compare
+    // the ticket with the directory in the same run.
+    let text = valid()
+        .replace("Module: orders", "Module: Orders")
+        .replace("Status: draft", "Status: approved")
+        .replace("## Scope\n", "## Scoped\n");
+    let checked = Plan::check(&text, Mode::Light);
+    assert_eq!(checked.problems.len(), 2, "{}", checked.problems);
+    assert_eq!(checked.ticket, Some(("SHOP-214".to_owned(), 2)));
+    assert_eq!(checked.status, Some(Status::Approved));
+    // `parse` agrees on the problems.
+    assert_eq!(
+        problems(&text, Mode::Light).to_string(),
+        checked.problems.to_string()
+    );
+}
+
+#[test]
+fn check_does_not_report_a_ticket_or_status_that_is_malformed() {
+    let text = valid()
+        .replace("Ticket: SHOP-214", "Ticket: shop-214")
+        .replace("Status: draft", "Status: Draft");
+    let checked = Plan::check(&text, Mode::Light);
+    assert_eq!(checked.problems.len(), 2, "{}", checked.problems);
+    assert_eq!(checked.ticket, None);
+    assert_eq!(checked.status, None);
+}
+
+#[test]
+fn check_without_a_header_reports_only_that() {
+    let checked = Plan::check("## Ticket\nno header\n", Mode::Light);
+    assert_eq!(checked.problems.len(), 1);
+    assert_eq!(checked.ticket, None);
+    assert_eq!(checked.status, None);
 }

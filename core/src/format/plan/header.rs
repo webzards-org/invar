@@ -245,14 +245,23 @@ fn is_key(key: &str) -> bool {
 
 // --- the whole header ---------------------------------------------------------
 
+/// What [`parse`] makes of the header lines.
+pub(super) struct Parsed {
+    /// Every line, always.
+    pub(super) lines: Vec<HeaderLine>,
+    /// The typed header, only when every rule of §5 holds.
+    pub(super) header: Option<Header>,
+    /// `Ticket` and its line, whenever the value has the shape of a ticket id
+    /// — even when other fields are wrong — so `plan validate` can compare it
+    /// with the directory name in the same run (M1-8).
+    pub(super) ticket: Option<(String, usize)>,
+    /// `Status`, whenever it is `draft` or `approved`, likewise.
+    pub(super) status: Option<Status>,
+}
+
 /// Parse the lines between the delimiters. `first_line` is the 1-based number
-/// of the first of them. Returns the lines (always) and the typed header (only
-/// when every rule of §5 holds).
-pub(super) fn parse(
-    lines: &[Line],
-    first_line: usize,
-    found: &mut Diagnostics,
-) -> (Vec<HeaderLine>, Option<Header>) {
+/// of the first of them.
+pub(super) fn parse(lines: &[Line], first_line: usize, found: &mut Diagnostics) -> Parsed {
     let before = found.len();
     let parsed: Vec<HeaderLine> = lines
         .iter()
@@ -378,7 +387,15 @@ pub(super) fn parse(
     } else {
         None
     };
-    (parsed, header)
+    let ticket = ticket
+        .filter(|(value, _)| is_ticket(value))
+        .map(|(value, line)| (value.to_owned(), line));
+    Parsed {
+        lines: parsed,
+        header,
+        ticket,
+        status,
+    }
 }
 
 // --- value formats (§5) --------------------------------------------------------

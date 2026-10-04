@@ -1,6 +1,6 @@
 //! The Plan: `.invar/plans/<TICKET>-<slug>/spec.md` (§4a).
 //!
-//! Implements `contracts/formats/plan-header.md` v1.2.0; section numbers and
+//! Implements `contracts/formats/plan-header.md` v1.2.1; section numbers and
 //! decision ids below (`§4.1`, `D-2`) point into it.
 //!
 //! **Reading** splits the file into four parts — opening delimiter, header,
@@ -22,12 +22,16 @@
 //! boundary is the delicate part: blank lines added or removed between the
 //! header and the body must not change it.
 
-// No command reads a Plan yet: the first are `plan validate` and
-// `plan approve` (M1-8, M1-9). `expect` rather than `allow`, so the compiler
-// asks for this line to go once one of them does.
+// `plan validate` (M1-8) only checks; reading the parts of a valid Plan,
+// approving it and resetting it come with `plan approve` and
+// `decision record` (M1-9, M1-11). `expect` rather than `allow`, so the
+// compiler asks for this line to go once they do.
 #![cfg_attr(
     not(test),
-    expect(dead_code, reason = "read by the plan commands from M1-7 onward")
+    expect(
+        dead_code,
+        reason = "the rest is used by the plan commands from M1-9 onward"
+    )
 )]
 
 mod header;
@@ -92,93 +96,19 @@ pub struct Plan {
 impl Plan {
     /// Parse a Plan's text, checking every rule of the contract for `mode`.
     pub fn parse(text: &str, mode: Mode) -> Result<Self, Diagnostics> {
-        let mut found = Diagnostics::new();
-
-        let (bom, text) = match text.strip_prefix('\u{FEFF}') {
-            Some(rest) => (true, rest),
-            None => (false, text),
-        };
-        let lines = split_lines(text);
-
-        // §4.1: the very first line is the opening delimiter.
-        match lines.first() {
-            Some((first, _)) if *first == DELIMITER => {}
-            Some((first, _)) => {
-                let hint = if first.trim().is_empty() {
-                    "remove the blank lines above it"
-                } else if first.trim() == DELIMITER {
-                    "remove the spaces around it"
-                } else {
-                    "a Plan starts with its header, between two `---` lines"
-                };
-                found.at(1, format!("the first line must be exactly `---`; {hint}"));
-                return Err(found);
-            }
-            None => {
-                found.general("the file is empty; a Plan starts with a `---` line");
-                return Err(found);
-            }
+        let analysis = analyze(text, mode);
+        match analysis.plan {
+            Some(plan) if analysis.checked.problems.is_empty() => Ok(plan),
+            _ => Err(analysis.checked.problems),
         }
+    }
 
-        // §4.1: the header ends at the next line that is exactly `---`. Any
-        // later `---` is body content.
-        let Some(closing_index) = lines
-            .iter()
-            .skip(1)
-            .position(|(text, _)| *text == DELIMITER)
-            .map(|position| position + 1)
-        else {
-            found.at(
-                1,
-                "the header opened here is never closed; add a line that is exactly `---` \
-                 after the last header key",
-            );
-            return Err(found);
-        };
-
-        let to_line = |(text, eol): &(&str, &str)| Line {
-            text: (*text).to_owned(),
-            eol: (*eol).to_owned(),
-        };
-        let header_raw: Vec<Line> = lines[1..closing_index].iter().map(to_line).collect();
-        let (header_lines, header) = header::parse(&header_raw, 2, &mut found);
-
-        // Everything after the closing line, as one verbatim string. Its byte
-        // offset is the sum of the lines before it.
-        let consumed: usize = lines[..=closing_index]
-            .iter()
-            .map(|(text, eol)| text.len() + eol.len())
-            .sum();
-        let rest = text[consumed..].to_owned();
-        let rest_first_line = closing_index + 2;
-
-        // §4.3, D-1: the body starts at the first non-blank line.
-        let mut body_start = rest.len();
-        let mut offset = 0;
-        for (line, eol) in split_lines(&rest) {
-            if !line.trim().is_empty() {
-                body_start = offset;
-                break;
-            }
-            offset += line.len() + eol.len();
-        }
-
-        let sections = sections::scan(&rest, rest_first_line, mode, &mut found);
-
-        let plan = header.map(|header| Plan {
-            header,
-            bom,
-            opening: to_line(&lines[0]),
-            header_lines,
-            closing: to_line(&lines[closing_index]),
-            rest,
-            body_start,
-            sections,
-        });
-        match plan {
-            Some(plan) if found.is_empty() => Ok(plan),
-            _ => Err(found),
-        }
+    /// Check a Plan's text without needing it to be valid: every problem, and
+    /// what could be read of `Ticket` and `Status` despite them. This is
+    /// `plan validate` (M1-8), which reports a header that disagrees with its
+    /// directory in the same run as a missing section.
+    pub fn check(text: &str, mode: Mode) -> Checked {
+        analyze(text, mode).checked
     }
 
     /// Read and parse a Plan file.
@@ -319,6 +249,129 @@ impl Plan {
         {
             line.set_value(value);
         }
+    }
+}
+
+/// What [`Plan::check`] found.
+#[derive(Debug)]
+pub struct Checked {
+    /// Every problem; empty for a valid Plan.
+    pub problems: Diagnostics,
+    /// The header's `Ticket` and its 1-based line, when the value has the
+    /// shape of a ticket id — even if other fields are wrong.
+    pub ticket: Option<(String, usize)>,
+    /// The header's `Status`, when it is `draft` or `approved` — even if
+    /// other fields are wrong.
+    pub status: Option<Status>,
+}
+
+struct Analysis {
+    /// Built only when the header is complete; valid only when there are no
+    /// problems.
+    plan: Option<Plan>,
+    checked: Checked,
+}
+
+/// Split the file into its four parts and check every rule (§4–§6).
+fn analyze(text: &str, mode: Mode) -> Analysis {
+    let mut found = Diagnostics::new();
+    let stop = |found| Analysis {
+        plan: None,
+        checked: Checked {
+            problems: found,
+            ticket: None,
+            status: None,
+        },
+    };
+
+    let (bom, text) = match text.strip_prefix('\u{FEFF}') {
+        Some(rest) => (true, rest),
+        None => (false, text),
+    };
+    let lines = split_lines(text);
+
+    // §4.1: the very first line is the opening delimiter.
+    match lines.first() {
+        Some((first, _)) if *first == DELIMITER => {}
+        Some((first, _)) => {
+            let hint = if first.trim().is_empty() {
+                "remove the blank lines above it"
+            } else if first.trim() == DELIMITER {
+                "remove the spaces around it"
+            } else {
+                "a Plan starts with its header, between two `---` lines"
+            };
+            found.at(1, format!("the first line must be exactly `---`; {hint}"));
+            return stop(found);
+        }
+        None => {
+            found.general("the file is empty; a Plan starts with a `---` line");
+            return stop(found);
+        }
+    }
+
+    // §4.1: the header ends at the next line that is exactly `---`. Any
+    // later `---` is body content.
+    let Some(closing_index) = lines
+        .iter()
+        .skip(1)
+        .position(|(text, _)| *text == DELIMITER)
+        .map(|position| position + 1)
+    else {
+        found.at(
+            1,
+            "the header opened here is never closed; add a line that is exactly `---` \
+             after the last header key",
+        );
+        return stop(found);
+    };
+
+    let to_line = |(text, eol): &(&str, &str)| Line {
+        text: (*text).to_owned(),
+        eol: (*eol).to_owned(),
+    };
+    let header_raw: Vec<Line> = lines[1..closing_index].iter().map(to_line).collect();
+    let parsed = header::parse(&header_raw, 2, &mut found);
+
+    // Everything after the closing line, as one verbatim string. Its byte
+    // offset is the sum of the lines before it.
+    let consumed: usize = lines[..=closing_index]
+        .iter()
+        .map(|(text, eol)| text.len() + eol.len())
+        .sum();
+    let rest = text[consumed..].to_owned();
+    let rest_first_line = closing_index + 2;
+
+    // §4.3, D-1: the body starts at the first non-blank line.
+    let mut body_start = rest.len();
+    let mut offset = 0;
+    for (line, eol) in split_lines(&rest) {
+        if !line.trim().is_empty() {
+            body_start = offset;
+            break;
+        }
+        offset += line.len() + eol.len();
+    }
+
+    let sections = sections::scan(&rest, rest_first_line, mode, &mut found);
+
+    let plan = parsed.header.map(|header| Plan {
+        header,
+        bom,
+        opening: to_line(&lines[0]),
+        header_lines: parsed.lines,
+        closing: to_line(&lines[closing_index]),
+        rest,
+        body_start,
+        sections,
+    });
+    Analysis {
+        plan,
+        checked: Checked {
+            problems: found,
+            ticket: parsed.ticket,
+            status: parsed.status,
+        },
     }
 }
 
