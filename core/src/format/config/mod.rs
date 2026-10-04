@@ -17,14 +17,6 @@
 //! The file is read, never written back, which is why a YAML library is
 //! acceptable here and not for the Plan header (D-1).
 
-// No command reads the config yet: the first ones are `plan validate` and
-// `init` (M1-8, M1-15). `expect` rather than `allow`, so the compiler asks for
-// this line to go once one of them does.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "read by project commands from M1-6 onward")
-)]
-
 use std::collections::BTreeMap;
 use std::fmt;
 use std::io;
