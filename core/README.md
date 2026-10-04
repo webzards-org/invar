@@ -40,7 +40,8 @@ core/src/
 ├── cli/         # one module per subcommand; arguments and `run`, no logic
 ├── format/      # invar.yaml (M1-3) and Plan parsing (M1-6); .feature later
 ├── digest/      # canonicalization and hashing (M1-1, M1-2)
-└── fs/          # path resolution, project root discovery
+├── gate/        # the checks: `plan validate` (M1-8); approve and check next
+└── fs/          # path resolution, project root discovery, Plan lookup
 ```
 
 The split between `digest/` and `format/` is deliberate: canonicalization takes
