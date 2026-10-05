@@ -1,6 +1,6 @@
 # Contract: Plan header and required sections
 
-**Version:** 1.2.1 — which command checks which rule; see §10 for what changed and why
+**Version:** 1.3.0 — what `plan approve` writes, and re-approval (OQ-1 resolved); see §10 for what changed and why
 **Status:** stable
 **Implements:** §4a (Plan document structure), §4d (Checksums), §5c (Context
 delivery), §12 (Plan lifecycle); light mode L-1, L-2, L-5
@@ -172,6 +172,36 @@ or a rebase onto a branch that upgraded one makes the Implementation context
 describe a version that is no longer installed; the tests judge whether the code
 works against what is actually installed, and a blocking check here would fire
 on every routine rebase.
+
+### 5.3 What `plan approve` writes
+
+`invar plan approve <TICKET | PATH>` is the human gate (§4a). In order:
+
+1. **Validate.** A Plan that `plan validate` rejects is refused, with the same
+   list of problems.
+2. **Compare with any earlier approval** (D-12):
+   - `Status: draft` — approve. Any values already in the approval keys are
+     overwritten.
+   - `Status: approved`, all three approval values present, and
+     `Approved-checksum` equal to the digest of the body — already approved;
+     nothing is written, and the command succeeds.
+   - `Status: approved` and the body's digest differs from `Approved-checksum`,
+     or any of the three approval values is empty — **refused**, unless
+     `--reapprove` is given; with it, approve as for a draft, replacing the
+     earlier values.
+3. **Read the approver and the date from git**, before anything is shown:
+   - `Approved-by` is `git config user.name`, run in the project root, with
+     surrounding whitespace trimmed. Unset or empty is an error, never an
+     empty field.
+   - `Approved-at` is today's date, `YYYY-MM-DD`, in the approver's local time
+     zone, as git dates a commit made now (D-13).
+4. **Print `## Acceptance criteria`** — what the code will be judged against.
+5. **Write.** `Status` becomes `approved`; `Approved-by`, `Approved-at` and
+   `Approved-checksum` get their values. `Approved-checksum` is the §4d digest
+   of the body (§4.3). Nothing else changes — not the other header lines,
+   not their comments, not the line endings, not one byte of the body.
+   `Lockfile-checksum` is left as it is (§5.2). The file is replaced
+   atomically, and refused if it changed after the criteria were printed.
 
 ## 6. Required sections
 
@@ -428,13 +458,35 @@ the one that guards the code: `plan check`, run by `invar done`. Keeping the
 two apart also means a body edited after approval surfaces as a stale
 approval from `plan check`, with its own wording, instead of as a form error.
 
+**D-12 — A changed approval is refused without `--reapprove`** (1.3.0,
+resolves OQ-1). `plan approve` on a Plan that is already approved but whose
+body no longer matches `Approved-checksum` could re-approve it and issue a new
+checksum. It does not: a body edited after approval is exactly the failure
+the checksum exists to catch, and a command that renews the approval as a
+matter of course turns that check into one more step of the routine. Asking
+for `--reapprove` makes renewing a deliberate act of someone who knows the
+text changed — and the command prints the criteria again before writing.
+The same applies to `Status: approved` with empty approval values (example
+9.3): no command recorded that approval, so there is nothing to keep, but
+writing a real one over it is still a decision about a Plan someone already
+calls approved. An approval that is still current is left alone, with or
+without the flag: re-running the command is harmless, and the original
+approver and date stay on record.
+
+**D-13 — `Approved-at` is the approver's local date, as git sees it**
+(1.3.0). D-6 makes it a date a person can check against their own memory of
+the day, and that is the local day: an approval at 00:30 in Belgrade belongs
+to that day, not to the previous one in UTC. The core reads it from git
+(`git var GIT_COMMITTER_IDENT`, with the identity overridden so a missing
+`user.email` does not matter) rather than computing it: the standard library
+has no local time zone, git already resolves it on every platform, and the
+date then matches the commit that carries the approval — `GIT_COMMITTER_DATE`
+included.
+
 ## 8. Open questions
 
-**OQ-1 — Re-approving an already approved Plan.** `plan approve` on a Plan
-whose body changed after approval: refuse and require an explicit flag, or
-re-approve and issue a new checksum? The safe default is to refuse, since a
-silent re-approval is indistinguishable from the failure mode the checksum
-exists to catch. Decide in M1-9.
+**OQ-1 — Re-approving an already approved Plan.** *Resolved in 1.3.0 by
+D-12:* refused unless `--reapprove` is given.
 
 **OQ-2 — `## Acceptance criteria` when `scenarios: true`.** Light mode
 requires it; the 1.0.0 shape for `scenarios: true` does not have it. Once
@@ -521,7 +573,9 @@ answers in `## Open questions / answers`.
 
 Only the header changes; the body is untouched, which is what makes
 `Approved-checksum` verifiable later. Light mode writes no
-`Lockfile-checksum`.
+`Lockfile-checksum`. The checksum is the real §4d digest of example 9.1's
+body; the core's tests approve 9.1 as `rade` on 2026-10-05 and compare the
+result with this header.
 
 ```markdown
 ---
@@ -530,7 +584,7 @@ Module: orders
 Status: approved
 Approved-by: rade
 Approved-at: 2026-10-05
-Approved-checksum: sha256:1f4ac0de5b7e4d2f8a9c3b1e6d0f7a25c8b4e93f1a6d2c07b5e8f43a9d1c6b20
+Approved-checksum: sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44
 ---
 ```
 
@@ -552,7 +606,8 @@ Without it nothing can detect a body edited after approval, so the Plan asserts
 an approval that cannot be checked — which is the exact state §4a's honesty
 note exists to prevent. Most likely cause: an agent writing the status itself
 instead of running `plan approve`. Reported by `plan check`; `plan validate`
-checks form only and accepts it (§5.1, D-11).
+checks form only and accepts it (§5.1, D-11); `plan approve` refuses it
+without `--reapprove` (D-12).
 
 ### 9.4 Invalid (`scenarios: true`) — missing section, and an ambiguous empty list
 
@@ -622,6 +677,25 @@ There is nothing for the developer to approve the change against, nothing for
 validate` reports it as an empty required section, naming the heading.
 
 ## 10. Version history
+
+**1.3.0 — `plan approve` (M1-9).**
+
+- New §5.3: what `plan approve` writes, where each value comes from, and in
+  what order it checks, prints and writes.
+- OQ-1 resolved by D-12: an approved Plan whose body changed — or whose
+  approval values are empty — is refused unless `--reapprove` is given; one
+  that is still current is left alone.
+- D-13: `Approved-at` is the approver's local date, read from git.
+- Example 9.2 carries the real digest of example 9.1's body instead of a
+  placeholder, and is now checked by a test.
+
+**Why:** the approval is the one point that records a person accepted the
+Plan; every later refusal rests on it. Writing down exactly what it records,
+and that it is never renewed without being asked, is what lets `plan check`
+and `done` rely on it.
+
+**Compatibility:** no Plan that was valid becomes invalid. `--reapprove` is
+new; a Plan approved before 1.3.0 is read the same way.
 
 **1.2.1 — which command checks which rule (M1-8).**
 
