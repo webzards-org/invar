@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
-use super::{Report, drafts, file, ticket};
+use super::{Report, drafts, file, spec_for};
 use crate::format::plan::{Mode, Status};
 use crate::fs::ProjectRoot;
 use crate::fs::plans::LookupError;
@@ -62,6 +62,11 @@ fn assert_mentions(report: &Report, needles: &[&str]) {
 
 fn validate(root: &ProjectRoot, spec: &Path) -> Report {
     file(root, spec, Mode::Light)
+}
+
+/// What `plan validate <TICKET>` does: look the Plan up, then validate it.
+fn ticket(root: &ProjectRoot, query: &str, mode: Mode) -> Result<Report, LookupError> {
+    Ok(file(root, &spec_for(root, query)?, mode))
 }
 
 // --- valid ------------------------------------------------------------------

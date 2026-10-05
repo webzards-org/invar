@@ -15,6 +15,7 @@ mod digest;
 mod format;
 mod fs;
 mod gate;
+mod git;
 
 use std::process::ExitCode;
 

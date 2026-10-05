@@ -80,17 +80,17 @@ pub fn file(root: &ProjectRoot, spec: &Path, mode: Mode) -> Report {
     }
 }
 
-/// Validate the Plan `query` names (a ticket id, normally).
+/// The `spec.md` that `query` names, for validating it.
 ///
-/// A match whose directory name is malformed, or that has no `spec.md`, is
-/// still validated — those are problems of the Plan, reported with the rest.
-/// Every other lookup failure (no match, several) is returned: there is no
-/// Plan to report on.
-pub fn ticket(root: &ProjectRoot, query: &str, mode: Mode) -> Result<Report, LookupError> {
+/// A match whose directory name is malformed, or that has no `spec.md`, still
+/// names a file — those are problems of the Plan, reported with the rest by
+/// [`file`]. Every other lookup failure (no match, several) is returned:
+/// there is no Plan to report on.
+pub fn spec_for(root: &ProjectRoot, query: &str) -> Result<PathBuf, LookupError> {
     match plans::find(root, query) {
-        Ok(dir) => Ok(file(root, &dir.spec_path(), mode)),
+        Ok(dir) => Ok(dir.spec_path()),
         Err(LookupError::MalformedName { path, .. } | LookupError::MissingSpec { path }) => {
-            Ok(file(root, &path.join(SPEC_FILE), mode))
+            Ok(path.join(SPEC_FILE))
         }
         Err(err) => Err(err),
     }
