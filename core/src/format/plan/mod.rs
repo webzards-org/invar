@@ -1,6 +1,6 @@
 //! The Plan: `.invar/plans/<TICKET>-<slug>/spec.md` (§4a).
 //!
-//! Implements `contracts/formats/plan-header.md` v1.2.1; section numbers and
+//! Implements `contracts/formats/plan-header.md` v1.3.0; section numbers and
 //! decision ids below (`§4.1`, `D-2`) point into it.
 //!
 //! **Reading** splits the file into four parts — opening delimiter, header,
@@ -22,15 +22,15 @@
 //! boundary is the delicate part: blank lines added or removed between the
 //! header and the body must not change it.
 
-// `plan validate` (M1-8) only checks; reading the parts of a valid Plan,
-// approving it and resetting it come with `plan approve` and
-// `decision record` (M1-9, M1-11). `expect` rather than `allow`, so the
-// compiler asks for this line to go once they do.
+// `plan validate` and `plan approve` (M1-8, M1-9) use most of it; `read`,
+// `sections` and `reset_to_draft` are for `plan check` and
+// `decision record` (M1-10, M1-11). `expect` rather than `allow`, so the
+// compiler asks for this line to go once they are used.
 #![cfg_attr(
     not(test),
     expect(
         dead_code,
-        reason = "the rest is used by the plan commands from M1-9 onward"
+        reason = "read, sections and reset_to_draft are used from M1-10 onward"
     )
 )]
 
