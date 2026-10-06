@@ -21,69 +21,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::diagnostics::Diagnostics;
-use crate::digest;
-use crate::format::plan::{Approval, Header, Mode, Plan, Status};
+use crate::format::plan::{Approval, Mode, Plan, Status};
 use crate::fs::ProjectRoot;
 
+use super::approval::{self, Prior, classify};
 use super::validate::{self, Report};
 
 #[cfg(test)]
 mod tests;
-
-/// What the header says about earlier approvals, against the body as it is
-/// now.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Prior {
-    /// `Status: draft`. Any approval values in it are overwritten.
-    Draft,
-    /// Approved, every value present, and the checksum matches the body.
-    Current { by: String, at: String },
-    /// Approved, but the body changed since: the checksum no longer matches.
-    Changed {
-        by: String,
-        at: String,
-        recorded: String,
-    },
-    /// `Status: approved` with approval values missing: no `plan approve`
-    /// wrote it (§5.1, example 9.3).
-    Unrecorded { missing: Vec<&'static str> },
-}
-
-/// Compare the header's approval with `current`, the digest of the body now.
-pub fn classify(header: &Header, current: &str) -> Prior {
-    if header.status == Status::Draft {
-        return Prior::Draft;
-    }
-    let fields = [
-        ("Approved-by", &header.approved_by),
-        ("Approved-at", &header.approved_at),
-        ("Approved-checksum", &header.approved_checksum),
-    ];
-    let missing: Vec<&'static str> = fields
-        .iter()
-        .filter(|(_, value)| value.is_none())
-        .map(|(key, _)| *key)
-        .collect();
-    let (Some(by), Some(at), Some(recorded)) = (
-        &header.approved_by,
-        &header.approved_at,
-        &header.approved_checksum,
-    ) else {
-        return Prior::Unrecorded { missing };
-    };
-    if recorded == current {
-        Prior::Current {
-            by: by.clone(),
-            at: at.clone(),
-        }
-    } else {
-        Prior::Changed {
-            by: by.clone(),
-            at: at.clone(),
-            recorded: recorded.clone(),
-        }
-    }
-}
 
 /// What `plan approve` will do.
 #[derive(Debug)]
@@ -135,7 +80,7 @@ pub fn prepare(
             problems,
         })
     })?;
-    let checksum = digest::digest(&digest::canonicalize(plan.body()));
+    let checksum = approval::body_digest(&plan);
 
     let replaces = match classify(plan.header(), &checksum) {
         Prior::Draft => None,
