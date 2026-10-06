@@ -22,15 +22,15 @@
 //! boundary is the delicate part: blank lines added or removed between the
 //! header and the body must not change it.
 
-// `plan validate` and `plan approve` (M1-8, M1-9) use most of it; `read`,
-// `sections` and `reset_to_draft` are for `plan check` and
-// `decision record` (M1-10, M1-11). `expect` rather than `allow`, so the
-// compiler asks for this line to go once they are used.
+// The plan commands (M1-8 to M1-10) use most of it. `sections` and
+// `reset_to_draft` are for `decision record` (M1-11); `read` is called only
+// by `fs::plans::open`, which has no caller yet. `expect` rather than
+// `allow`, so the compiler asks for this line to go once they are used.
 #![cfg_attr(
     not(test),
     expect(
         dead_code,
-        reason = "read, sections and reset_to_draft are used from M1-10 onward"
+        reason = "sections, reset_to_draft and read have no caller in the binary yet"
     )
 )]
 

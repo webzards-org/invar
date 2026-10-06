@@ -17,12 +17,13 @@
 //! has no Plan of its own — a single, confident, wrong match that no
 //! ambiguity check can catch.
 
-// `plan validate` and `plan approve` (M1-8, M1-9) use `find`; `open`, which
-// needs a valid Plan, is for `plan check` (M1-10). `expect` rather than
-// `allow`, so the compiler asks for this line to go once it is used.
+// The plan commands (M1-8 to M1-10) use `find`. `open` has no caller: they
+// validate first, so that every problem is reported, and then read the Plan
+// themselves. `expect` rather than `allow`, so the compiler asks for this
+// line to go once `open` is used — or it can be removed.
 #![cfg_attr(
     not(test),
-    expect(dead_code, reason = "`open` is used by `plan check` from M1-10")
+    expect(dead_code, reason = "`open` has no caller in the binary yet")
 )]
 
 use std::fmt;
