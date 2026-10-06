@@ -7,7 +7,8 @@
 
 use anyhow::{Context as _, Result};
 
-use crate::gate::approve::{self, ApproveError, Decision, Prior};
+use crate::gate::approval::Prior;
+use crate::gate::approve::{self, ApproveError, Decision};
 use crate::git;
 
 use super::target;
