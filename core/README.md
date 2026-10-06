@@ -40,7 +40,7 @@ core/src/
 ├── cli/         # one module per subcommand; arguments and `run`, no logic
 ├── format/      # invar.yaml (M1-3) and Plan parsing (M1-6); .feature later
 ├── digest/      # canonicalization and hashing (M1-1, M1-2)
-├── gate/        # the checks: `plan validate`, `plan approve` (M1-8, M1-9)
+├── gate/        # the checks: `plan validate`, `approve`, `check`, `guard` (M1-8–10)
 ├── git/         # the few questions asked of `git`, run as a command
 └── fs/          # path resolution, project root discovery, Plan lookup
 ```
