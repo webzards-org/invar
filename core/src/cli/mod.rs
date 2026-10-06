@@ -2,14 +2,20 @@
 //!
 //! One module per subcommand. A subcommand module owns its arguments and a
 //! `run` function; it does not own the logic — that lives in `digest`,
-//! `format`, `gate` and `git`. Keeping the split means a command can be called
-//! from a test, from CI or from a hook and behave identically (§13b).
+//! `format`, `gate`, `decision` and `git`. Keeping the split means a command
+//! can be called from a test, from CI or from a hook and behave identically
+//! (§13b).
 
 use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+use crate::format::config;
+use crate::format::plan::Mode;
+use crate::fs::ProjectRoot;
+
+mod decision;
 mod hash;
 mod plan;
 
@@ -38,11 +44,19 @@ pub enum Command {
     /// Work with the Plan of a ticket: `.invar/plans/<TICKET>-<slug>/spec.md`.
     #[command(subcommand)]
     Plan(plan::Command),
-    // The rest of the surface (§8) arrives with M1:
-    //   scenario validate | confirm      later (scenarios mode)
-    //   init                             M1-13
-    //   doctor, context, generate,
-    //   lint, decision, clean-spec       M2+
+    /// Record and read the decision log: `.invar/decisions/`.
+    ///
+    /// What was built and why — or why it could not be — kept after the Plan
+    /// is gone, for the planner to read next time.
+    #[command(subcommand)]
+    Decision(decision::Command),
+    // The rest of M1 (docs/TASKS-M1.md):
+    //   done                             M1-12
+    //   clean-spec                       M1-13
+    //   context show                     M1-14
+    //   init                             M1-15
+    //   pr-body                          M1-16
+    // Later milestones: scenario validate | confirm, generate, lint, doctor.
 }
 
 impl Cli {
@@ -52,6 +66,17 @@ impl Cli {
         match self.command {
             Command::Hash(args) => hash::run(args).map(|()| ExitCode::SUCCESS),
             Command::Plan(command) => plan::run(command),
+            Command::Decision(command) => decision::run(command).map(|()| ExitCode::SUCCESS),
         }
     }
+}
+
+/// Read `invar.yaml` for a command: warnings to stderr, `scenarios: true`
+/// refused (invar-yaml.md §3.1).
+fn mode(root: &ProjectRoot) -> Result<Mode> {
+    let loaded = config::load_for_command(root)?;
+    for warning in &loaded.warnings {
+        eprintln!("warning: {}: {warning}", loaded.path.display());
+    }
+    Ok(Mode::of(&loaded.config))
 }
