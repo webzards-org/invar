@@ -25,7 +25,9 @@ fn main() -> ExitCode {
     let cli = cli::Cli::parse();
 
     match cli.run() {
-        Ok(()) => ExitCode::SUCCESS,
+        // Most commands exit 0 on success; `plan guard` chooses its own code
+        // (2 denies a tool call to a `PreToolUse` hook).
+        Ok(code) => code,
         Err(err) => {
             // `{err:#}` prints the whole anyhow context chain on one line:
             // "reading the Plan: opening spec.md: No such file or directory".
