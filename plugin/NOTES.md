@@ -431,3 +431,128 @@ The spike is done when all of these hold. **All verified 2026-09-30.**
 
 That last one is the point of the whole exercise: whatever the hook does, the
 developer's work continues.
+
+## 11. How a `PreToolUse` hook denies a tool call — verified for M1-10
+
+Verified on **2026-10-06 against Claude Code 2.1.291**, by running `claude -p`
+in a throwaway project whose `.claude/settings.json` registered a
+`PreToolUse` hook on `Write|Edit`, and asking Claude to write a file. Not read
+from the docs: each row below is what happened.
+
+### What blocks, and what Claude is shown
+
+| Hook output | Tool call | What Claude saw |
+|---|---|---|
+| `hookSpecificOutput.permissionDecision: "deny"` + `permissionDecisionReason`, **exit 0** | **Blocked** | `PreToolUse:Write hook error: <permissionDecisionReason>` |
+| Reason on stderr, **exit 2**, no JSON | **Blocked** | `PreToolUse:Write hook error: [<hook command>]: <stderr>` |
+| JSON deny **and** stderr **and** exit 2 | **Blocked** | the JSON `permissionDecisionReason` (stderr not shown to Claude) |
+| stderr, **exit 1** | Ran | nothing — a non-blocking error |
+| Plain text that is not JSON on stdout, exit 0 | Ran | nothing |
+| `{"systemMessage": "…"}`, exit 0 | Ran | nothing; the **developer** sees `PreToolUse:Write says: …` |
+
+So both documented mechanisms work, and they agree: **exit 2** blocks, and
+**`permissionDecision: "deny"`** blocks. With both present, Claude is given
+the JSON reason. Exit 1, a crash and malformed stdout all let the call
+through — a broken `PreToolUse` hook fails *open*, the same property §9
+verified for `PostToolUse`.
+
+Two details worth knowing:
+
+- The transcript calls a deliberate deny a **"hook error"**. Nothing can be
+  done about the prefix, so the reason has to carry the meaning on its own:
+  what the file is, why it is off limits, and what to do instead.
+- The top-level `decision: "block"` / `"approve"` fields of older versions
+  are not the `PreToolUse` mechanism any more; `hookSpecificOutput` is.
+
+**Never answer `"allow"`.** Per the hooks documentation, `permissionDecision:
+"allow"` skips the developer's permission prompt for that call. A guard that
+only wants to *not object* must print nothing at all and exit 0, which leaves
+the call to the normal permission flow. (Taken from the docs, not exercised —
+there is no reason to.)
+
+### What the hook receives
+
+The payloads, as captured from stdin:
+
+```json
+{
+  "session_id": "…", "transcript_path": "…", "cwd": "/tmp/claude-0/hookexp",
+  "scratchpad_dir": "…", "prompt_id": "…", "permission_mode": "default",
+  "effort": { "level": "medium" },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
+  "tool_input": { "file_path": "/tmp/claude-0/hookexp/target.txt", "content": "hi" },
+  "tool_use_id": "toolu_…"
+}
+```
+
+`Edit` sends `"tool_input": { "file_path", "old_string", "new_string",
+"replace_all" }`. In both, **`file_path` was absolute**; `cwd` is there to
+resolve one that is not. Fields come and go between versions (`prompt_id`,
+`effort` and `scratchpad_dir` are recent), so a reader should look up what it
+needs and ignore the rest — which is what `invar plan guard` does.
+
+### What `invar plan guard` does with this (M1-10)
+
+| Verdict | stdout | stderr | Exit |
+|---|---|---|---|
+| **Deny** — the path is an approved Plan's `spec.md` | `hookSpecificOutput` with `permissionDecision: "deny"` and the reason | the reason | **2** |
+| **Pass** — a draft Plan, any other file | nothing | nothing | 0 |
+| **Unsure** — input it cannot make sense of | `{"systemMessage": "invar plan guard: …; the edit is allowed"}` | the same text | 0 |
+
+Deny uses both signals on purpose: either blocks on its own in Claude Code,
+and exit 2 also makes the verdict obvious to a script or a CI test that pipes
+JSON in.
+
+The hook for M1-17, in exec form (§7):
+
+```json
+{
+  "matcher": "Write|Edit",
+  "hooks": [
+    {
+      "type": "command",
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/invar",
+      "args": ["plan", "guard"],
+      "timeout": 10
+    }
+  ]
+}
+```
+
+Set the timeout: the documented default for a command hook is 600 seconds.
+
+### End to end, with the real binary
+
+Same setup, with the hook running `invar plan guard` against a project holding
+the contract's example Plan:
+
+- **`Edit` on the approved Plan: denied.** Claude reported
+  `PreToolUse:Edit hook error: .invar/plans/SHOP-214-cancel-unpaid-order/spec.md
+  is the approved Plan for SHOP-214. …`, and the file was byte-identical
+  afterwards.
+- **`Edit` on the same Plan set back to `draft`: went through.**
+- **`sed -i` on the approved Plan through `Bash`: went through** — the hook
+  never fired, exactly as §8 predicted. **`invar plan check SHOP-214` then
+  refused** with "the Plan for SHOP-214 changed after it was approved" and
+  exit 1.
+
+That last pair is the design in one line: the guard is a convenience that
+saves the agent a wasted edit; `Approved-checksum`, checked by `plan check`
+and `done`, is the boundary. `invar plan guard --help` says so.
+
+### Reproducing
+
+```bash
+mkdir -p /tmp/guard-test/.claude && cd /tmp/guard-test
+# a project with invar.yaml and an approved Plan, then:
+cat > .claude/settings.json <<EOF
+{"hooks":{"PreToolUse":[{"matcher":"Write|Edit","hooks":[
+  {"type":"command","command":"$(command -v invar)","args":["plan","guard"],"timeout":10}]}]}}
+EOF
+claude -p "Use the Edit tool to change 403 to 409 in .invar/plans/<dir>/spec.md; \
+  if it is blocked, report the message verbatim" --allowedTools Edit,Read < /dev/null
+```
+
+`< /dev/null` matters: without it `claude -p` waits three seconds for stdin
+and prints a warning.

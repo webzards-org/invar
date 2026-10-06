@@ -5,5 +5,8 @@
 //! invoked — the CLI, a hook and CI call the same code and get the same answer
 //! (§13b). The CLI modules only parse arguments and print.
 
+pub mod approval;
 pub mod approve;
+pub mod check;
+pub mod guard;
 pub mod validate;

@@ -1,0 +1,228 @@
+//! End-to-end tests for `invar plan guard` (M1-10): the real binary, with a
+//! `PreToolUse` payload piped into it the way Claude Code does. The payload
+//! shapes are the ones Claude Code 2.1.291 sent (`plugin/NOTES.md` §11).
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use assert_cmd::Command;
+use predicates::prelude::*;
+use predicates::str::contains;
+use serde_json::{Value, json};
+use tempfile::TempDir;
+
+const SPEC: &str = ".invar/plans/SHOP-214-cancel/spec.md";
+
+const APPROVED: &str = "---\nTicket: SHOP-214\nModule: orders\nStatus: approved\n\
+    Approved-by: rade\nApproved-at: 2026-10-05\n\
+    Approved-checksum: sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44\n\
+    ---\n\n## Ticket\nSHOP-214\n";
+
+struct Project {
+    dir: TempDir,
+}
+
+impl Project {
+    fn new(plan: &str) -> Self {
+        let project = Self {
+            dir: tempfile::tempdir().unwrap(),
+        };
+        fs::write(project.root().join("invar.yaml"), "").unwrap();
+        let spec = project.root().join(SPEC);
+        fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        fs::write(spec, plan).unwrap();
+        project
+    }
+
+    fn root(&self) -> PathBuf {
+        self.dir.path().canonicalize().unwrap()
+    }
+
+    fn path(&self, relative: &str) -> String {
+        self.root().join(relative).display().to_string()
+    }
+}
+
+/// What Claude Code sends for `Edit` (verified payload shape).
+fn edit(cwd: &Path, file_path: &str) -> String {
+    json!({
+        "session_id": "8d4316a8-82ea-5dc0-a7e0-18f9e2621b46",
+        "transcript_path": "/root/.claude/projects/x/8d4316a8.jsonl",
+        "cwd": cwd,
+        "permission_mode": "default",
+        "effort": { "level": "medium" },
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": file_path,
+            "old_string": "refused with 403",
+            "new_string": "refused with 409",
+            "replace_all": false
+        },
+        "tool_use_id": "toolu_01Kpa9ZF1iydktghpFB6qdt1"
+    })
+    .to_string()
+}
+
+/// What Claude Code sends for `Write`.
+fn write(cwd: &Path, file_path: &str) -> String {
+    json!({
+        "cwd": cwd,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": { "file_path": file_path, "content": "hi" },
+    })
+    .to_string()
+}
+
+fn guard(stdin: impl Into<Vec<u8>>) -> assert_cmd::assert::Assert {
+    Command::cargo_bin("invar")
+        .unwrap()
+        .args(["plan", "guard"])
+        .write_stdin(stdin)
+        .assert()
+}
+
+// --- deny -----------------------------------------------------------------------
+
+#[test]
+fn an_edit_to_an_approved_plan_is_denied() {
+    let project = Project::new(APPROVED);
+    let assert = guard(edit(&project.root(), &project.path(SPEC)))
+        .code(2)
+        .stderr(contains(format!(
+            "{SPEC} is the approved Plan for SHOP-214"
+        )));
+
+    // stdout is exactly one JSON object, the PreToolUse deny decision.
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(stdout.lines().count(), 1, "{stdout}");
+    let output: Value = serde_json::from_str(&stdout).unwrap();
+    let decision = &output["hookSpecificOutput"];
+    assert_eq!(decision["hookEventName"], "PreToolUse");
+    assert_eq!(decision["permissionDecision"], "deny");
+    let reason = decision["permissionDecisionReason"].as_str().unwrap();
+    assert!(reason.contains("approved Plan for SHOP-214"), "{reason}");
+    assert!(reason.contains("--reapprove"), "{reason}");
+}
+
+#[test]
+fn a_write_over_an_approved_plan_is_denied() {
+    let project = Project::new(APPROVED);
+    guard(write(&project.root(), &project.path(SPEC))).code(2);
+}
+
+#[test]
+fn a_relative_path_is_read_from_the_payloads_cwd() {
+    let project = Project::new(APPROVED);
+    guard(edit(&project.root(), SPEC)).code(2);
+    guard(edit(
+        &project.root().join(".invar"),
+        "plans/SHOP-214-cancel/spec.md",
+    ))
+    .code(2);
+}
+
+#[test]
+fn an_approved_plan_with_crlf_is_denied_too() {
+    let project = Project::new(&APPROVED.replace('\n', "\r\n"));
+    guard(edit(&project.root(), &project.path(SPEC))).code(2);
+}
+
+// --- allow ----------------------------------------------------------------------
+
+#[test]
+fn an_edit_to_a_draft_plan_passes_silently() {
+    let project = Project::new(&APPROVED.replace("Status: approved", "Status: draft"));
+    guard(edit(&project.root(), &project.path(SPEC)))
+        .code(0)
+        .stdout("")
+        .stderr("");
+}
+
+#[test]
+fn any_other_file_passes_silently() {
+    let project = Project::new(APPROVED);
+    for path in [
+        project.path("app/Models/Order.php"),
+        project.path(".invar/plans/SHOP-214-cancel/notes.md"),
+        project.path(".invar/plans/SHOP-300-new/spec.md"),
+        "/tmp/somewhere/else.txt".to_owned(),
+    ] {
+        guard(write(&project.root(), &path))
+            .code(0)
+            .stdout("")
+            .stderr("");
+    }
+}
+
+#[test]
+fn the_guard_never_answers_allow() {
+    // "allow" would skip the developer's own permission prompt.
+    let project = Project::new(APPROVED);
+    for stdin in [
+        edit(&project.root(), &project.path("app/x.php")),
+        "garbage".to_owned(),
+    ] {
+        guard(stdin).stdout(contains("\"allow\"").not());
+    }
+}
+
+// --- broken input: allow, and say why --------------------------------------------
+
+#[test]
+fn malformed_input_allows_the_edit_and_reports_the_problem() {
+    for (stdin, problem) in [
+        ("", "no hook input on stdin"),
+        ("not json", "the hook input is not valid JSON"),
+        (
+            "{\"tool_name\": \"Edit\", ",
+            "the hook input is not valid JSON",
+        ),
+        ("{}", "has no `tool_input.file_path`"),
+        (
+            "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"}}",
+            "for Bash has no `tool_input.file_path`",
+        ),
+    ] {
+        let assert = guard(stdin)
+            .code(0)
+            .stderr(contains(problem).and(contains("the edit is allowed")));
+        let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+        let output: Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|err| panic!("{stdin:?}: stdout is not JSON ({err}): {stdout}"));
+        let message = output["systemMessage"].as_str().unwrap();
+        assert!(message.starts_with("invar plan guard: "), "{message}");
+        assert!(message.contains(problem), "{stdin:?}: {message}");
+        assert!(output.get("hookSpecificOutput").is_none(), "{stdout}");
+    }
+}
+
+#[test]
+fn an_unreadable_plan_allows_the_edit_and_reports_the_problem() {
+    let project = Project::new(APPROVED);
+    fs::write(
+        project.root().join(SPEC),
+        b"---\nStatus: approved\xff\n---\n",
+    )
+    .unwrap();
+    guard(edit(&project.root(), &project.path(SPEC)))
+        .code(0)
+        .stdout(contains("systemMessage").and(contains("not valid UTF-8")));
+}
+
+// --- the help says what the guard is not --------------------------------------------
+
+#[test]
+fn the_help_says_the_checksum_is_the_boundary() {
+    Command::cargo_bin("invar")
+        .unwrap()
+        .args(["plan", "guard", "--help"])
+        .assert()
+        .success()
+        .stdout(contains(
+            "The guard is a convenience; the checksum is the boundary",
+        ))
+        .stdout(contains("never sees a file changed through `Bash`"))
+        .stdout(contains("invar plan check"));
+}

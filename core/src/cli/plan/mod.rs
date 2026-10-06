@@ -1,5 +1,7 @@
 //! `invar plan …`: the Plan of one ticket (§4a).
 
+use std::process::ExitCode;
+
 use anyhow::Result;
 use clap::Subcommand;
 
@@ -8,6 +10,8 @@ use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
 
 mod approve;
+mod check;
+mod guard;
 mod target;
 mod validate;
 
@@ -31,12 +35,39 @@ pub enum Command {
     /// An approved Plan whose body changed since is refused unless
     /// `--reapprove` is given; one that is unchanged is left as it is.
     Approve(approve::Args),
+
+    /// Check that a Plan is approved and unchanged since: the gate before any
+    /// code is written.
+    ///
+    /// Run by the agent at the start of Phase 2, and by `invar done`. Passes
+    /// only an approved Plan whose body still matches `Approved-checksum`;
+    /// refuses a draft, a Plan changed after approval, and an approval no
+    /// `invar plan approve` recorded. Exits non-zero on refusal.
+    Check(check::Args),
+
+    /// Deny `Write`/`Edit` to an approved Plan — for a `PreToolUse` hook.
+    ///
+    /// Reads the hook's JSON from stdin and looks at `tool_input.file_path`.
+    /// An approved Plan's `spec.md` is denied (exit 2, with the reason as JSON
+    /// on stdout and as text on stderr); a draft Plan and every other file
+    /// pass silently (exit 0). Input it cannot make sense of passes too, with
+    /// the problem reported: a broken guard must not halt a session.
+    ///
+    /// The guard is a convenience; the checksum is the boundary. A hook on
+    /// `Write|Edit` never sees a file changed through `Bash` — a heredoc,
+    /// `sed -i`, `git checkout`. `invar plan check` and `invar done` catch
+    /// every such change through `Approved-checksum`. Passing the guard proves
+    /// nothing about a Plan; passing `plan check` does.
+    Guard(guard::Args),
 }
 
-pub fn run(command: Command) -> Result<()> {
+pub fn run(command: Command) -> Result<ExitCode> {
+    let done = |result: Result<()>| result.map(|()| ExitCode::SUCCESS);
     match command {
-        Command::Validate(args) => validate::run(args),
-        Command::Approve(args) => approve::run(args),
+        Command::Validate(args) => done(validate::run(args)),
+        Command::Approve(args) => done(approve::run(args)),
+        Command::Check(args) => done(check::run(args)),
+        Command::Guard(args) => guard::run(args),
     }
 }
 

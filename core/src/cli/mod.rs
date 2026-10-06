@@ -5,6 +5,8 @@
 //! `format`, `gate` and `git`. Keeping the split means a command can be called
 //! from a test, from CI or from a hook and behave identically (§13b).
 
+use std::process::ExitCode;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
@@ -44,9 +46,11 @@ pub enum Command {
 }
 
 impl Cli {
-    pub fn run(self) -> Result<()> {
+    /// Run the command. Most succeed with exit 0; `plan guard` picks its own
+    /// code, because a hook reads meaning into it.
+    pub fn run(self) -> Result<ExitCode> {
         match self.command {
-            Command::Hash(args) => hash::run(args),
+            Command::Hash(args) => hash::run(args).map(|()| ExitCode::SUCCESS),
             Command::Plan(command) => plan::run(command),
         }
     }
