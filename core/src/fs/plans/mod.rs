@@ -17,10 +17,10 @@
 //! has no Plan of its own — a single, confident, wrong match that no
 //! ambiguity check can catch.
 
-// The plan commands (M1-8 to M1-10) use `find`. `open` has no caller: they
-// validate first, so that every problem is reported, and then read the Plan
-// themselves. `expect` rather than `allow`, so the compiler asks for this
-// line to go once `open` is used — or it can be removed.
+// The plan and decision commands (M1-8 to M1-11) use `find`. `open` has no
+// caller: they validate first, so that every problem is reported, and then
+// read the Plan themselves. `expect` rather than `allow`, so the compiler
+// asks for this line to go once `open` is used — or it can be removed.
 #![cfg_attr(
     not(test),
     expect(dead_code, reason = "`open` has no caller in the binary yet")

@@ -26,15 +26,12 @@
 //!
 //! Arrived with M1-4. Plan lookup (M1-7) and `init` (M1-15) build on it.
 
-// `plan validate` (M1-8) finds the root; the decision and output
-// directories, and `join`, are for later commands. `expect` rather than
+// The plan and decision commands (M1-8 to M1-11) use it; the output
+// directory and `join` are for later commands. `expect` rather than
 // `allow`, so the compiler asks for this line to go once they are used.
 #![cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "decisions_dir, out_dir and join are used by later commands"
-    )
+    expect(dead_code, reason = "out_dir and join are used by later commands")
 )]
 
 use std::ffi::OsString;

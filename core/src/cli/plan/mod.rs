@@ -5,9 +5,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::Subcommand;
 
-use crate::format::config;
-use crate::format::plan::Mode;
-use crate::fs::ProjectRoot;
+use super::mode;
 
 mod approve;
 mod check;
@@ -69,14 +67,4 @@ pub fn run(command: Command) -> Result<ExitCode> {
         Command::Check(args) => done(check::run(args)),
         Command::Guard(args) => guard::run(args),
     }
-}
-
-/// Read `invar.yaml` for a plan command: warnings to stderr, `scenarios: true`
-/// refused (invar-yaml.md §3.1).
-fn mode(root: &ProjectRoot) -> Result<Mode> {
-    let loaded = config::load_for_command(root)?;
-    for warning in &loaded.warnings {
-        eprintln!("warning: {}: {warning}", loaded.path.display());
-    }
-    Ok(Mode::of(&loaded.config))
 }

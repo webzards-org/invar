@@ -38,11 +38,13 @@ No async runtime. Dependencies stay few and boring.
 core/src/
 ├── main.rs      # argument parsing and dispatch only
 ├── cli/         # one module per subcommand; arguments and `run`, no logic
-├── format/      # invar.yaml (M1-3) and Plan parsing (M1-6); .feature later
+├── format/      # invar.yaml (M1-3), Plan (M1-6), decision entries (M1-11); .feature later
 ├── digest/      # canonicalization and hashing (M1-1, M1-2)
 ├── gate/        # the checks: `plan validate`, `approve`, `check`, `guard` (M1-8–10)
-├── git/         # the few questions asked of `git`, run as a command
-└── fs/          # path resolution, project root discovery, Plan lookup
+├── decision/    # the decision log: `record` (insert-only, `failed` resets the Plan) and `log` (M1-11)
+├── git/         # the few questions asked of `git`, run as a command: user, clock
+├── fs/          # path resolution, project root discovery, Plan lookup
+└── calendar.rs  # civil-date arithmetic for git's clock and entry timestamps
 ```
 
 The split between `digest/` and `format/` is deliberate: canonicalization takes

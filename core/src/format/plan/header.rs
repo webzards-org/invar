@@ -7,6 +7,7 @@
 //! part a command ever changes, and only that part is rewritten.
 
 use crate::diagnostics::Diagnostics;
+use crate::format::values::{is_module, is_ticket};
 
 use super::Line;
 
@@ -257,6 +258,9 @@ pub(super) struct Parsed {
     pub(super) ticket: Option<(String, usize)>,
     /// `Status`, whenever it is `draft` or `approved`, likewise.
     pub(super) status: Option<Status>,
+    /// `Module`, whenever it has the shape of a module name, likewise — what
+    /// `decision record` files an entry under (M1-11).
+    pub(super) module: Option<String>,
 }
 
 /// Parse the lines between the delimiters. `first_line` is the 1-based number
@@ -390,34 +394,20 @@ pub(super) fn parse(lines: &[Line], first_line: usize, found: &mut Diagnostics) 
     let ticket = ticket
         .filter(|(value, _)| is_ticket(value))
         .map(|(value, line)| (value.to_owned(), line));
+    let module = module
+        .map(|(value, _)| value)
+        .filter(|value| is_module(value))
+        .map(str::to_owned);
     Parsed {
         lines: parsed,
         header,
         ticket,
         status,
+        module,
     }
 }
 
 // --- value formats (§5) --------------------------------------------------------
-
-/// `^[A-Z][A-Z0-9]*-[0-9]+$`
-pub(super) fn is_ticket(value: &str) -> bool {
-    let Some((prefix, number)) = value.split_once('-') else {
-        return false;
-    };
-    let mut prefix_chars = prefix.chars();
-    prefix_chars.next().is_some_and(|c| c.is_ascii_uppercase())
-        && prefix_chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
-        && !number.is_empty()
-        && number.chars().all(|c| c.is_ascii_digit())
-}
-
-/// `^[a-z][a-z0-9_]*$` — which `global` satisfies too.
-fn is_module(value: &str) -> bool {
-    let mut chars = value.chars();
-    chars.next().is_some_and(|c| c.is_ascii_lowercase())
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-}
 
 /// `YYYY-MM-DD`, and a day that exists.
 pub(super) fn is_date(value: &str) -> bool {

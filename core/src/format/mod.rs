@@ -5,7 +5,7 @@
 //!
 //! - `invar.yaml` (§6)                           — M1-3, [`config`]
 //! - the Plan header and required sections (§4a) — M1-6, [`plan`]
-//! - decision entries (§7)                       — M1-11
+//! - decision entries (§7)                       — M1-11, [`decision`]
 //! - the `.feature` metadata block (§4)          — the feature-tests milestone
 //!
 //! The specifications live in `contracts/formats/`; this module implements
@@ -23,4 +23,6 @@
 //! (§14.2).
 
 pub mod config;
+pub mod decision;
 pub mod plan;
+pub mod values;

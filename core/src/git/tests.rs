@@ -1,10 +1,11 @@
-//! Tests for the date arithmetic. Running `git` itself is covered by the CLI
-//! tests, which control its configuration through the environment.
+//! Tests for the date and time arithmetic. Running `git` itself is covered
+//! by the CLI tests, which control its configuration through the environment.
 
-use super::{civil_from_days, date_from_ident};
+use super::Instant;
+use crate::calendar::civil_from_days;
 
 fn date(ident: &str) -> Option<String> {
-    date_from_ident(ident)
+    Instant::from_ident(ident).map(Instant::local_date)
 }
 
 #[test]
@@ -103,4 +104,30 @@ fn civil_from_days_agrees_with_counting_day_by_day() {
             (year + 1, 1, 1)
         };
     }
+}
+
+#[test]
+fn an_instant_renders_local_with_its_offset_and_utc_for_filenames() {
+    // 2026-10-06T16:37:12Z, read in Belgrade.
+    let belgrade = Instant::from_ident("rade <r@x> 1791304632 +0200").unwrap();
+    assert_eq!(belgrade.local_rfc3339(), "2026-10-06T18:37:12+02:00");
+    assert_eq!(belgrade.utc_stamp(), "2026-10-06-163712");
+    assert_eq!(belgrade.local_date(), "2026-10-06");
+
+    // The same instant in New York, and in a half-hour zone.
+    let new_york = Instant::from_ident("x <x> 1791304632 -0400").unwrap();
+    assert_eq!(new_york.local_rfc3339(), "2026-10-06T12:37:12-04:00");
+    assert_eq!(new_york.utc_stamp(), "2026-10-06-163712");
+    let delhi = Instant::from_ident("x <x> 1791304632 +0530").unwrap();
+    assert_eq!(delhi.local_rfc3339(), "2026-10-06T22:07:12+05:30");
+    let utc = Instant::from_ident("x <x> 1791304632 +0000").unwrap();
+    assert_eq!(utc.local_rfc3339(), "2026-10-06T16:37:12+00:00");
+
+    // Midnight boundaries in both renderings.
+    let late = Instant::from_ident("x <x> 1791323999 +0200").unwrap(); // 21:59:59Z
+    assert_eq!(late.local_rfc3339(), "2026-10-06T23:59:59+02:00");
+    assert_eq!(late.utc_stamp(), "2026-10-06-215959");
+    let early = Instant::from_ident("x <x> 1791324000 +0200").unwrap(); // 22:00:00Z
+    assert_eq!(early.local_rfc3339(), "2026-10-07T00:00:00+02:00");
+    assert_eq!(early.utc_stamp(), "2026-10-06-220000");
 }
