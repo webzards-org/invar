@@ -1,0 +1,207 @@
+//! Tests for `plan check` (M1-10): exactly one state passes.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use tempfile::TempDir;
+
+use super::{CheckError, check};
+use crate::format::plan::Mode;
+use crate::fs::ProjectRoot;
+use crate::gate::approve::{Decision, prepare};
+
+fn contract_example(number: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/plan-header.md");
+    let text = fs::read_to_string(path).unwrap();
+    let after = text.split_once(&format!("### {number} ")).unwrap().1;
+    let body = after.split_once("```markdown\n").unwrap().1;
+    body.split_once("\n```\n").unwrap().0.to_owned() + "\n"
+}
+
+fn project(text: &str) -> (TempDir, ProjectRoot, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("invar.yaml"), "").unwrap();
+    let root = ProjectRoot::for_test(dir.path());
+    let plan_dir = root.plans_dir().join("SHOP-214-cancel-unpaid-order");
+    fs::create_dir_all(&plan_dir).unwrap();
+    let spec = plan_dir.join("spec.md");
+    fs::write(&spec, text).unwrap();
+    (dir, root, spec)
+}
+
+/// Approve the Plan the way `plan approve` does.
+fn approve(root: &ProjectRoot, spec: &Path) {
+    let Decision::Approve(pending) = prepare(root, spec, Mode::Light, false).unwrap() else {
+        panic!("expected an approval");
+    };
+    pending.commit("rade".into(), "2026-10-05".into()).unwrap();
+}
+
+fn refusal(root: &ProjectRoot, spec: &Path) -> CheckError {
+    match check(root, spec, Mode::Light) {
+        Err(err) => err,
+        Ok(approved) => panic!("expected a refusal, got {approved:?}"),
+    }
+}
+
+/// Example 9.1's body under example 9.2's header.
+fn example_9_2_in_full() -> String {
+    let body = contract_example("9.1")
+        .split_once("\n---\n")
+        .unwrap()
+        .1
+        .to_owned();
+    contract_example("9.2") + &body
+}
+
+// --- passes ---------------------------------------------------------------------
+
+#[test]
+fn the_contracts_approved_example_passes() {
+    let (_dir, root, spec) = project(&example_9_2_in_full());
+    let approved = check(&root, &spec, Mode::Light).unwrap();
+    assert_eq!(approved.ticket, "SHOP-214");
+    assert_eq!(approved.by, "rade");
+    assert_eq!(approved.at, "2026-10-05");
+    assert_eq!(
+        approved.checksum,
+        "sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44"
+    );
+    assert_eq!(approved.spec, spec);
+}
+
+#[test]
+fn a_plan_just_approved_passes() {
+    let (_dir, root, spec) = project(&contract_example("9.1"));
+    approve(&root, &spec);
+    assert!(check(&root, &spec, Mode::Light).is_ok());
+}
+
+#[test]
+fn an_approved_plan_checked_out_with_crlf_still_passes() {
+    // Approved on LF, then `core.autocrlf=true` on another machine.
+    let (_dir, root, spec) = project(&contract_example("9.1"));
+    approve(&root, &spec);
+    let crlf = fs::read_to_string(&spec).unwrap().replace('\n', "\r\n");
+    fs::write(&spec, crlf).unwrap();
+    let approved = check(&root, &spec, Mode::Light).unwrap();
+    assert_eq!(
+        approved.checksum,
+        "sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44"
+    );
+}
+
+#[test]
+fn trailing_whitespace_and_blank_lines_before_the_body_do_not_matter() {
+    // §4d canonicalization and D-1: neither changes the body's digest.
+    let text = example_9_2_in_full()
+        .replace("## Scope\n", "## Scope   \n")
+        .replace("\n---\n\n## Ticket", "\n---\n\n\n\n## Ticket");
+    let (_dir, root, spec) = project(&text);
+    assert!(check(&root, &spec, Mode::Light).is_ok());
+}
+
+// --- refusals ---------------------------------------------------------------------
+
+#[test]
+fn a_draft_is_refused() {
+    let (_dir, root, spec) = project(&contract_example("9.1"));
+    match refusal(&root, &spec) {
+        CheckError::Draft { ticket, .. } => assert_eq!(ticket, "SHOP-214"),
+        other => panic!("expected Draft, got {other}"),
+    }
+    let message = refusal(&root, &spec).to_string();
+    assert!(message.contains("is still a draft"), "{message}");
+    assert!(message.contains("Do not start implementing"), "{message}");
+    assert!(
+        message.contains("`invar plan approve SHOP-214`"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_plan_changed_after_approval_is_refused_in_plain_words() {
+    let (_dir, root, spec) = project(&example_9_2_in_full());
+    let edited = fs::read_to_string(&spec)
+        .unwrap()
+        .replace("refused with 403", "refused with 409");
+    fs::write(&spec, edited).unwrap();
+    match refusal(&root, &spec) {
+        CheckError::Changed(stale) => {
+            assert_eq!(
+                (stale.by.as_str(), stale.at.as_str()),
+                ("rade", "2026-10-05")
+            );
+            assert_ne!(stale.recorded, stale.current);
+            assert_eq!(stale.ticket, "SHOP-214");
+        }
+        other => panic!("expected Changed, got {other}"),
+    }
+    let message = refusal(&root, &spec).to_string();
+    assert!(
+        message.contains("the Plan for SHOP-214 changed after it was approved"),
+        "{message}"
+    );
+    assert!(message.contains("--reapprove"), "{message}");
+}
+
+#[test]
+fn an_approval_without_a_checksum_is_refused() {
+    // Example 9.3's header, on a body that is valid in form.
+    let text = contract_example("9.1")
+        .replace("Status: draft", "Status: approved")
+        .replace("Approved-by:", "Approved-by: rade")
+        .replace("Approved-at:", "Approved-at: 2026-10-05");
+    let (_dir, root, spec) = project(&text);
+    match refusal(&root, &spec) {
+        CheckError::Unrecorded { missing, .. } => assert_eq!(missing, ["Approved-checksum"]),
+        other => panic!("expected Unrecorded, got {other}"),
+    }
+    let message = refusal(&root, &spec).to_string();
+    assert!(
+        message.contains("`Approved-checksum` is empty: no `invar plan approve` recorded"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_plan_that_is_not_valid_is_refused_with_its_problems() {
+    let text = example_9_2_in_full().replace("## Intent\n", "## Purpose\n");
+    let (_dir, root, spec) = project(&text);
+    match refusal(&root, &spec) {
+        CheckError::Invalid(report) => assert!(
+            report
+                .problems
+                .to_string()
+                .contains("missing required section `## Intent`"),
+            "{}",
+            report.problems
+        ),
+        other => panic!("expected Invalid, got {other}"),
+    }
+}
+
+#[test]
+fn a_header_only_change_that_keeps_the_body_still_passes() {
+    // The checksum covers the body, not the header (§4.3): a comment added
+    // to the header is not a change to what was approved.
+    let text = example_9_2_in_full().replace("Module: orders\n", "Module: orders  # billing too\n");
+    let (_dir, root, spec) = project(&text);
+    assert!(check(&root, &spec, Mode::Light).is_ok());
+}
+
+#[test]
+fn a_header_ticket_moved_away_from_its_directory_is_refused() {
+    // The checksum covers the body only, so this edit leaves it intact; the
+    // form check is what catches it.
+    let text = example_9_2_in_full().replace("Ticket: SHOP-214\n", "Ticket: SHOP-215\n");
+    let (_dir, root, spec) = project(&text);
+    match refusal(&root, &spec) {
+        CheckError::Invalid(report) => assert!(
+            report.problems.to_string().contains("`Ticket: SHOP-215`"),
+            "{}",
+            report.problems
+        ),
+        other => panic!("expected Invalid, got {other}"),
+    }
+}
