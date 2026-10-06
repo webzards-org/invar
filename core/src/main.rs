@@ -9,7 +9,9 @@
 //! code. `invar generate` must fail loudly on any violation (§10), which starts
 //! with the exit code being right.
 
+mod calendar;
 mod cli;
+mod decision;
 mod diagnostics;
 mod digest;
 mod format;
