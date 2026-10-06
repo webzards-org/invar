@@ -22,15 +22,15 @@
 //! boundary is the delicate part: blank lines added or removed between the
 //! header and the body must not change it.
 
-// The plan commands (M1-8 to M1-10) use most of it. `sections` and
-// `reset_to_draft` are for `decision record` (M1-11); `read` is called only
-// by `fs::plans::open`, which has no caller yet. `expect` rather than
-// `allow`, so the compiler asks for this line to go once they are used.
+// The plan and decision commands (M1-8 to M1-11) use most of it. `sections`
+// has no caller yet; `read` is called only by `fs::plans::open`, which has
+// none either. `expect` rather than `allow`, so the compiler asks for this
+// line to go once they are used.
 #![cfg_attr(
     not(test),
     expect(
         dead_code,
-        reason = "sections, reset_to_draft and read have no caller in the binary yet"
+        reason = "sections and read have no caller in the binary yet"
     )
 )]
 
@@ -263,6 +263,9 @@ pub struct Checked {
     /// The header's `Status`, when it is `draft` or `approved` — even if
     /// other fields are wrong.
     pub status: Option<Status>,
+    /// The header's `Module`, when it has the shape of a module name — even
+    /// if other fields are wrong.
+    pub module: Option<String>,
 }
 
 struct Analysis {
@@ -281,6 +284,7 @@ fn analyze(text: &str, mode: Mode) -> Analysis {
             problems: found,
             ticket: None,
             status: None,
+            module: None,
         },
     };
 
@@ -371,6 +375,7 @@ fn analyze(text: &str, mode: Mode) -> Analysis {
             problems: found,
             ticket: parsed.ticket,
             status: parsed.status,
+            module: parsed.module,
         },
     }
 }
