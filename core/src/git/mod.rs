@@ -10,6 +10,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::calendar::civil_from_days;
+
 #[cfg(test)]
 mod tests;
 
@@ -34,14 +36,21 @@ pub fn user_name(dir: &Path) -> Result<String, GitError> {
 }
 
 /// Today's date, `YYYY-MM-DD`, as git would date a commit made now in `dir`:
-/// the committer clock, in the committer's local time zone (§5.3).
+/// the committer clock, in the committer's local time zone
+/// (plan-header.md §5.3, D-13).
+pub fn today(dir: &Path) -> Result<String, GitError> {
+    Ok(now(dir)?.local_date())
+}
+
+/// The current moment as git would stamp a commit made now in `dir`: the
+/// committer clock, with the committer's local UTC offset.
 ///
 /// Asked of git rather than computed here because the standard library has
-/// no local time zone, and because it honours `GIT_COMMITTER_DATE` — the date
-/// is the one the commit carrying the approval will show. The identity is
+/// no local time zone, and because it honours `GIT_COMMITTER_DATE` — the time
+/// is the one the commit carrying the change will show. The identity is
 /// overridden on the command line so a missing `user.email` cannot fail it:
 /// only the timestamp is read.
-pub fn today(dir: &Path) -> Result<String, GitError> {
+pub fn now(dir: &Path) -> Result<Instant, GitError> {
     const COMMAND: &str = "git var GIT_COMMITTER_IDENT";
     let output = run(
         dir,
@@ -58,55 +67,98 @@ pub fn today(dir: &Path) -> Result<String, GitError> {
         return Err(failed(COMMAND, &output));
     }
     let ident = text(COMMAND, &output.stdout)?;
-    date_from_ident(ident).ok_or_else(|| GitError::UnexpectedOutput {
+    Instant::from_ident(ident).ok_or_else(|| GitError::UnexpectedOutput {
         command: COMMAND,
         output: ident.trim().to_owned(),
     })
 }
 
-/// `Name <email> 1791224788 +0200` → the local date of that instant,
-/// `2026-10-05`. `None` when the last two fields are not a Unix time and a
-/// `±hhmm` offset.
-pub fn date_from_ident(ident: &str) -> Option<String> {
-    let mut fields = ident.split_whitespace().rev();
-    let offset = fields.next()?;
-    let seconds: i64 = fields.next()?.parse().ok()?;
-
-    let (sign, digits) = match offset.split_at_checked(1)? {
-        ("+", digits) => (1, digits),
-        ("-", digits) => (-1, digits),
-        _ => return None,
-    };
-    if digits.len() != 4 || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let hours: i64 = digits[..2].parse().ok()?;
-    let minutes: i64 = digits[2..].parse().ok()?;
-    if minutes >= 60 {
-        return None;
-    }
-    let local = seconds.checked_add(sign * (hours * 3600 + minutes * 60))?;
-
-    let (year, month, day) = civil_from_days(local.div_euclid(86_400));
-    (0..=9999)
-        .contains(&year)
-        .then(|| format!("{year:04}-{month:02}-{day:02}"))
+/// A moment in time, as git reports it: seconds since the Unix epoch, and
+/// the UTC offset of the clock that read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Instant {
+    /// Seconds since 1970-01-01T00:00:00Z.
+    pub seconds: i64,
+    /// The local UTC offset, in minutes: `+0200` is 120.
+    pub offset_minutes: i32,
 }
 
-/// Days since 1970-01-01 → (year, month, day) in the proleptic Gregorian
-/// calendar. Howard Hinnant's `civil_from_days`, exact for every `i64` input
-/// that fits.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097); // [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
-    let mp = (5 * doy + 2) / 153; // [0, 11], March-based
-    let day = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
-    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    (year, month, day)
+impl Instant {
+    /// `Name <email> 1791224788 +0200` → that instant. `None` when the last
+    /// two fields are not a Unix time and a `±hhmm` offset, or when the
+    /// result falls outside the years 0000–9999.
+    pub fn from_ident(ident: &str) -> Option<Self> {
+        let mut fields = ident.split_whitespace().rev();
+        let offset = fields.next()?;
+        let seconds: i64 = fields.next()?.parse().ok()?;
+
+        let (sign, digits) = match offset.split_at_checked(1)? {
+            ("+", digits) => (1, digits),
+            ("-", digits) => (-1, digits),
+            _ => return None,
+        };
+        if digits.len() != 4 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        let hours: i32 = digits[..2].parse().ok()?;
+        let minutes: i32 = digits[2..].parse().ok()?;
+        if minutes >= 60 {
+            return None;
+        }
+        let instant = Self {
+            seconds,
+            offset_minutes: sign * (hours * 60 + minutes),
+        };
+        // Both renderings must stay within four-digit years.
+        let in_range = |seconds: i64| (0..=9999).contains(&civil(seconds).0);
+        (in_range(instant.local_seconds()?) && in_range(seconds)).then_some(instant)
+    }
+
+    /// `YYYY-MM-DD` in local time.
+    pub fn local_date(self) -> String {
+        let (year, month, day, ..) = civil(self.local_seconds().unwrap_or(self.seconds));
+        format!("{year:04}-{month:02}-{day:02}")
+    }
+
+    /// `YYYY-MM-DDTHH:MM:SS±HH:MM` in local time, with its offset (RFC 3339):
+    /// a decision entry's `date` (decision-entry.md D-2).
+    pub fn local_rfc3339(self) -> String {
+        let (year, month, day, hour, minute, second) =
+            civil(self.local_seconds().unwrap_or(self.seconds));
+        let sign = if self.offset_minutes < 0 { '-' } else { '+' };
+        let offset = self.offset_minutes.unsigned_abs();
+        format!(
+            "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}{sign}{:02}:{:02}",
+            offset / 60,
+            offset % 60
+        )
+    }
+
+    /// `YYYY-MM-DD-HHMMSS` in UTC: a decision entry's filename prefix
+    /// (decision-entry.md §2).
+    pub fn utc_stamp(self) -> String {
+        let (year, month, day, hour, minute, second) = civil(self.seconds);
+        format!("{year:04}-{month:02}-{day:02}-{hour:02}{minute:02}{second:02}")
+    }
+
+    fn local_seconds(self) -> Option<i64> {
+        self.seconds
+            .checked_add(i64::from(self.offset_minutes) * 60)
+    }
+}
+
+/// Seconds since the epoch → (year, month, day, hour, minute, second).
+fn civil(seconds: i64) -> (i64, u32, u32, u32, u32, u32) {
+    let (year, month, day) = civil_from_days(seconds.div_euclid(86_400));
+    let of_day = seconds.rem_euclid(86_400) as u32;
+    (
+        year,
+        month,
+        day,
+        of_day / 3600,
+        of_day / 60 % 60,
+        of_day % 60,
+    )
 }
 
 fn run(dir: &Path, args: &[&str]) -> Result<std::process::Output, GitError> {
@@ -164,7 +216,7 @@ impl fmt::Display for GitError {
             Self::NotInstalled => write!(
                 f,
                 "`git` was not found on PATH; invar runs git to read who is approving \
-                 and today's date — install git, or add it to PATH"
+                 and the current date and time — install git, or add it to PATH"
             ),
             Self::CannotRun { source } => write!(f, "cannot run `git`: {source}"),
             Self::Failed {
