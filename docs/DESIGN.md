@@ -1464,7 +1464,7 @@ put it: on disk.
 | After a code edit (Phase 2) | `invar lint check` | No |
 | During Phase 2 iteration | `invar generate <n> --tests-path <current>` | No |
 | End of Phase 2 | `invar generate <n>` (full suite) | Yes — fails loudly, writes the decision entry |
-| — | `plan approve`, `scenario confirm` | **Never hooked** |
+| — | `plan approve`, `scenario confirm` | **Never hooked** — and a `Bash` guard denies the agent running them |
 
 **"After a code edit" is narrower than it sounds.** A `PostToolUse` hook
 matches on the *tool* that ran, so a matcher of `Write|Edit` does not see a file
@@ -1492,6 +1492,22 @@ run.
 **Human decisions are never hooked.** A hook that confirms a scenario has
 abolished the gate. `plan approve` and `scenario confirm` are commands the
 developer runs deliberately; that deliberateness is their entire function.
+
+**The agent is kept from running them by a hook that only ever says no.** The
+same `PreToolUse` guard that keeps `Write` and `Edit` off an approved Plan
+(`plan guard`) also reads a `Bash` call's command line, and denies one that
+runs `invar plan approve` — and, once `.feature` files exist, `scenario
+confirm`. The reason it gives tells the agent to say the Plan is ready and
+wait: the developer approves from their own terminal. This costs the developer
+nothing, which is why it is preferred to making the command ask for
+confirmation: a prompt in every approval would be paid for by every cycle,
+and an agent running in the same terminal could not be told from a person
+anyway. It has the standing of every guard here and no more. It scans words,
+not a shell, so a command built at run time or run from a script gets past it;
+a hook that fails lets the call through; and an agent that edits the hook
+configuration removes it. What an approval made by the wrong party leaves
+behind is what the checks on disk already look at — `Approved-by`, and a Plan
+the developer never read — not anything in the hook.
 
 **The largest gain is the return path, not the enforcement.** Today the
 developer copies command output back to the agent by hand. A hook puts lint and

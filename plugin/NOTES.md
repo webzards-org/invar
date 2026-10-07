@@ -508,7 +508,7 @@ The hook for M1-17, in exec form (§7):
 
 ```json
 {
-  "matcher": "Write|Edit",
+  "matcher": "Write|Edit|Bash",
   "hooks": [
     {
       "type": "command",
@@ -521,6 +521,46 @@ The hook for M1-17, in exec form (§7):
 ```
 
 Set the timeout: the documented default for a command hook is 600 seconds.
+
+### Commands only the developer runs — added after M1-10
+
+The matcher above also includes `Bash`, for a second job of the same command:
+keeping the agent from running `invar plan approve`. The developer approves
+from their own terminal; the agent is told, when it tries, to say the Plan is
+ready and wait. For a `Bash` call the guard reads `tool_input.command` and
+answers with the same verdicts as above (**Deny**: the JSON reason, the reason
+on stderr, exit 2; **Pass**: nothing). The list of commands is `HUMAN_ONLY` in
+`core/src/gate/guard/mod.rs`; `scenario confirm` joins it with `.feature`
+files. `--help` is allowed.
+
+Why a hook and not only a permission rule: the rule lives in the project's
+`.claude/settings.json`, which `invar init` (M1-15) is to write, and as
+documented it matches a command *prefix*. (Whether a plugin can ship
+permission rules itself was not examined by the spike; check before relying on
+it either way.) The hook ships with the plugin, reads the whole command line
+(`bash -c`, `&&`, `$(…)`, an absolute path) and tells the agent what to do
+instead. `init` may still add
+`"permissions": { "deny": ["Bash(invar plan approve:*)"] }` as a second layer;
+neither depends on the other.
+
+Limits, all by design (the boundary is `Approved-checksum`, not this):
+
+- It scans words; it does not run a shell. A command assembled at run time, a
+  script file, or `cargo run -- plan approve` (no `invar` word) is not seen.
+- A broken hook lets the call through (§11 above), and an agent that edits
+  `hooks/hooks.json` or `.claude/settings.json` removes it.
+- It is blunt in the other direction too: a commit message that quotes the
+  whole command is denied, and the reason says how to word it instead. Of
+  note when developing invar itself.
+- Every `Bash` call now starts `invar plan guard`. A Rust binary, so this is
+  milliseconds, but it is a cost that `Write|Edit` alone did not have.
+
+**Not yet verified against Claude Code itself:** that a `Bash` payload carries
+`tool_input.command` (taken from §8 and the hooks documentation, and covered by
+the unit tests, not exercised), and that a deny on `Bash` reads like the one on
+`Edit` above. Check with the recipe in *Reproducing*, using
+`--allowedTools Bash` and a prompt that asks Claude to run
+`invar plan approve` on a throwaway project.
 
 ### End to end, with the real binary
 
