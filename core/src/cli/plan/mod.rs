@@ -43,13 +43,18 @@ pub enum Command {
     /// `invar plan approve` recorded. Exits non-zero on refusal.
     Check(check::Args),
 
-    /// Deny `Write`/`Edit` to an approved Plan — for a `PreToolUse` hook.
+    /// Deny `Write`/`Edit` of an approved Plan, and `Bash` runs of `plan approve` — for a `PreToolUse` hook.
     ///
     /// Reads the hook's JSON from stdin and looks at `tool_input.file_path`.
     /// An approved Plan's `spec.md` is denied (exit 2, with the reason as JSON
     /// on stdout and as text on stderr); a draft Plan and every other file
     /// pass silently (exit 0). Input it cannot make sense of passes too, with
     /// the problem reported: a broken guard must not halt a session.
+    ///
+    /// A `Bash` call is read by its `tool_input.command` instead: one that runs
+    /// `invar plan approve` is denied the same way, because approving is the
+    /// developer's decision, made from their own terminal. Every other command
+    /// passes silently.
     ///
     /// The guard is a convenience; the checksum is the boundary. A hook on
     /// `Write|Edit` never sees a file changed through `Bash` — a heredoc,

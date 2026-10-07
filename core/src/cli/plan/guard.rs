@@ -1,4 +1,8 @@
-//! `invar plan guard`, for a `PreToolUse` hook on `Write|Edit`.
+//! `invar plan guard`, for a `PreToolUse` hook on `Write|Edit|Bash`.
+//!
+//! A `Write` or `Edit` of an approved Plan is denied, and so is a `Bash` call
+//! that runs `invar plan approve`: that is the developer's decision, run from
+//! their own terminal. Both answer in the same way, below.
 //!
 //! The output follows what Claude Code does with it, verified against
 //! version 2.1.291 (`plugin/NOTES.md` §11):
@@ -51,7 +55,7 @@ pub fn run(_args: Args) -> Result<ExitCode> {
             ExitCode::from(2)
         }
         Verdict::Unsure { problem } => {
-            let message = format!("invar plan guard: {problem}; the edit is allowed");
+            let message = format!("invar plan guard: {problem}; the tool call is allowed");
             println!("{}", json!({ "systemMessage": message }));
             eprintln!("{message}");
             ExitCode::SUCCESS
