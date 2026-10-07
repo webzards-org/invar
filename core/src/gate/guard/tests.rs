@@ -198,12 +198,14 @@ fn input_that_is_not_a_payload_is_reported_and_allowed() {
     assert_unsure(decide(b"{\"tool_name\":", cwd), "not valid JSON");
     assert_unsure(decide(b"[1, 2]", cwd), "no `tool_input.file_path`");
     assert_unsure(decide(b"{}", cwd), "no `tool_input.file_path`");
+    // `Bash` is judged by its command, not a path (below); any other tool
+    // that carries no path is reported.
     assert_unsure(
         decide(
-            br#"{"tool_name":"Bash","tool_input":{"command":"ls"}}"#,
+            br#"{"tool_name":"Grep","tool_input":{"pattern":"approve"}}"#,
             cwd,
         ),
-        "for Bash has no `tool_input.file_path`",
+        "for Grep has no `tool_input.file_path`",
     );
     assert_unsure(
         decide(
@@ -242,4 +244,148 @@ fn unknown_payload_fields_are_ignored() {
         decide(&input, Path::new("/")),
         Verdict::Deny { .. }
     ));
+}
+
+// --- commands only the developer runs -----------------------------------------
+//
+// `plan approve` records that a person read the Plan. The guard keeps the agent
+// from running it, and tells it what to do instead. A scan of words, not a
+// shell: these tests pin what it catches and what it leaves alone.
+
+fn bash(command: &str) -> Vec<u8> {
+    serde_json::to_vec(&json!({
+        "session_id": "abc",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": { "command": command, "description": "run it" },
+    }))
+    .unwrap()
+}
+
+fn verdict_on(command: &str) -> Verdict {
+    decide(&bash(command), Path::new("/"))
+}
+
+fn denied(command: &str) -> String {
+    match verdict_on(command) {
+        Verdict::Deny { reason } => reason,
+        other => panic!("expected Deny for {command:?}, got {other:?}"),
+    }
+}
+
+#[test]
+fn running_plan_approve_is_denied_and_the_agent_is_told_what_to_do() {
+    let reason = denied("invar plan approve SHOP-214");
+    assert!(
+        reason.contains("is the developer's decision, not yours"),
+        "{reason}"
+    );
+    assert!(reason.contains("Do not run it"), "{reason}");
+    assert!(
+        reason.contains("they run `invar plan approve SHOP-214` themselves"),
+        "{reason}"
+    );
+    assert!(reason.contains("their own terminal"), "{reason}");
+    assert!(reason.contains("--reapprove"), "{reason}");
+}
+
+#[test]
+fn the_reason_names_the_ticket_wherever_it_stands_and_a_placeholder_otherwise() {
+    assert!(
+        denied("invar plan approve --reapprove SHOP-214").contains("`invar plan approve SHOP-214`")
+    );
+    assert!(denied("invar plan approve").contains("`invar plan approve <ticket>`"));
+}
+
+#[test]
+fn every_way_of_writing_the_command_is_denied() {
+    for command in [
+        "invar plan approve SHOP-214",
+        "invar plan approve SHOP-214 --reapprove",
+        "invar plan approve .invar/plans/SHOP-214-cancel/spec.md",
+        // The binary by path.
+        "/usr/local/bin/invar plan approve SHOP-214",
+        "./target/debug/invar plan approve SHOP-214",
+        "~/bin/invar plan approve SHOP-214",
+        "invar.exe plan approve SHOP-214",
+        // Spacing, options in front, a line broken with a backslash.
+        "invar   plan   approve   SHOP-214",
+        "invar -C app plan approve SHOP-214",
+        "invar \\\n  plan approve SHOP-214",
+        // In a sequence, a pipe, a group, a substitution.
+        "cd app && invar plan approve SHOP-214",
+        "invar plan validate SHOP-214 && invar plan approve SHOP-214",
+        "invar plan validate SHOP-214; invar plan approve SHOP-214",
+        "echo y | invar plan approve SHOP-214",
+        "(invar plan approve SHOP-214)",
+        "$(invar plan approve SHOP-214)",
+        "`invar plan approve SHOP-214`",
+        // Behind a prefix or a shell.
+        "FOO=1 invar plan approve SHOP-214",
+        "env invar plan approve SHOP-214",
+        "sudo -u rade invar plan approve SHOP-214",
+        "bash -c 'invar plan approve SHOP-214'",
+        "sh -c \"invar plan approve SHOP-214\"",
+        "\"invar\" plan approve SHOP-214",
+    ] {
+        denied(command);
+    }
+}
+
+#[test]
+fn other_commands_pass_and_so_does_every_other_invar_command() {
+    for command in [
+        "ls -la",
+        "git status",
+        "cargo test",
+        "invar plan validate SHOP-214",
+        "invar plan validate --all-drafts",
+        "invar plan check SHOP-214",
+        "invar plan guard",
+        "invar context show",
+        // The words appear, but no `invar` runs them.
+        "echo plan approve",
+        "grep -rn approve invar/core/src",
+        // A word that only starts with `invar` is not the command.
+        "echo invariants plan approve notes",
+        // `invar` is only a directory name here.
+        "cd invar && cargo build",
+        // They are in different commands.
+        "invar plan validate SHOP-214; echo plan approve",
+    ] {
+        assert_eq!(verdict_on(command), Verdict::Pass, "{command:?}");
+    }
+}
+
+#[test]
+fn asking_for_help_is_not_running_the_command() {
+    for command in [
+        "invar plan approve --help",
+        "invar plan approve -h",
+        "invar plan approve SHOP-214 --help",
+    ] {
+        assert_eq!(verdict_on(command), Verdict::Pass, "{command:?}");
+    }
+}
+
+#[test]
+fn a_bash_payload_without_a_command_is_reported_and_allowed() {
+    let cwd = Path::new("/");
+    assert_unsure(
+        decide(br#"{"tool_name":"Bash","tool_input":{}}"#, cwd),
+        "no `tool_input.command`",
+    );
+    assert_unsure(
+        decide(br#"{"tool_name":"Bash","tool_input":{"command":7}}"#, cwd),
+        "no `tool_input.command`",
+    );
+}
+
+#[test]
+fn a_command_never_changes_what_the_file_checks_decide() {
+    // The two jobs are told apart by the tool: an Edit of an approved Plan is
+    // still denied, a Bash `ls` of it still passes.
+    let (_dir, _root, spec) = project(APPROVED);
+    assert!(matches!(on(&spec), Verdict::Deny { .. }));
+    assert_eq!(verdict_on(&format!("ls {}", spec.display())), Verdict::Pass);
 }
