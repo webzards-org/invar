@@ -136,6 +136,20 @@ impl Pending {
             .trim_matches(['\n', '\r'])
     }
 
+    /// Check that `by` and `at` can be written into the header, before the
+    /// criteria are shown. [`commit`](Self::commit) makes the same check, but
+    /// by then a person has read the criteria of an approval that was never
+    /// going to be recorded.
+    pub fn check_values(&self, by: &str, at: &str) -> Result<(), ApproveError> {
+        Approval {
+            by: by.to_owned(),
+            at: at.to_owned(),
+            checksum: self.checksum.clone(),
+        }
+        .check()
+        .map_err(ApproveError::Unwritable)
+    }
+
     /// Write the approval: `by` from `git config user.name`, `at` as
     /// `YYYY-MM-DD`. Refuses if the file changed since [`prepare`] read it,
     /// and verifies the result by reading it back.
