@@ -47,11 +47,6 @@ fn spec_path(path: &Path) -> Result<PathBuf> {
 }
 
 /// Relative to the current directory when the file is under it, so the
-/// paths an agent or a person sees are the ones they would type.
-pub fn shown(path: &Path, cwd: &Path) -> String {
-    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_owned());
-    path.strip_prefix(&cwd)
-        .unwrap_or(path)
-        .display()
-        .to_string()
-}
+/// paths an agent or a person sees are the ones they would type. Shared with
+/// the other commands, so it lives in `cli`.
+pub use crate::cli::shown;

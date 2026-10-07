@@ -6,6 +6,7 @@
 //! can be called from a test, from CI or from a hook and behave identically
 //! (§13b).
 
+use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::Result;
@@ -79,4 +80,51 @@ fn mode(root: &ProjectRoot) -> Result<Mode> {
         eprintln!("warning: {}: {warning}", loaded.path.display());
     }
     Ok(Mode::of(&loaded.config))
+}
+
+/// A path relative to the current directory when it is under it, so the paths
+/// an agent or a person sees are the ones they would type; otherwise as it is.
+///
+/// `cwd` is canonicalized first, so a symlinked or roundabout current
+/// directory still matches the canonical paths the project root gives.
+pub fn shown(path: &Path, cwd: &Path) -> String {
+    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_owned());
+    path.strip_prefix(&cwd)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::shown;
+
+    #[test]
+    fn a_path_under_the_current_directory_is_shown_relative_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().canonicalize().unwrap();
+        let inside = cwd.join(".invar").join("plans").join("spec.md");
+        let expected = Path::new(".invar").join("plans").join("spec.md");
+        assert_eq!(shown(&inside, &cwd), expected.display().to_string());
+    }
+
+    #[test]
+    fn a_path_elsewhere_is_shown_in_full() {
+        let here = tempfile::tempdir().unwrap();
+        let there = tempfile::tempdir().unwrap();
+        let path = there.path().canonicalize().unwrap().join("spec.md");
+        assert_eq!(shown(&path, here.path()), path.display().to_string());
+    }
+
+    #[test]
+    fn a_current_directory_that_is_not_canonical_still_matches() {
+        // Spelled with a `..` in it, as a symlinked or relative one can be.
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().canonicalize().unwrap();
+        std::fs::create_dir(real.join("sub")).unwrap();
+        let roundabout = real.join("sub").join("..");
+        assert_eq!(shown(&real.join("a.md"), &roundabout), "a.md");
+    }
 }
