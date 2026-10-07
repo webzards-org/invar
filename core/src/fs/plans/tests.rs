@@ -362,8 +362,17 @@ fn a_directory_name_is_a_ticket_and_a_slug_as_the_shared_rules_define_them() {
         "proj-1", "PROJ", "P-", "1P-1", "P_Q-1", "PROJ-1a", "-1", // not
     ];
     let slugs = [
-        "a", "reserve-stock", "2fa-setup", "x1-y2", // valid
-        "", "-a", "a-", "a--b", "A", "Reserve", "a_b", // not
+        "a",
+        "reserve-stock",
+        "2fa-setup",
+        "x1-y2", // valid
+        "",
+        "-a",
+        "a-",
+        "a--b",
+        "A",
+        "Reserve",
+        "a_b", // not
     ];
     for ticket in tickets {
         for slug in slugs {

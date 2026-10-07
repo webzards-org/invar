@@ -75,6 +75,17 @@ fn write(cwd: &Path, file_path: &str) -> String {
     .to_string()
 }
 
+/// What Claude Code sends for `Bash`: a command line, no file path.
+fn bash(cwd: &Path, command: &str) -> String {
+    json!({
+        "cwd": cwd,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": { "command": command, "description": "run it" },
+    })
+    .to_string()
+}
+
 fn guard(stdin: impl Into<Vec<u8>>) -> assert_cmd::assert::Assert {
     Command::cargo_bin("invar")
         .unwrap()
@@ -129,6 +140,62 @@ fn an_approved_plan_with_crlf_is_denied_too() {
     guard(edit(&project.root(), &project.path(SPEC))).code(2);
 }
 
+// --- commands only the developer runs -------------------------------------------
+
+#[test]
+fn running_plan_approve_from_a_shell_is_denied() {
+    let project = Project::new(APPROVED);
+    let assert = guard(bash(
+        &project.root(),
+        "invar plan approve SHOP-214 --reapprove",
+    ))
+    .code(2)
+    .stderr(contains("is the developer's decision, not yours"));
+
+    // The same answer as for an approved Plan: one JSON object on stdout.
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(stdout.lines().count(), 1, "{stdout}");
+    let output: Value = serde_json::from_str(&stdout).unwrap();
+    let decision = &output["hookSpecificOutput"];
+    assert_eq!(decision["hookEventName"], "PreToolUse");
+    assert_eq!(decision["permissionDecision"], "deny");
+    let reason = decision["permissionDecisionReason"].as_str().unwrap();
+    assert!(
+        reason.contains("they run `invar plan approve SHOP-214` themselves"),
+        "{reason}"
+    );
+    assert!(reason.contains("their own terminal"), "{reason}");
+}
+
+#[test]
+fn the_command_is_denied_however_the_shell_is_asked_to_run_it() {
+    let project = Project::new(APPROVED);
+    for command in [
+        "bash -c 'invar plan approve SHOP-214'",
+        "cd app && ./target/debug/invar plan approve SHOP-214",
+        "echo y | invar plan approve SHOP-214",
+    ] {
+        guard(bash(&project.root(), command)).code(2);
+    }
+}
+
+#[test]
+fn every_other_shell_command_passes_silently() {
+    let project = Project::new(APPROVED);
+    for command in [
+        "ls -la",
+        "git status",
+        "invar plan validate SHOP-214",
+        "invar plan check SHOP-214",
+        "invar plan approve --help",
+    ] {
+        guard(bash(&project.root(), command))
+            .code(0)
+            .stdout("")
+            .stderr("");
+    }
+}
+
 // --- allow ----------------------------------------------------------------------
 
 #[test]
@@ -162,6 +229,8 @@ fn the_guard_never_answers_allow() {
     let project = Project::new(APPROVED);
     for stdin in [
         edit(&project.root(), &project.path("app/x.php")),
+        bash(&project.root(), "ls"),
+        bash(&project.root(), "invar plan approve SHOP-214"),
         "garbage".to_owned(),
     ] {
         guard(stdin).stdout(contains("\"allow\"").not());
@@ -180,14 +249,20 @@ fn malformed_input_allows_the_edit_and_reports_the_problem() {
             "the hook input is not valid JSON",
         ),
         ("{}", "has no `tool_input.file_path`"),
+        // `Bash` is judged by its command (above); any other tool without a
+        // path is reported, and so is a `Bash` call without a command.
         (
-            "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"}}",
-            "for Bash has no `tool_input.file_path`",
+            "{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"approve\"}}",
+            "for Grep has no `tool_input.file_path`",
+        ),
+        (
+            "{\"tool_name\":\"Bash\",\"tool_input\":{}}",
+            "for Bash has no `tool_input.command`",
         ),
     ] {
         let assert = guard(stdin)
             .code(0)
-            .stderr(contains(problem).and(contains("the edit is allowed")));
+            .stderr(contains(problem).and(contains("the tool call is allowed")));
         let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
         let output: Value = serde_json::from_str(&stdout)
             .unwrap_or_else(|err| panic!("{stdin:?}: stdout is not JSON ({err}): {stdout}"));
@@ -225,4 +300,14 @@ fn the_help_says_the_checksum_is_the_boundary() {
         ))
         .stdout(contains("never sees a file changed through `Bash`"))
         .stdout(contains("invar plan check"));
+}
+
+#[test]
+fn the_help_says_a_bash_call_is_read_by_its_command() {
+    Command::cargo_bin("invar")
+        .unwrap()
+        .args(["plan", "guard", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("tool_input.command"));
 }
