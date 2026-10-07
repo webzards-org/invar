@@ -168,7 +168,7 @@ pub fn record(
         Err(err) => {
             // D-8: no reset Plan without its entry.
             if let (Some(spec), Some((_, _, original))) = (&reset, &plan)
-                && let Err(source) = fs::write(spec, original)
+                && let Err(source) = restore_plan(spec, original, mode)
             {
                 return Err(RecordError::RestoreFailed {
                     spec: spec.clone(),
@@ -211,10 +211,27 @@ fn reset_plan(spec: &Path, original: &str, mode: Mode) -> Result<(), RecordError
         Ok(())
     } else {
         // Put the original back rather than leave a Plan nobody can trust.
-        let _ = fs::write(spec, original);
+        let _ = restore_plan(spec, original, mode);
         Err(RecordError::PlanNotPreserved {
             spec: spec.to_owned(),
         })
+    }
+}
+
+/// Put the Plan back exactly as it was, by the same atomic write that changed
+/// it.
+///
+/// A plain `fs::write` truncates the file before it writes: a restore
+/// interrupted halfway would leave the very half-written Plan that D-8 exists
+/// to prevent. `original` parsed when the Plan was reset, and a Plan
+/// reproduces its own text byte for byte, so parsing it again gives the file
+/// back; `Plan::write` then replaces it atomically.
+fn restore_plan(spec: &Path, original: &str, mode: Mode) -> io::Result<()> {
+    match Plan::parse(original, mode) {
+        Ok(plan) if plan.to_text() == original => plan.write(spec),
+        // Not expected: it parsed a moment ago, and a Plan round-trips. A
+        // plain write is still better than leaving the Plan reset.
+        _ => fs::write(spec, original),
     }
 }
 
