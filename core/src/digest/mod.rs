@@ -10,8 +10,9 @@
 //!
 //! 1. decode as UTF-8, strip a BOM if present
 //! 2. normalize line endings: `\r\n` and `\r` → `\n`
-//! 3. strip trailing whitespace from every line
-//! 4. strip trailing blank lines, then append exactly one `\n`
+//! 3. strip trailing whitespace from every line (Unicode `White_Space`)
+//! 4. strip trailing blank lines, then append exactly one `\n` — unless
+//!    nothing is left, in which case nothing is appended
 //! 5. (body extraction — *not* done here, see below)
 //!
 //! **Step 5 lives elsewhere on purpose.** Deciding where a `.feature` header
@@ -59,15 +60,19 @@ pub fn canonicalize(input: &str) -> String {
 
     // 3. Strip trailing whitespace from every line. `split('\n')` rather than
     //    `lines()`: `lines()` quietly eats a `\r` before each `\n`, which would
-    //    hide whether step 2 actually works. `trim_end()` is Unicode-aware
-    //    (fixtures README, D-2) and leaves leading whitespace — indentation —
-    //    untouched.
+    //    hide whether step 2 actually works. §4d defines whitespace as the
+    //    Unicode `White_Space` property, which is exactly what `trim_end()`
+    //    implements (`char::is_whitespace`); it leaves leading whitespace —
+    //    indentation — untouched. Do not replace it with a hand-written set:
+    //    the unit tests pin the boundary of this definition (fixtures
+    //    README, D-2).
     let lines: Vec<&str> = text.split('\n').map(str::trim_end).collect();
 
     // 4. Strip trailing blank lines. Only *trailing*: leading and interior
     //    blank lines are content. After step 3 a blank line is an empty one.
     let Some(last) = lines.iter().rposition(|line| !line.is_empty()) else {
-        // Nothing but whitespace (or nothing at all): D-1, the empty string.
+        // Nothing but whitespace (or nothing at all): §4d step 4 and D-1, the
+        // empty string — nothing is appended.
         return String::new();
     };
 
