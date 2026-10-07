@@ -504,6 +504,16 @@ Deny uses both signals on purpose: either blocks on its own in Claude Code,
 and exit 2 also makes the verdict obvious to a script or a CI test that pipes
 JSON in.
 
+**Exit 2 means *deny*, and nothing else.** clap's own usage errors exit with 2
+as well, and Claude Code blocks a `PreToolUse` call on exit 2. A hook started
+with arguments this binary does not know — a plugin written for a newer
+`invar`, or the other way round — would therefore have blocked every `Write`,
+`Edit` and `Bash` call in the session, with a usage message as the reason: the
+opposite of "a broken guard must not halt a session". `main.rs` turns every
+usage error into exit 1, which does not block, as it does any other failure;
+`--help` and `--version` still exit 0. Pinned by `tests/cli.rs` and
+`tests/plan_guard.rs`.
+
 The hook for M1-17, in exec form (§7):
 
 ```json
