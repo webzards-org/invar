@@ -176,7 +176,10 @@ impl ProjectRoot {
     /// through `..`, and the plain path all give the same answer. `path` need
     /// not exist yet — the `Write` tool reports a file it is about to create
     /// (M1-10) — but its nearest existing ancestor is resolved, symlinks
-    /// included. A relative `path` is taken relative to the current directory.
+    /// included. A symbolic link that points at something that does not exist
+    /// is followed too: a write through it creates the file at its target, so
+    /// that is the path that is reported. A relative `path` is taken relative
+    /// to the current directory.
     pub fn relative_path(&self, path: &Path) -> io::Result<Option<PathBuf>> {
         let canonical = canonicalize_lenient(path)?;
         Ok(canonical
@@ -207,11 +210,42 @@ fn entry_exists(dir: &Path, name: &str) -> Result<bool, RootError> {
     }
 }
 
+/// Where `path` points, when `path` is itself a symbolic link: the link's
+/// target, resolved against the link's directory when it is relative (an
+/// absolute target replaces the directory, as in `Path::join`). `None` when
+/// `path` is not a symlink, or does not exist.
+fn link_target(path: &Path) -> io::Result<Option<PathBuf>> {
+    match path.symlink_metadata() {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            let target = path.read_link()?;
+            Ok(Some(match path.parent() {
+                Some(parent) => parent.join(target),
+                None => target,
+            }))
+        }
+        Ok(_) => Ok(None),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+/// The most symbolic links followed while resolving one path: the limit the
+/// operating system itself applies. A bound, not an expectation — a link that
+/// loops makes `canonicalize` fail with an error of its own long before.
+const MAX_LINKS: usize = 40;
+
 /// Canonicalize a path that may not exist yet.
 ///
 /// The longest existing ancestor is canonicalized by the operating system, so
 /// symlinks are resolved where they can exist. The remaining components do
 /// not exist, so they cannot be symlinks, and are normalized lexically.
+///
+/// **A symlink whose target does not exist is not "a name that does not
+/// exist".** The operating system reports both as `NotFound`, but a write
+/// through the link creates the file at its target. Treating the link as a
+/// plain missing name would report a path inside the project for a write that
+/// lands outside it, or inside a protected directory under another name. So
+/// such a link is followed, one step at a time, to where it points.
 fn canonicalize_lenient(path: &Path) -> io::Result<PathBuf> {
     enum Part {
         Name(OsString),
@@ -220,6 +254,7 @@ fn canonicalize_lenient(path: &Path) -> io::Result<PathBuf> {
 
     let mut existing = std::path::absolute(path)?;
     let mut missing = Vec::new();
+    let mut links = 0;
     loop {
         match existing.canonicalize() {
             Ok(mut resolved) => {
@@ -234,6 +269,16 @@ fn canonicalize_lenient(path: &Path) -> io::Result<PathBuf> {
                 return Ok(resolved);
             }
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                // A link that points nowhere fails here like a missing name.
+                // Follow it; what was peeled off below it stays pending.
+                if let Some(target) = link_target(&existing)? {
+                    links += 1;
+                    if links > MAX_LINKS {
+                        return Err(io::Error::other("too many levels of symbolic links"));
+                    }
+                    existing = target;
+                    continue;
+                }
                 match existing.components().next_back() {
                     Some(Component::Normal(name)) => missing.push(Part::Name(name.to_owned())),
                     Some(Component::ParentDir) => missing.push(Part::Up),
