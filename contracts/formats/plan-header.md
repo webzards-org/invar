@@ -1,6 +1,6 @@
 # Contract: Plan header and required sections
 
-**Version:** 1.3.0 — what `plan approve` writes, and re-approval (OQ-1 resolved); see §10 for what changed and why
+**Version:** 1.4.0 — what counts as content in a required section; see §10 for what changed and why
 **Status:** stable
 **Implements:** §4a (Plan document structure), §4d (Checksums), §5c (Context
 delivery), §12 (Plan lifecycle); light mode L-1, L-2, L-5
@@ -249,7 +249,12 @@ Whether `## Acceptance criteria` is required in this mode as well is open
   trailing whitespace. `## Acceptance Criteria` is an error.
 - Additional sections beyond the required ones are permitted, anywhere, and
   ignored by the core. Only the relative order of the required ones is checked.
-- A required section may be empty of prose only where §6.1 says so.
+- A required section may be empty of prose only where §6.1 says so. What
+  counts as **content** is defined once, for every required section (D-14): a
+  line that still has at least one letter or digit after HTML comments
+  (`<!-- … -->`, also across lines), a leading list marker (`-`, `*`, `+`,
+  `1.`, `1)`) and a leading checkbox (`[ ]`, `[x]`) are removed. A comment, an
+  empty list item and a lone `...` are not content.
 - `plan validate` reports **all** missing, misspelled or misordered headings in
   one run, not one per invocation. A developer fixing a Plan should need one
   round trip.
@@ -263,9 +268,9 @@ Whether `## Acceptance criteria` is required in this mode as well is open
 | `## Scope` | Modules and layers touched; what is explicitly out of scope | No |
 | `## Open questions / answers` | The clarifying questions of Phase 1 and the developer's answers | Yes — with an explicit line saying none were needed |
 | `## Rejected alternatives` | Approaches considered and dropped, with the reason | Yes — same |
-| `## Acceptance criteria` | What the change will be judged against (§6.4) — light mode | **No** — and `_none_` counts as empty (D-8) |
+| `## Acceptance criteria` | What the change will be judged against (§6.4) — light mode | **No** — and no placeholder counts as content (D-8, D-14) |
 | `## Scenarios to write` | A machine-readable list (§6.2) — `scenarios: true` only | No |
-| `## Scenarios to delete` | A machine-readable list (§6.2) — `scenarios: true` only | Yes — empty means nothing is deleted |
+| `## Scenarios to delete` | A machine-readable list (§6.2) — `scenarios: true` only | Yes — written `_none_`, never left blank (D-5) |
 | `## Implementation context` | Ticket-specific guidance for Phase 2 (§6.3) | Yes — with an explicit line saying no context source applies |
 
 `## Open questions / answers` and `## Rejected alternatives` are the sections
@@ -336,11 +341,15 @@ change will be judged against: by the developer approving the Plan, by the
 coder in Phase 2, by `/invar:review` before the PR (M1-20), and later by the
 `.feature` files written from it (L-1).
 
-**Non-empty.** The section must contain at least one non-blank line other than
-`_none_`. A Plan with nothing to accept cannot be reviewed against, cannot be
+**Non-empty, in substance.** The section must contain at least one criterion:
+a line of real text (§6, D-14) that is not a placeholder. The placeholders are
+`_none_`, `none`, `n/a`, `tbd` and `todo`, in any capitalisation and with any
+emphasis or trailing punctuation (`**TBD**`, `N/A.`), when they are the whole
+line. A Plan with nothing to accept cannot be reviewed against, cannot be
 approved meaningfully — there is nothing for the person at the gate to agree
 to — and cannot be turned into tests later. Unlike `## Scenarios to delete`,
-"nothing" is never a valid answer here, so `_none_` is not an escape (D-8).
+"nothing" is never a valid answer here, so `_none_` is not an escape (D-8), and
+neither is any other way of writing it (D-14).
 
 **Recommended form: one criterion per list item, in Given/When/Then prose.**
 
@@ -482,6 +491,19 @@ to that day, not to the previous one in UTC. The core reads it from git
 has no local time zone, git already resolves it on every platform, and the
 date then matches the commit that carries the approval — `GIT_COMMITTER_DATE`
 included.
+
+**D-14 — Content means text, not just a non-blank line** (1.4.0). The gate
+rests on `## Acceptance criteria`, and a check that only asks for a non-blank
+line is satisfied by `-`, `TBD` or `<!-- fill in -->` — the placeholders an
+agent or a template leaves behind. §6 therefore defines content once, for every
+required section: a line with a letter or digit left once HTML comments, a
+leading list marker and a leading checkbox are removed. The acceptance criteria
+add a short list of placeholder lines (§6.4) that do not count either, because
+in that section "nothing" is never an answer (D-8). The list is deliberately
+small and is not extended with every spelling of "nothing yet": a planner can
+learn to satisfy any mechanical check, so this one only removes what is
+unambiguously not a criterion. Whether a criterion is a *good* one remains what
+the person at the gate is for.
 
 ## 8. Open questions
 
@@ -677,6 +699,26 @@ There is nothing for the developer to approve the change against, nothing for
 validate` reports it as an empty required section, naming the heading.
 
 ## 10. Version history
+
+**1.4.0 — what counts as content (M1-6).**
+
+- §6 defines *content* for every required section (D-14): HTML comments, bare
+  list markers, empty checkboxes and lines with no letter or digit do not count.
+- `## Acceptance criteria` additionally rejects placeholder lines — `_none_`,
+  `none`, `n/a`, `tbd`, `todo` (§6.4, D-14).
+- §6.1: `## Scenarios to delete` is empty only as `_none_`, as D-5 and example
+  9.4 already said; the table said otherwise.
+
+**Why:** the gate rests on the acceptance criteria, and "at least one non-blank
+line" accepted `-`, `TBD` and `<!-- fill in -->`: exactly what a template or a
+hurried agent leaves behind, and exactly what the person at the gate is least
+likely to notice.
+
+**Compatibility:** a Plan that was valid under 1.3.0 is invalid under 1.4.0 only
+if a required section holds nothing but comments, bare list markers or
+punctuation, or if its acceptance criteria are only placeholders. Plans are
+consumable and do not outlive their cycle (§12), so at most a Plan in flight
+needs one line rewritten.
 
 **1.3.0 — `plan approve` (M1-9).**
 

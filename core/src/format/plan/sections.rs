@@ -81,12 +81,14 @@ pub(super) fn scan(
 
         // Code fences: a `## ` inside a fenced block is an example, not a
         // heading. A fence opens with three or more backticks or tildes and
-        // closes with at least as many of the same character.
+        // closes with at least as many of the same character and nothing
+        // after them: a line such as ```` ```php ```` inside an open fence is
+        // content, as in CommonMark.
         let unindented = strip_up_to_three_spaces(text);
-        if let Some((marker, count)) = fence_marker(unindented) {
+        if let Some((marker, count, bare)) = fence_marker(unindented) {
             match fence {
                 None => fence = Some((marker, count)),
-                Some((open, open_count)) if open == marker && count >= open_count => {
+                Some((open, open_count)) if open == marker && count >= open_count && bare => {
                     fence = None;
                 }
                 Some(_) => {}
@@ -168,7 +170,7 @@ fn check_required(
         present.push((position, first));
 
         let content = &rest[first.content.clone()];
-        if is_empty(name, content) {
+        if !has_text(name, content) {
             found.at(first.line, empty_message(name, mode));
         }
     }
@@ -242,20 +244,96 @@ fn report_missing(
     ));
 }
 
-/// Empty: no line with content. In `## Acceptance criteria`, `_none_` is no
-/// content either (D-8).
-fn is_empty(name: &str, content: &str) -> bool {
-    content
-        .lines()
-        .map(str::trim)
-        .all(|line| line.is_empty() || (name == ACCEPTANCE_CRITERIA && line == "_none_"))
+/// Does the section hold written content (§6, D-14)?
+///
+/// A line counts when letters or digits are left on it once HTML comments, a
+/// leading list marker and a leading checkbox are removed. So `-`, `1.`,
+/// `- [ ]`, `...` and `<!-- fill in -->` are not content. In
+/// `## Acceptance criteria` a placeholder line (`_none_`, `TBD`, ...) does not
+/// count either (D-8, D-14).
+fn has_text(name: &str, content: &str) -> bool {
+    let mut in_comment = false;
+    content.lines().any(|line| {
+        let visible = without_comments(line, &mut in_comment);
+        let text = strip_checkbox(strip_list_marker(visible.trim()));
+        text.chars().any(char::is_alphanumeric)
+            && !(name == ACCEPTANCE_CRITERIA && is_placeholder(text))
+    })
+}
+
+/// `line` without HTML comments. `in_comment` carries an unclosed `<!--` over
+/// to the next line, so a comment that spans lines hides all of them; one
+/// that is never closed hides the rest of the section, as it does when the
+/// Markdown is rendered.
+fn without_comments(line: &str, in_comment: &mut bool) -> String {
+    let mut visible = String::new();
+    let mut rest = line;
+    loop {
+        if *in_comment {
+            let Some(end) = rest.find("-->") else {
+                return visible;
+            };
+            rest = &rest[end + 3..];
+            *in_comment = false;
+        } else {
+            let Some(start) = rest.find("<!--") else {
+                visible.push_str(rest);
+                return visible;
+            };
+            visible.push_str(&rest[..start]);
+            rest = &rest[start + 4..];
+            *in_comment = true;
+        }
+    }
+}
+
+/// The line after a leading list marker: `-`, `*` or `+`, or digits followed
+/// by `.` or `)` — and only when the marker is followed by a space or ends the
+/// line. `**TBD**` and `1.5 seconds` are not list items.
+fn strip_list_marker(line: &str) -> &str {
+    let ends_marker = |rest: &str| rest.is_empty() || rest.starts_with(char::is_whitespace);
+
+    if let Some(rest) = line.strip_prefix(['-', '*', '+'])
+        && ends_marker(rest)
+    {
+        return rest.trim_start();
+    }
+    let digits = line.bytes().take_while(u8::is_ascii_digit).count();
+    if digits > 0
+        && let Some(rest) = line[digits..].strip_prefix(['.', ')'])
+        && ends_marker(rest)
+    {
+        return rest.trim_start();
+    }
+    line
+}
+
+/// The text after a leading task-list checkbox: `[ ]`, `[x]` or `[X]`.
+fn strip_checkbox(text: &str) -> &str {
+    ["[ ]", "[x]", "[X]"]
+        .iter()
+        .find_map(|mark| text.strip_prefix(*mark))
+        .map_or(text, str::trim_start)
+}
+
+/// A line that says "nothing yet" instead of stating a criterion: the whole
+/// line is one of a few words, in any capitalisation, with any emphasis or
+/// trailing punctuation around it (`**TBD**`, `N/A.`). Deliberately a short
+/// list (plan-header.md D-14).
+fn is_placeholder(text: &str) -> bool {
+    let word = text
+        .trim_matches(|c: char| c.is_whitespace() || matches!(c, '_' | '*' | '.' | ':' | '!'))
+        .to_lowercase();
+    matches!(word.as_str(), "none" | "n/a" | "tbd" | "todo")
 }
 
 fn empty_message(name: &str, mode: Mode) -> String {
     let what_to_write = match name {
         ACCEPTANCE_CRITERIA => {
             "add at least one acceptance criterion, one per list item: \
-             `- Given …, when …, then ….` `_none_` is not accepted here (plan-header.md D-8)"
+             `- Given …, when …, then ….` Comments, bare list markers and placeholders \
+             (`_none_`, `TBD`, `TODO`, `N/A`) do not count; `_none_` is not accepted here \
+             (plan-header.md D-8, D-14)"
         }
         "Open questions / answers" => {
             "list the questions and answers, or write one line saying none were needed"
@@ -290,9 +368,14 @@ fn strip_up_to_three_spaces(text: &str) -> &str {
     &text[spaces..]
 }
 
-/// `Some((char, count))` when the line opens or closes a code fence.
-fn fence_marker(text: &str) -> Option<(char, usize)> {
+/// `Some((char, count, bare))` when the line can open or close a code fence:
+/// three or more backticks or tildes. `bare` says nothing but whitespace
+/// follows them, which is what a closing fence needs; an opening fence may
+/// carry an info string (```` ```php ````).
+fn fence_marker(text: &str) -> Option<(char, usize, bool)> {
     let marker = text.chars().next().filter(|c| matches!(c, '`' | '~'))?;
     let count = text.chars().take_while(|c| *c == marker).count();
-    (count >= 3).then_some((marker, count))
+    // The markers are ASCII, one byte each, so `count` is also a byte offset.
+    let bare = text[count..].trim().is_empty();
+    (count >= 3).then_some((marker, count, bare))
 }

@@ -184,8 +184,8 @@ fn parse_line(line: &Line, number: usize, found: &mut Diagnostics) -> HeaderLine
         found.at(
             number,
             format!(
-                "`{key}` is not a valid header key; keys are letters, digits and `-`, \
-                 such as `Approved-by`"
+                "`{key}` is not a valid header key; keys are letters, digits, `-`, `_` \
+                 and `.`, such as `Approved-by`"
             ),
         );
         return verbatim();

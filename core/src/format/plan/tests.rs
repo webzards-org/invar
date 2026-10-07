@@ -1,5 +1,5 @@
 //! Tests for Plan parsing and writing (M1-6), against
-//! `contracts/formats/plan-header.md` v1.3.0.
+//! `contracts/formats/plan-header.md` v1.4.0.
 //!
 //! The valid Plan used throughout is the contract's own example 9.1, read out
 //! of the Markdown, so the contract and the parser cannot drift apart.
@@ -720,6 +720,160 @@ fn none_does_not_count_as_acceptance_criteria() {
         found[0].contains("`_none_` is not accepted here"),
         "{found:#?}"
     );
+}
+
+// --- what counts as content (plan-header.md D-14) ---------------------------
+
+/// Example 9.1 with its acceptance criteria replaced by `content`.
+fn with_criteria(content: &str) -> String {
+    let criteria = parse(&valid()).acceptance_criteria().unwrap().to_owned();
+    replace(&valid(), &criteria, &format!("{content}\n\n"))
+}
+
+/// `content` as the acceptance criteria is rejected, and as nothing else than
+/// an empty section.
+fn assert_criteria_rejected(content: &str) {
+    let found = messages(&with_criteria(content), Mode::Light);
+    assert_eq!(found.len(), 1, "{content:?}: {found:#?}");
+    assert!(
+        found[0].contains("`## Acceptance criteria` is empty"),
+        "{content:?}: {found:#?}"
+    );
+}
+
+#[test]
+fn placeholders_do_not_count_as_acceptance_criteria() {
+    for content in [
+        "_none_",
+        "none",
+        "None.",
+        "N/A",
+        "n/a",
+        "TBD",
+        "**TBD**",
+        "- TBD",
+        "* todo",
+        "1. TODO",
+        // Several placeholders are still no criterion.
+        "TBD\n\n_none_\n\nn/a",
+    ] {
+        assert_criteria_rejected(content);
+    }
+}
+
+#[test]
+fn markers_and_comments_do_not_count_as_acceptance_criteria() {
+    for content in [
+        "-",
+        "- ",
+        "*",
+        "+",
+        "1.",
+        "2)",
+        "- [ ]",
+        "- [x]",
+        "- - -",
+        "-\n-\n-",
+        "...",
+        "\u{2026}",
+        "<!-- fill in -->",
+        "- <!-- one criterion per item -->",
+        "<!-- fill in\nlater -->",
+        // Never closed: everything after it is hidden, as when rendered.
+        "<!-- never closed\n- Given a paid order, when I cancel it, then it is refused.",
+    ] {
+        assert_criteria_rejected(content);
+    }
+}
+
+#[test]
+fn real_criteria_are_accepted_whatever_their_form() {
+    for content in [
+        "- Given a paid order, when I cancel it, then it is refused.",
+        "Given a paid order, when I cancel it, then it is refused.",
+        "1. Given a paid order, when I cancel it, then it is refused.",
+        "- [ ] Given a paid order, when I cancel it, then it is refused.",
+        "<!-- one criterion per item -->\n- Given a paid order, when I cancel it, then it is refused.",
+        "<!-- note --> Given a paid order, when I cancel it, then it is refused.",
+        // A placeholder next to a real criterion does not cancel it.
+        "TBD\n- Given a paid order, when I cancel it, then it is refused.",
+        // Not English, and not ASCII.
+        "- Ako je narud\u{17E}bina pla\u{107}ena, zahtev se odbija sa 403.",
+        // A number or a `#` inside the text is just text.
+        "- Order #214 is refused, not cancelled.",
+        // Starting with a placeholder word is not being one.
+        "None of the unpaid orders is deleted.",
+        "1.5 seconds after the click the button is disabled.",
+    ] {
+        Plan::parse(&with_criteria(content), Mode::Light)
+            .unwrap_or_else(|problems| panic!("{content:?} was refused:\n{problems}"));
+    }
+}
+
+#[test]
+fn a_comment_is_not_content_in_any_required_section() {
+    let plan = parse(&valid());
+    for heading in ["Intent", "Scope", "Implementation context"] {
+        let content = plan.section(heading).unwrap();
+        let text = replace(
+            &valid(),
+            &format!("## {heading}\n{content}"),
+            &format!("## {heading}\n<!-- todo -->\n\n"),
+        );
+        let found = messages(&text, Mode::Light);
+        assert_eq!(found.len(), 1, "{heading}: {found:#?}");
+        assert!(
+            found[0].contains(&format!("`## {heading}` is empty")),
+            "{heading}: {found:#?}"
+        );
+    }
+}
+
+#[test]
+fn placeholders_are_a_rule_of_the_acceptance_criteria_only() {
+    // "None." is a fine answer to "were there open questions?" (§6.1).
+    let plan = parse(&valid());
+    let content = plan.section("Open questions / answers").unwrap();
+    let text = replace(
+        &valid(),
+        &format!("## Open questions / answers\n{content}"),
+        "## Open questions / answers\nNone.\n\n",
+    );
+    parse(&text);
+}
+
+// --- edges ------------------------------------------------------------------
+
+#[test]
+fn a_heading_on_the_last_line_without_a_line_ending_is_an_empty_section() {
+    let text = format!("{}\n## Notes", valid());
+    let plan = parse(&text);
+    assert_eq!(plan.section("Notes"), Some(""));
+    assert_eq!(plan.to_text(), text);
+}
+
+#[test]
+fn an_empty_header_reports_every_missing_key() {
+    let found = messages("---\n---\n", Mode::Light);
+    let missing = found
+        .iter()
+        .filter(|m| m.contains("the header has no `"))
+        .count();
+    assert_eq!(missing, 6, "{found:#?}");
+}
+
+#[test]
+fn a_fence_is_closed_only_by_a_bare_fence_line() {
+    // The inner ```php line has an info string, so it cannot close the outer
+    // fence: the heading after it is still part of the example.
+    let text = replace(
+        &valid(),
+        "## Scope\n",
+        "Example:\n\n```markdown\n```php\n## Implementation context\n## Scope\n```\n\n## Scope\n",
+    );
+    let plan = parse(&text);
+    assert!(plan.section("Intent").unwrap().contains("```php"));
+    assert_eq!(plan.sections().len(), 7);
 }
 
 #[test]
