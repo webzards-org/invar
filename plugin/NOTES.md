@@ -498,7 +498,7 @@ needs and ignore the rest — which is what `invar plan guard` does.
 |---|---|---|---|
 | **Deny** — the path is an approved Plan's `spec.md` | `hookSpecificOutput` with `permissionDecision: "deny"` and the reason | the reason | **2** |
 | **Pass** — a draft Plan, any other file | nothing | nothing | 0 |
-| **Unsure** — input it cannot make sense of | `{"systemMessage": "invar plan guard: …; the edit is allowed"}` | the same text | 0 |
+| **Unsure** — input it cannot make sense of | `{"systemMessage": "invar plan guard: …; the tool call is allowed"}` | the same text | 0 |
 
 Deny uses both signals on purpose: either blocks on its own in Claude Code,
 and exit 2 also makes the verdict obvious to a script or a CI test that pipes
