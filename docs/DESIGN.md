@@ -575,8 +575,15 @@ content always produces the same digest:
 
 1. decode as UTF-8, strip a BOM if present
 2. normalize line endings: `\r\n` and `\r` → `\n`
-3. strip trailing whitespace from every line
-4. strip trailing blank lines, then append exactly one `\n`
+3. strip trailing whitespace from every line — *whitespace* meaning every code
+   point with the Unicode `White_Space` property (space, tab, no-break space,
+   `U+0085`, `U+2028`, `U+3000`, …), and nothing else: not `U+FEFF`, not
+   `U+200B`, not the ASCII control characters `U+001C`–`U+001F`. Only `\n`
+   ends a line (step 2 has already turned every other terminator into one);
+   `U+2028` in the middle of a line is content
+4. strip trailing blank lines, then append exactly one `\n` — **unless nothing
+   is left**: an empty result stays the empty string, and nothing is appended.
+   Its digest is therefore the SHA-256 of zero bytes
 5. for a `.feature`, hash only the body — everything after the metadata block;
    for a Plan, only the body — everything after the YAML header
 

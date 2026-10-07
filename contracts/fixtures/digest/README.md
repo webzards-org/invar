@@ -74,14 +74,22 @@ expected digest is the well-known SHA-256 of zero bytes
 (`e3b0c442…b855`), which makes the group double as a self-check — an
 implementation that gets a different value there has a bug in its hashing, not
 in its canonicalization. An empty `.feature` body is invalid anyway (§4), so
-nothing downstream depends on the other reading.
+nothing downstream depends on the other reading. §4d step 4 now states the
+rule itself ("unless nothing is left"), so this is no longer a deviation from
+the text but its wording.
 
-**D-2 — Trailing whitespace is stripped per line with Unicode-aware
-semantics.** Rust's `str::trim_end()` and Python's `str.rstrip()` agree on
-ASCII space and tab, which is all the fixtures exercise. They do *not* agree on
-every Unicode whitespace code point, so no fixture depends on those — if a
-future fixture needs one, the specification has to say which definition wins
-before the fixture is added.
+**D-2 — Trailing whitespace is every code point with the Unicode `White_Space`
+property, and nothing else.** §4d now says so explicitly. Rust's
+`str::trim_end()` implements exactly that definition. Python's bare
+`str.rstrip()` does *not*: it also strips the ASCII control characters
+`U+001C`–`U+001F`, so `tools/generate.py` strips an explicit `White_Space` set
+instead (`UNICODE_WHITE_SPACE`). Not whitespace, and therefore kept: `U+FEFF`,
+`U+200B`–`U+200D`, `U+2060`, `U+180E`, `U+001C`–`U+001F`. Only `\n` ends a line
+once step 2 has run, so `U+2028` inside a line is content, and at the end of
+one it is stripped like any other whitespace. The boundary is pinned by unit
+tests in `core/src/digest/tests.rs`, not by fixture files: a fixture of exotic
+whitespace would be destroyed by the same tooling the other fixtures resist.
+Any other implementation must use the same definition.
 
 **D-3 — `tools/generate.py` is executable code inside `contracts/`, which
 `contracts/README.md` otherwise forbids.** The exception is deliberate and
