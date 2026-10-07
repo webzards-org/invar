@@ -7,6 +7,7 @@ use tempfile::TempDir;
 
 use super::{LookupError, PlanDir, SPEC_FILE, find, open, parse_dir_name};
 use crate::format::plan::{Mode, PlanError};
+use crate::format::values::{is_slug, is_ticket};
 use crate::fs::ProjectRoot;
 
 /// A valid light-mode Plan for `ticket`: every required section, in order,
@@ -330,6 +331,46 @@ fn directory_names_follow_the_contract_shape() {
         "PROJ-412-x-",
     ] {
         assert_eq!(parse_dir_name(bad), None, "{bad:?}");
+    }
+}
+
+#[test]
+fn the_ticket_ends_where_its_digits_end_so_a_slug_may_start_with_digits() {
+    // The ticket's number stops at the first character that is not a digit,
+    // and a dash must follow: what comes after belongs to the slug.
+    assert_eq!(
+        parse_dir_name("PROJ-412-2fa-setup"),
+        Some(("PROJ-412", "2fa-setup"))
+    );
+    assert_eq!(parse_dir_name("PROJ-4-12-x"), Some(("PROJ-4", "12-x")));
+    // Letters straight after the number are neither a ticket nor a slug.
+    assert_eq!(parse_dir_name("PROJ-412x-reserve"), None);
+}
+
+#[test]
+fn a_directory_name_is_a_ticket_and_a_slug_as_the_shared_rules_define_them() {
+    // The shape of a directory name is not a third copy of the ticket and slug
+    // rules (plan-header.md §2): it is exactly a valid ticket, a dash and a
+    // valid slug, judged by `format::values`. If `parse_dir_name` ever grows
+    // rules of its own, one of these pairs stops agreeing.
+    //
+    // Slugs that start with `<digits>-` are left out on purpose: `PROJ` and
+    // `1-x` make the same text as `PROJ-1` and `x`, so the pair is not
+    // independent. (The split of such names is pinned by the test above.)
+    let tickets = [
+        "PROJ-1", "PROJ-412", "A-0", "A1B-7", "X9-99", // valid
+        "proj-1", "PROJ", "P-", "1P-1", "P_Q-1", "PROJ-1a", "-1", // not
+    ];
+    let slugs = [
+        "a", "reserve-stock", "2fa-setup", "x1-y2", // valid
+        "", "-a", "a-", "a--b", "A", "Reserve", "a_b", // not
+    ];
+    for ticket in tickets {
+        for slug in slugs {
+            let name = format!("{ticket}-{slug}");
+            let expected = (is_ticket(ticket) && is_slug(slug)).then_some((ticket, slug));
+            assert_eq!(parse_dir_name(&name), expected, "{name:?}");
+        }
     }
 }
 

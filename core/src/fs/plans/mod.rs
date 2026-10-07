@@ -31,6 +31,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::format::plan::{Mode, Plan, PlanError};
+use crate::format::values::{is_slug, is_ticket};
 
 use super::ProjectRoot;
 
@@ -175,21 +176,20 @@ pub fn list(root: &ProjectRoot) -> Result<Option<Vec<String>>, LookupError> {
 ///
 /// The split is unambiguous: the ticket's letters stop at its first dash, and
 /// its number stops at the first character that is not a digit.
+///
+/// What a ticket id and a slug *are* is not decided here: `is_ticket` and
+/// `is_slug` in `format::values` own those rules, so the directory name, the
+/// header's `Ticket` and the decision entry cannot drift apart. This function
+/// only finds the split.
 pub fn parse_dir_name(name: &str) -> Option<(&str, &str)> {
     let (prefix, rest) = name.split_once('-')?;
-    let mut prefix_chars = prefix.chars();
-    let prefix_ok = prefix_chars.next().is_some_and(|c| c.is_ascii_uppercase())
-        && prefix_chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
     let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
-    let slug = rest[digits..].strip_prefix('-')?;
-    let slug_ok = !slug.is_empty()
-        && slug.split('-').all(|group| {
-            !group.is_empty()
-                && group
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-        });
-    (prefix_ok && digits > 0 && slug_ok).then(|| (&name[..prefix.len() + 1 + digits], slug))
+    // The prefix, its dash and the digits are all ASCII up to here, so this
+    // is a character boundary.
+    let ticket_end = prefix.len() + 1 + digits;
+    let ticket = &name[..ticket_end];
+    let slug = name[ticket_end..].strip_prefix('-')?;
+    (is_ticket(ticket) && is_slug(slug)).then_some((ticket, slug))
 }
 
 /// Whether `query` occurs in `name` as a whole segment: no letter or digit
