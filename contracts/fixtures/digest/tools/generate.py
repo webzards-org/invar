@@ -43,12 +43,23 @@ FIXTURES_VERSION = "1.0.0"
 # --------------------------------------------------------------------------
 
 
+# Unicode White_Space (DESIGN.md 4d step 3, README D-2). Spelled out rather
+# than taken from str.rstrip(), which also strips U+001C-U+001F. U+000A and
+# U+000D are included for completeness; after step 2 neither can occur inside
+# a line.
+UNICODE_WHITE_SPACE = (
+    "\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680"
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000"
+)
+
+
 def canonicalize(raw: bytes) -> str:
     text = raw.decode("utf-8")               # 1. decode as UTF-8
     if text.startswith("﻿"):            #    strip a BOM if present
         text = text[1:]
     text = text.replace("\r\n", "\n").replace("\r", "\n")   # 2. line endings
-    lines = [line.rstrip() for line in text.split("\n")]    # 3. trailing ws
+    lines = [line.rstrip(UNICODE_WHITE_SPACE) for line in text.split("\n")]  # 3. trailing ws
     while lines and lines[-1] == "":         # 4. strip trailing blank lines
         lines.pop()
     if not lines:                            #    D-1: empty stays empty
