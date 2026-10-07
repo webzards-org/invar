@@ -311,3 +311,23 @@ fn the_help_says_a_bash_call_is_read_by_its_command() {
         .success()
         .stdout(contains("tool_input.command"));
 }
+
+#[test]
+fn a_hook_started_with_arguments_this_binary_does_not_know_is_not_a_denial() {
+    // A plugin written for a newer or an older `invar`. Exit 2 would make
+    // Claude Code block every Write, Edit and Bash call; a usage error must
+    // never look like a verdict, even when the payload piped in would be one.
+    let project = Project::new(APPROVED);
+    for args in [
+        &["plan", "guard", "--no-such-flag"][..],
+        &["plan", "guard-v2"],
+    ] {
+        Command::cargo_bin("invar")
+            .unwrap()
+            .args(args)
+            .write_stdin(edit(&project.root(), &project.path(SPEC)))
+            .assert()
+            .code(1)
+            .stdout("");
+    }
+}

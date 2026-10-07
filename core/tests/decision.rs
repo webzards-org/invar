@@ -3,7 +3,10 @@
 //! `GIT_COMMITTER_DATE`.
 
 use std::fs;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
+use std::process::{Command as Process, Stdio};
+use std::time::{Duration, Instant};
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -213,7 +216,7 @@ fn an_unknown_type_is_refused_by_the_parser() {
     project
         .record(&["--ticket", "SHOP-214", "--type", "fixed", "-m", "x"])
         .failure()
-        .code(2)
+        .code(1)
         .stderr(contains(
             "possible values: confirmed, correction, failed, note",
         ));
@@ -425,4 +428,50 @@ fn log_without_a_decisions_directory_says_so() {
         .assert()
         .success()
         .stdout(contains("no decision entries:").and(contains("does not exist")));
+}
+
+// --- order of work -----------------------------------------------------------
+
+#[test]
+fn the_project_is_looked_up_before_stdin_is_read() {
+    // Outside any project, with a stdin that stays open and never ends. The
+    // command has to say what is wrong, not wait for text it cannot use: when
+    // it read stdin first, this hung.
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = Process::new(env!("CARGO_BIN_EXE_invar"))
+        .args(["decision", "record", "--ticket", "SHOP-1", "--type", "note"])
+        .current_dir(dir.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Held, never written to and never closed.
+    let _open_stdin = child.stdin.take();
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "still waiting for stdin after 10 seconds: the command reads the entry's \
+                 text before it looks for the project"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+
+    assert!(!status.success());
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert!(stderr.contains("invar init"), "{stderr}");
 }

@@ -314,3 +314,18 @@ fn an_approval_written_by_hand_needs_reapprove() {
         ));
     assert_eq!(header_value(&project.read_spec(), "Approved-by"), "rade");
 }
+
+#[test]
+fn a_name_that_cannot_be_recorded_is_refused_before_the_criteria_are_shown() {
+    // `rade # admin` cannot be written into a header line as it is. That is
+    // known before anything is shown, so the person is not asked to read the
+    // criteria of an approval that was never going to be recorded.
+    let project = Project::new(Some("rade # admin"));
+    let draft = project.read_spec();
+    project
+        .approve(&["PROJ-412"])
+        .failure()
+        .stdout("")
+        .stderr(contains("cannot record the approval"));
+    assert_eq!(project.read_spec(), draft);
+}

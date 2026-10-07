@@ -237,11 +237,13 @@ fn all_drafts_with_no_drafts_exits_zero() {
 #[test]
 fn a_target_and_all_drafts_are_mutually_exclusive_and_one_is_required() {
     let project = Project::new("");
-    project.validate(&[]).failure().code(2);
+    // A usage error exits 1, never 2: 2 is reserved for `plan guard`'s denial
+    // (tests/cli.rs, `a_usage_error_never_exits_with_code_2`).
+    project.validate(&[]).failure().code(1);
     project
         .validate(&["PROJ-1", "--all-drafts"])
         .failure()
-        .code(2);
+        .code(1);
 }
 
 // --- project and config ---------------------------------------------------------

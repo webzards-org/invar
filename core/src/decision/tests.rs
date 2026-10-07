@@ -467,6 +467,49 @@ fn when_the_entry_cannot_be_written_the_plan_is_restored() {
         Err(RecordError::Io { .. })
     ));
     assert_eq!(fs::read_to_string(spec(&root)).unwrap(), original);
+    // The Plan was put back by an atomic write, which leaves nothing behind.
+    assert_eq!(plan_dir_files(&root), ["spec.md"]);
+}
+
+/// The names in the Plan's directory.
+fn plan_dir_files(root: &ProjectRoot) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(spec(root).parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_restored_plan_is_byte_identical_whatever_its_form() {
+    // A BOM, CRLF line endings, a comment line, an unknown key and an inline
+    // comment: everything a Plan keeps byte for byte has to come back the same
+    // from a restore, not only the plain case.
+    let original = format!(
+        "\u{FEFF}{}",
+        approved_plan()
+            .replace(
+                "Status: approved",
+                "# set by the planner\nStatus: approved   # keep\nOwner: team-orders"
+            )
+            .replace('\n', "\r\n")
+    );
+    let (_dir, root) = project(Some(&original));
+    fs::create_dir_all(root.decisions_dir().parent().unwrap()).unwrap();
+    fs::write(root.decisions_dir(), "not a directory").unwrap();
+
+    assert!(matches!(
+        record(
+            &root,
+            request("SHOP-214", Type::Failed, None),
+            NOW,
+            Mode::Light
+        ),
+        Err(RecordError::Io { .. })
+    ));
+    assert_eq!(fs::read(spec(&root)).unwrap(), original.as_bytes());
+    assert_eq!(plan_dir_files(&root), ["spec.md"]);
 }
 
 #[test]

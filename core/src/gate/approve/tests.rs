@@ -382,6 +382,79 @@ fn reapprove_on_a_draft_is_an_ordinary_approval() {
     assert_eq!(pending.replaces(), None);
 }
 
+#[test]
+fn a_draft_with_leftover_approval_values_is_approved_and_they_are_replaced() {
+    // plan-header.md §5.1 and §5.3: while `Status` says `draft` the approval
+    // values mean nothing. `plan approve` overwrites whatever the keys hold,
+    // without `--reapprove`, and the body is untouched.
+    let draft = contract_example("9.1")
+        .replace("Approved-by:\n", "Approved-by: someone-else\n")
+        .replace("Approved-at:\n", "Approved-at: 2020-01-01\n")
+        .replace(
+            "Approved-checksum:\n",
+            &format!("Approved-checksum: {SUM_A}\n"),
+        );
+    assert_ne!(
+        draft,
+        contract_example("9.1"),
+        "the leftovers must be in the header"
+    );
+    let (_dir, root, spec) = project(&draft);
+
+    let pending = pending(&root, &spec, false);
+    assert_eq!(pending.replaces(), None);
+    let approval = pending.commit("rade".into(), "2026-10-05".into()).unwrap();
+    assert_ne!(approval.checksum, SUM_A);
+
+    let written = fs::read_to_string(&spec).unwrap();
+    assert_eq!(
+        changed_lines(&draft, &written),
+        [
+            ("Status: draft\n".into(), "Status: approved\n".into()),
+            (
+                "Approved-by: someone-else\n".into(),
+                "Approved-by: rade\n".into()
+            ),
+            (
+                "Approved-at: 2020-01-01\n".into(),
+                "Approved-at: 2026-10-05\n".into()
+            ),
+            (
+                format!("Approved-checksum: {SUM_A}\n"),
+                format!("Approved-checksum: {}\n", approval.checksum)
+            ),
+        ]
+    );
+    for stale in ["someone-else", "2020-01-01", SUM_A] {
+        assert!(!written.contains(stale), "{stale} is still there");
+    }
+}
+
+#[test]
+fn values_that_cannot_be_written_are_refused_before_the_commit() {
+    // `plan approve` asks this before it prints the criteria, so a person
+    // never reads the criteria of an approval that cannot be recorded.
+    let draft = contract_example("9.1");
+    let (_dir, root, spec) = project(&draft);
+    let pending = pending(&root, &spec, false);
+
+    assert!(pending.check_values("rade", "2026-10-05").is_ok());
+    for (by, at) in [
+        ("rade # admin", "2026-10-05"),
+        ("rade", "05.10.2026"),
+        ("  ", "2026-10-05"),
+    ] {
+        assert!(
+            matches!(
+                pending.check_values(by, at),
+                Err(ApproveError::Unwritable(_))
+            ),
+            "{by:?} {at:?}"
+        );
+    }
+    assert_eq!(fs::read_to_string(&spec).unwrap(), draft);
+}
+
 // --- classify ------------------------------------------------------------------
 
 #[test]

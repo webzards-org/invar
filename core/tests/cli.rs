@@ -114,3 +114,41 @@ fn hash_appears_in_the_top_level_help() {
         .stdout(contains("hash"))
         .stdout(contains("whole file"));
 }
+
+// --- exit codes -------------------------------------------------------------
+
+#[test]
+fn a_usage_error_never_exits_with_code_2() {
+    // clap's own default for a usage error is 2. Here 2 means one thing:
+    // `plan guard` denying a tool call, which Claude Code blocks on
+    // (plugin/NOTES.md §11). A hook started with arguments this binary does not
+    // know would otherwise block every Write, Edit and Bash call in a session.
+    for args in [
+        &["bogus"][..],
+        &["plan", "bogus"],
+        &["plan", "guard", "--bogus"],
+        &["hash"],
+        &["decision", "record"],
+    ] {
+        invar()
+            .args(args)
+            .assert()
+            .failure()
+            .code(1)
+            .stdout("")
+            .stderr(contains("Usage"));
+    }
+}
+
+#[test]
+fn help_and_version_still_exit_zero() {
+    for args in [
+        &["--help"][..],
+        &["--version"],
+        &["plan", "--help"],
+        &["plan", "guard", "--help"],
+        &["decision", "record", "--help"],
+    ] {
+        invar().args(args).assert().success().stderr("");
+    }
+}
