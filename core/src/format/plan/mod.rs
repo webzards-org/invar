@@ -1,6 +1,6 @@
 //! The Plan: `.invar/plans/<TICKET>-<slug>/spec.md` (§4a).
 //!
-//! Implements `contracts/formats/plan-header.md` v1.4.0; section numbers and
+//! Implements `contracts/formats/plan-header.md` v1.4.1; section numbers and
 //! decision ids below (`§4.1`, `D-2`) point into it.
 //!
 //! **Reading** splits the file into four parts — opening delimiter, header,
@@ -392,8 +392,10 @@ pub struct Approval {
 }
 
 impl Approval {
-    /// Values a header line can hold and read back unchanged.
-    fn check(&self) -> Result<(), String> {
+    /// Values a header line can hold and read back unchanged. `Plan::approve`
+    /// asks it before it writes, and `plan approve` asks it first of all, before
+    /// a person is shown anything to approve.
+    pub fn check(&self) -> Result<(), String> {
         let by = self.by.as_str();
         if by.trim().is_empty() || by != by.trim() {
             return Err(format!(

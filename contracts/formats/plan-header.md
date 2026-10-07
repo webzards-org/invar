@@ -1,6 +1,6 @@
 # Contract: Plan header and required sections
 
-**Version:** 1.4.0 — what counts as content in a required section; see §10 for what changed and why
+**Version:** 1.4.1 — a draft's approval values are not an error; see §10 for what changed and why
 **Status:** stable
 **Implements:** §4a (Plan document structure), §4d (Checksums), §5c (Context
 delivery), §12 (Plan lifecycle); light mode L-1, L-2, L-5
@@ -133,8 +133,11 @@ approval is stale, and `plan check` refuses — and with it `invar done`
 
 ### 5.1 Consistency rules
 
-- `Status: draft` — the three approval values must be empty, and so must
-  `Lockfile-checksum` when the key is present.
+- `Status: draft` — the three approval values are expected to be empty, and so
+  is `Lockfile-checksum` when the key is present. Nothing treats a draft that
+  holds some as an error: `plan check` refuses every draft for being one, and
+  `plan approve` overwrites whatever the approval keys hold (§5.3). While
+  `Status` says `draft` the values mean nothing.
 - `Status: approved` — `Approved-by`, `Approved-at` and `Approved-checksum`
   must be non-empty. `Lockfile-checksum` may be absent, empty, or a digest.
 - `Ticket` must equal the `<TICKET>` part of the directory name.
@@ -146,11 +149,11 @@ approval is stale, and `plan check` refuses — and with it `invar done`
 and structure (§3, §4), the presence of every required key and the format of
 every non-empty value (§5), `Ticket` against the directory name (above), and
 the required sections (§6). It does not look at whether the Plan is approved:
-the first two rules above — the approval values against `Status` — are
+the second rule above — an `approved` Plan has its three values — is
 checked by `plan check` (M1-10), which `invar done` runs, and by
-`plan approve` before it approves (M1-9). A draft with empty approval values
-is therefore valid, and so is the Plan of example 9.3 as far as
-`plan validate` is concerned.
+`plan approve` (M1-9), which refuses such a Plan without `--reapprove`
+(D-12). A draft is valid whatever its approval values hold, and so is the
+Plan of example 9.3 as far as `plan validate` is concerned.
 
 ### 5.2 `Lockfile-checksum`
 
@@ -195,6 +198,9 @@ on every routine rebase.
      empty field.
    - `Approved-at` is today's date, `YYYY-MM-DD`, in the approver's local time
      zone, as git dates a commit made now (D-13).
+   - Both must be writable into a header line as they are — a name with a
+     newline or a ` #` in it is not — and a pair that is not is refused here,
+     before anything is shown.
 4. **Print `## Acceptance criteria`** — what the code will be judged against.
 5. **Write.** `Status` becomes `approved`; `Approved-by`, `Approved-at` and
    `Approved-checksum` get their values. `Approved-checksum` is the §4d digest
@@ -699,6 +705,24 @@ There is nothing for the developer to approve the change against, nothing for
 validate` reports it as an empty required section, naming the heading.
 
 ## 10. Version history
+
+**1.4.1 — a draft's approval values, and when they are checked (M1-9).**
+
+- §5.1 no longer says that `plan check` and `plan approve` check a draft's
+  approval values. They never did, and nothing needs them to: `plan check`
+  refuses a draft for being one, and `plan approve` overwrites the values
+  (§5.3). §5.1 now says so.
+- §5.3 step 3: values that cannot be written into a header line are refused
+  before the criteria are printed, not after.
+
+**Why:** the text promised a check that no command makes, so a reader
+implementing it from the contract would add a refusal the reference
+implementation does not have; and the order of §5.3 promised that nothing is
+shown for an approval that cannot be recorded, which the first implementation
+only kept for what git reports.
+
+**Compatibility:** no Plan that was valid becomes invalid, and none that was
+refused is accepted. The contract now describes what the core does.
 
 **1.4.0 — what counts as content (M1-6).**
 
