@@ -87,6 +87,12 @@ impl Instant {
     /// `Name <email> 1791224788 +0200` → that instant. `None` when the last
     /// two fields are not a Unix time and a `±hhmm` offset, or when the
     /// result falls outside the years 0000–9999.
+    ///
+    /// The offset's hours are 00–23 and its minutes 00–59, which is what
+    /// RFC 3339 allows and what the decision entry's `date` has to be. Real
+    /// zones stay between −12:00 and +14:00; the wider range only keeps a
+    /// `GIT_COMMITTER_DATE` that git itself accepts from turning into a date
+    /// no reader of the entry can parse.
     pub fn from_ident(ident: &str) -> Option<Self> {
         let mut fields = ident.split_whitespace().rev();
         let offset = fields.next()?;
@@ -102,7 +108,7 @@ impl Instant {
         }
         let hours: i32 = digits[..2].parse().ok()?;
         let minutes: i32 = digits[2..].parse().ok()?;
-        if minutes >= 60 {
+        if hours > 23 || minutes >= 60 {
             return None;
         }
         let instant = Self {
@@ -162,6 +168,14 @@ fn civil(seconds: i64) -> (i64, u32, u32, u32, u32, u32) {
 }
 
 fn run(dir: &Path, args: &[&str]) -> Result<std::process::Output, GitError> {
+    // Starting a process in a directory that is not there fails with
+    // `NotFound`, the very kind that means `git` is not installed. Without
+    // this check the developer would be told to install a git they have.
+    if !dir.is_dir() {
+        return Err(GitError::NotADirectory {
+            dir: dir.to_owned(),
+        });
+    }
     Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -208,6 +222,8 @@ pub enum GitError {
     },
     /// `user.name` is unset or empty.
     UserNameMissing { dir: PathBuf },
+    /// The directory `git` was to run in does not exist, or is not a directory.
+    NotADirectory { dir: PathBuf },
 }
 
 impl fmt::Display for GitError {
@@ -219,6 +235,11 @@ impl fmt::Display for GitError {
                  and the current date and time — install git, or add it to PATH"
             ),
             Self::CannotRun { source } => write!(f, "cannot run `git`: {source}"),
+            Self::NotADirectory { dir } => write!(
+                f,
+                "cannot run `git` in {}: it does not exist, or it is not a directory",
+                dir.display()
+            ),
             Self::Failed {
                 command,
                 status,

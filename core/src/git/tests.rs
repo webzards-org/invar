@@ -1,7 +1,9 @@
-//! Tests for the date and time arithmetic. Running `git` itself is covered
-//! by the CLI tests, which control its configuration through the environment.
+//! Tests for the date and time arithmetic, and for what can be decided
+//! without running `git` (a directory that is not there). Running `git`
+//! itself is covered by the CLI tests, which control its configuration
+//! through the environment.
 
-use super::Instant;
+use super::{GitError, Instant, today, user_name};
 use crate::calendar::civil_from_days;
 
 fn date(ident: &str) -> Option<String> {
@@ -74,6 +76,11 @@ fn malformed_idents_are_none() {
         "x <x> 1791153000 +200",
         "x <x> 1791153000 +02:00",
         "x <x> 1791153000 +0260",
+        // Hours 24 and up are not an RFC 3339 offset (see
+        // `offsets_are_limited_to_what_rfc_3339_allows`).
+        "x <x> 1791153000 +2400",
+        "x <x> 1791153000 -2400",
+        "x <x> 1791153000 +9959",
         "x <x> 9223372036854775807 +0100",
     ] {
         assert_eq!(date(ident), None, "{ident:?}");
@@ -130,4 +137,63 @@ fn an_instant_renders_local_with_its_offset_and_utc_for_filenames() {
     let early = Instant::from_ident("x <x> 1791324000 +0200").unwrap(); // 22:00:00Z
     assert_eq!(early.local_rfc3339(), "2026-10-07T00:00:00+02:00");
     assert_eq!(early.utc_stamp(), "2026-10-06-220000");
+}
+
+#[test]
+fn offsets_are_limited_to_what_rfc_3339_allows() {
+    // Hours are 00–23. An offset outside that would be written into a decision
+    // entry's `date` as something no reader can parse.
+    for ident in [
+        "x <x> 1791304632 +2400",
+        "x <x> 1791304632 -2400",
+        "x <x> 1791304632 +2500",
+        "x <x> 1791304632 +9959",
+        "x <x> 1791304632 -9959",
+    ] {
+        assert_eq!(Instant::from_ident(ident), None, "{ident:?}");
+    }
+
+    // The extremes real zones have (−12:00 and +14:00), and the widest offset
+    // the format allows, are accepted and rendered as they are.
+    // The base instant is 2026-10-06T16:37:12Z.
+    for (ident, rendered) in [
+        ("x <x> 1791304632 -1200", "2026-10-06T04:37:12-12:00"),
+        ("x <x> 1791304632 +1400", "2026-10-07T06:37:12+14:00"),
+        ("x <x> 1791304632 +2359", "2026-10-07T16:36:12+23:59"),
+    ] {
+        let instant = Instant::from_ident(ident).unwrap_or_else(|| panic!("{ident:?} refused"));
+        assert_eq!(instant.local_rfc3339(), rendered, "{ident:?}");
+    }
+}
+
+// --- a directory that is not there ------------------------------------------
+//
+// Starting a process in a missing directory fails with `NotFound`, the same
+// kind of error as a `git` that is not installed. These pin that the two are
+// told apart. Neither test needs `git` at all: the check comes first.
+
+#[test]
+fn a_missing_directory_is_not_reported_as_git_being_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("no-such-directory");
+
+    for result in [user_name(&missing).map(drop), today(&missing).map(drop)] {
+        let err = result.unwrap_err();
+        assert!(matches!(err, GitError::NotADirectory { .. }), "{err:?}");
+        let message = err.to_string();
+        assert!(message.contains("no-such-directory"), "{message}");
+        assert!(!message.contains("not found on PATH"), "{message}");
+        assert!(!message.contains("install git"), "{message}");
+    }
+}
+
+#[test]
+fn a_file_where_a_directory_was_expected_is_reported_the_same_way() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("a-file");
+    std::fs::write(&file, "").unwrap();
+
+    let err = user_name(&file).unwrap_err();
+    assert!(matches!(err, GitError::NotADirectory { .. }), "{err:?}");
+    assert!(err.to_string().contains("a-file"), "{err}");
 }
