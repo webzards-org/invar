@@ -390,3 +390,119 @@ fn is_root() -> bool {
     let probe = tempfile::NamedTempFile::new().unwrap();
     probe.as_file().metadata().unwrap().uid() == 0
 }
+
+// --- symbolic links that point nowhere --------------------------------------
+//
+// The operating system reports a dangling symlink as `NotFound`, exactly like
+// a name that does not exist. A write through it, though, creates the file at
+// its target, so `relative_path` has to report the target (M1-4, and the
+// `PreToolUse` guard that relies on it, M1-10).
+
+#[cfg(unix)]
+mod dangling_symlinks {
+    use std::os::unix::fs::symlink;
+
+    use super::*;
+
+    /// A project with `.invar/decisions/` and `.invar/plans/`, and a directory
+    /// beside it. Returns the temp dir, the root, and the project's path
+    /// as the test built it (not canonicalized).
+    fn setup() -> (TempDir, ProjectRoot, PathBuf) {
+        let dir = tree(&[
+            "project/invar.yaml",
+            "project/.invar/decisions/",
+            "project/.invar/plans/",
+            "elsewhere/",
+        ]);
+        let project = dir.path().join("project");
+        let root = ProjectRoot::discover_from(&project).unwrap();
+        (dir, root, project)
+    }
+
+    fn relative(root: &ProjectRoot, path: &Path) -> Option<PathBuf> {
+        root.relative_path(path).unwrap()
+    }
+
+    #[test]
+    fn a_dangling_link_that_points_out_of_the_project_is_outside() {
+        // Reported as `out-link`, inside the project, a write through it would
+        // be allowed: it creates `elsewhere/new.md`.
+        let (_dir, root, project) = setup();
+        let link = project.join("out-link");
+        symlink("../elsewhere/new.md", &link).unwrap();
+
+        assert_eq!(relative(&root, &link), None);
+    }
+
+    #[test]
+    fn a_dangling_link_to_a_protected_path_is_that_path() {
+        // Reported as `shortcut`, the decision log could be written to under
+        // another name.
+        let (_dir, root, project) = setup();
+        let link = project.join("shortcut");
+        symlink(".invar/decisions/new.md", &link).unwrap();
+
+        assert_eq!(
+            relative(&root, &link).as_deref(),
+            Some(Path::new(".invar/decisions/new.md"))
+        );
+    }
+
+    #[test]
+    fn an_absolute_link_target_is_followed_too() {
+        let (_dir, root, project) = setup();
+        let link = project.join("absolute");
+        symlink(root.path().join(".invar/decisions/abs.md"), &link).unwrap();
+
+        assert_eq!(
+            relative(&root, &link).as_deref(),
+            Some(Path::new(".invar/decisions/abs.md"))
+        );
+    }
+
+    #[test]
+    fn a_chain_of_dangling_links_is_followed_to_its_end() {
+        let (_dir, root, project) = setup();
+        symlink(".invar/decisions/chained.md", project.join("second")).unwrap();
+        symlink("second", project.join("first")).unwrap();
+
+        assert_eq!(
+            relative(&root, &project.join("first")).as_deref(),
+            Some(Path::new(".invar/decisions/chained.md"))
+        );
+    }
+
+    #[test]
+    fn a_dangling_link_in_the_middle_of_a_path_is_followed_too() {
+        // `plans-link` points at a directory that does not exist yet; a file
+        // below it would be created there once the directory is.
+        let (_dir, root, project) = setup();
+        symlink(".invar/plans/PROJ-9-new", project.join("plans-link")).unwrap();
+
+        assert_eq!(
+            relative(&root, &project.join("plans-link/spec.md")).as_deref(),
+            Some(Path::new(".invar/plans/PROJ-9-new/spec.md"))
+        );
+    }
+
+    #[test]
+    fn a_link_that_loops_is_an_error_not_a_hang() {
+        let (_dir, root, project) = setup();
+        symlink("b", project.join("a")).unwrap();
+        symlink("a", project.join("b")).unwrap();
+
+        assert!(root.relative_path(&project.join("a")).is_err());
+    }
+
+    #[test]
+    fn a_missing_name_next_to_a_dangling_link_is_still_just_missing() {
+        // Following links must not change the ordinary case.
+        let (_dir, root, project) = setup();
+        symlink(".invar/decisions/new.md", project.join("shortcut")).unwrap();
+
+        assert_eq!(
+            relative(&root, &project.join("specs/orders/new.feature")).as_deref(),
+            Some(Path::new("specs/orders/new.feature"))
+        );
+    }
+}
