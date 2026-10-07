@@ -19,10 +19,52 @@ use super::{InvalidUtf8, canonicalize, canonicalize_bytes, digest};
 const EMPTY_DIGEST: &str =
     "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
+/// Every code point with the Unicode `White_Space` property except the two
+/// line terminators, `U+000A` and `U+000D` (§4d step 3, D-2).
+///
+/// Spelled out on purpose instead of asking `char::is_whitespace`: a test that
+/// derives its expectation from the code under test cannot fail.
+/// `the_explicit_set_is_exactly_rusts_white_space` ties this list to the
+/// standard library, so the two cannot drift apart unnoticed.
+const UNICODE_WHITE_SPACE: &[char] = &[
+    '\u{0009}', '\u{000B}', '\u{000C}', '\u{0020}', '\u{0085}', '\u{00A0}', '\u{1680}', '\u{2000}',
+    '\u{2001}', '\u{2002}', '\u{2003}', '\u{2004}', '\u{2005}', '\u{2006}', '\u{2007}', '\u{2008}',
+    '\u{2009}', '\u{200A}', '\u{2028}', '\u{2029}', '\u{202F}', '\u{205F}', '\u{3000}',
+];
+
+/// Code points that look like whitespace, or behave like it elsewhere (Python's
+/// `str.rstrip()` strips the `U+001C`–`U+001F` controls), but are *not*
+/// `White_Space` and so are content (§4d step 3, D-2).
+const NOT_WHITE_SPACE: &[char] = &[
+    '\u{001C}', '\u{001D}', '\u{001E}', '\u{001F}', '\u{180E}', '\u{200B}', '\u{200C}', '\u{200D}',
+    '\u{2060}', '\u{FEFF}',
+];
+
 // --- fixtures ---------------------------------------------------------------
 
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/fixtures/digest")
+}
+
+/// Read a fixture file as raw bytes.
+///
+/// Bytes, never a line-oriented reader: one that normalizes terminators for us
+/// would make crlf.txt and lf.txt identical and the tests would pass without
+/// testing anything.
+fn read_fixture(path: &str) -> Vec<u8> {
+    fs::read(fixtures_dir().join(path))
+        .unwrap_or_else(|err| panic!("reading fixture {path}: {err}"))
+}
+
+/// Canonicalize bytes already read from the fixture `path`, naming the file in
+/// the panic if they are not valid UTF-8.
+fn canonical_of(path: &str, bytes: &[u8]) -> String {
+    canonicalize_bytes(bytes).unwrap_or_else(|err| panic!("{path}: {err}"))
+}
+
+/// Read and canonicalize a fixture file in one step.
+fn canonical_fixture(path: &str) -> String {
+    canonical_of(path, &read_fixture(path))
 }
 
 struct Group {
@@ -71,11 +113,7 @@ fn canonicalize_all_fixtures() -> Vec<(String, String)> {
             let mut canonical_of_group: Option<String> = None;
 
             for (path, recorded_bytes) in &group.files {
-                // Bytes, never a line-oriented reader: one that normalizes
-                // terminators for us would make crlf.txt and lf.txt identical
-                // and the test would pass without testing anything.
-                let bytes = fs::read(fixtures_dir().join(path))
-                    .unwrap_or_else(|err| panic!("reading fixture {path}: {err}"));
+                let bytes = read_fixture(path);
 
                 assert_eq!(
                     bytes.len(),
@@ -85,8 +123,7 @@ fn canonicalize_all_fixtures() -> Vec<(String, String)> {
                     bytes.len(),
                 );
 
-                let canonical =
-                    canonicalize_bytes(&bytes).unwrap_or_else(|err| panic!("{path}: {err}"));
+                let canonical = canonical_of(path, &bytes);
 
                 assert_eq!(
                     canonical.len(),
@@ -143,14 +180,8 @@ fn every_fixture_digests_to_its_groups_expected_digest() {
     let mut walked = 0;
     for group in &groups {
         for (path, _) in &group.files {
-            // Bytes, never a line-oriented reader (see above).
-            let bytes = fs::read(fixtures_dir().join(path))
-                .unwrap_or_else(|err| panic!("reading fixture {path}: {err}"));
-            let canonical =
-                canonicalize_bytes(&bytes).unwrap_or_else(|err| panic!("{path}: {err}"));
-
             assert_eq!(
-                digest(&canonical),
+                digest(&canonical_fixture(path)),
                 group.expected_digest,
                 "{path} does not hash to group `{}`'s expected digest",
                 group.name,
@@ -181,10 +212,7 @@ fn empty_group_yields_the_sha256_of_zero_bytes() {
     assert_eq!(group.expected_digest, EMPTY_DIGEST);
 
     for (path, _) in &group.files {
-        let bytes = fs::read(fixtures_dir().join(path))
-            .unwrap_or_else(|err| panic!("reading fixture {path}: {err}"));
-        let canonical = canonicalize_bytes(&bytes).unwrap_or_else(|err| panic!("{path}: {err}"));
-        assert_eq!(digest(&canonical), EMPTY_DIGEST, "{path}");
+        assert_eq!(digest(&canonical_fixture(path)), EMPTY_DIGEST, "{path}");
     }
 }
 
@@ -239,7 +267,7 @@ fn idempotent_on_messy_input() {
 
 #[test]
 fn empty_result_is_the_empty_string_not_a_newline() {
-    // D-1.
+    // D-1: §4d step 4, "unless nothing is left".
     for input in [
         "",
         "\n",
@@ -247,6 +275,8 @@ fn empty_result_is_the_empty_string_not_a_newline() {
         "   \n\t\n  ",
         "\u{FEFF}",
         "\u{FEFF}\r\n  \r\n",
+        // Whitespace that is not ASCII counts too (D-2).
+        "\u{00A0}\u{3000}\n\u{2028}",
     ] {
         assert_eq!(canonicalize(input), "", "input {input:?}");
     }
@@ -304,6 +334,98 @@ fn multi_byte_characters_survive_whitespace_stripping() {
         canonicalize("Ćirilica: Београд \t\r\nkafa: ☕  \r\n"),
         "Ćirilica: Београд\nkafa: ☕\n",
     );
+}
+
+// --- step 3: what counts as whitespace (D-2) --------------------------------
+
+#[test]
+fn the_explicit_set_is_exactly_rusts_white_space() {
+    // Ties the hand-written list above to the standard library over the whole
+    // code space. If a future Unicode version ever changed `White_Space`, this
+    // fails — and with it the question of whether §4d, the Python reference
+    // in `contracts/fixtures/digest/tools/generate.py` and this list still
+    // agree becomes a deliberate decision rather than a silent drift.
+    let mut expected: Vec<char> = UNICODE_WHITE_SPACE.to_vec();
+    expected.extend(['\n', '\r']);
+    expected.sort_unstable();
+
+    let actual: Vec<char> = (0..=char::MAX as u32)
+        .filter_map(char::from_u32)
+        .filter(|c| c.is_whitespace())
+        .collect();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn every_unicode_white_space_is_stripped_from_the_end_of_a_line() {
+    for &c in UNICODE_WHITE_SPACE {
+        assert_eq!(canonicalize(&format!("alpha{c}\n")), "alpha\n", "{c:?}");
+        assert_eq!(
+            canonicalize(&format!("alpha{c}{c}\nbeta{c}\n")),
+            "alpha\nbeta\n",
+            "{c:?}"
+        );
+    }
+}
+
+#[test]
+fn every_unicode_white_space_is_kept_at_the_start_and_inside_a_line() {
+    for &c in UNICODE_WHITE_SPACE {
+        // Indentation is content...
+        let indented = format!("{c}alpha\n");
+        assert_eq!(canonicalize(&indented), indented, "{c:?}");
+        // ...and so is whitespace between two words.
+        let interior = format!("alpha{c}beta\n");
+        assert_eq!(canonicalize(&interior), interior, "{c:?}");
+    }
+}
+
+#[test]
+fn a_line_of_unicode_white_space_is_a_blank_line() {
+    for &c in UNICODE_WHITE_SPACE {
+        // Trailing: stripped with the other blank lines.
+        assert_eq!(canonicalize(&format!("alpha\n{c}\n")), "alpha\n", "{c:?}");
+        // Interior: stays, as an empty line.
+        assert_eq!(
+            canonicalize(&format!("alpha\n{c}\nbeta\n")),
+            "alpha\n\nbeta\n",
+            "{c:?}"
+        );
+        // Alone: nothing is left (D-1).
+        assert_eq!(canonicalize(&format!("{c}\n")), "", "{c:?}");
+    }
+}
+
+#[test]
+fn mixed_trailing_white_space_is_stripped_in_one_pass() {
+    assert_eq!(
+        canonicalize("alpha \u{00A0}\t\u{3000}\u{2009}\nbeta\u{0085}\n"),
+        "alpha\nbeta\n",
+    );
+}
+
+#[test]
+fn only_lf_ends_a_line_so_u2028_and_u0085_inside_a_line_are_content() {
+    // U+2028 and U+0085 are line breaks in some definitions; here they are not.
+    assert_eq!(canonicalize("alpha\u{2028}beta\n"), "alpha\u{2028}beta\n");
+    assert_eq!(canonicalize("alpha\u{0085}beta\n"), "alpha\u{0085}beta\n");
+    // At the end of a line they are whitespace like any other.
+    assert_eq!(canonicalize("alpha\u{2028}\nbeta\n"), "alpha\nbeta\n");
+}
+
+#[test]
+fn code_points_that_are_not_white_space_are_content() {
+    for &c in NOT_WHITE_SPACE {
+        assert!(!c.is_whitespace(), "{c:?} is whitespace after all");
+
+        // Not stripped from the end of a line...
+        let trailing = format!("alpha{c}\n");
+        assert_eq!(canonicalize(&trailing), trailing, "{c:?}");
+        // ...and a line made of one is not blank, so it survives.
+        let alone = format!("alpha\n{c}\n");
+        assert_eq!(canonicalize(&alone), alone, "{c:?}");
+    }
 }
 
 // --- step 1: decoding -------------------------------------------------------
