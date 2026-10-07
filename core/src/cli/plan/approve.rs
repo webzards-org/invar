@@ -1,9 +1,11 @@
 //! `invar plan approve <TICKET | PATH> [--reapprove]`.
 //!
 //! Order matters: validate, read who is approving and today's date from git,
-//! print the acceptance criteria, and only then write. Anything that can
-//! fail fails before the criteria are shown, so a person never reads criteria
-//! for an approval that was not recorded.
+//! check that those values can be written, print the acceptance criteria, and
+//! only then write. Everything that can be known to fail fails before the
+//! criteria are shown, so a person does not read the criteria of an approval
+//! that was never going to be recorded. What is left is the file changing in
+//! the meantime, which the commit refuses, and a disk that fails.
 
 use anyhow::{Context as _, Result};
 
@@ -57,6 +59,7 @@ pub fn run(args: Args) -> Result<()> {
 
     let by = git::user_name(root.path())?;
     let at = git::today(root.path())?;
+    pending.check_values(&by, &at)?;
 
     let shown = target::shown(pending.spec(), &cwd);
     match pending.replaces() {
