@@ -1,8 +1,6 @@
 //! `invar decision record --ticket <T> --type <TYPE> [--module <M>] [--message <TEXT>]`.
 
-use std::io::{IsTerminal as _, Read as _};
-
-use anyhow::{Context as _, Result, bail};
+use anyhow::Result;
 use clap::builder::{PossibleValuesParser, TypedValueParser as _};
 
 use crate::cli::shown;
@@ -50,7 +48,7 @@ pub fn run(args: Args) -> Result<()> {
 
     let body = match args.message {
         Some(message) => message,
-        None => read_stdin()?,
+        None => crate::cli::read_stdin()?,
     };
     let request = Request {
         ticket: args.ticket,
@@ -77,21 +75,6 @@ pub fn run(args: Args) -> Result<()> {
         );
     }
     Ok(())
-}
-
-/// The entry's text from stdin. A terminal is refused: nobody is going to type
-/// it there, and waiting would only look like a hang.
-fn read_stdin() -> Result<String> {
-    let stdin = std::io::stdin();
-    if stdin.is_terminal() {
-        bail!("no text for the entry: give it with `--message \"…\"`, or pipe it on stdin");
-    }
-    let mut body = String::new();
-    stdin
-        .lock()
-        .read_to_string(&mut body)
-        .context("cannot read the entry's text from stdin")?;
-    Ok(body)
 }
 
 #[cfg(test)]

@@ -6,10 +6,11 @@
 //! can be called from a test, from CI or from a hook and behave identically
 //! (§13b).
 
+use std::io::{IsTerminal as _, Read as _};
 use std::path::Path;
 use std::process::ExitCode;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result, bail};
 use clap::{Parser, Subcommand};
 
 use crate::format::config;
@@ -17,8 +18,10 @@ use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
 
 mod decision;
+mod done;
 mod hash;
 mod plan;
+mod pr_body;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -51,12 +54,30 @@ pub enum Command {
     /// is gone, for the planner to read next time.
     #[command(subcommand)]
     Decision(decision::Command),
+    /// Render the Plan as a PR description.
+    ///
+    /// Fixed section order — Intent, Scope, Open questions / answers,
+    /// Rejected alternatives, Acceptance criteria, Implementation context —
+    /// with the ticket id and the approval line. The pasted `## Ticket` text
+    /// is left out unless `--with-ticket` is given. Refuses on a draft Plan:
+    /// a PR description describes an approved specification.
+    ///
+    /// `invar done` renders the same way, to `.invar/out/<TICKET>-pr.md`,
+    /// before it deletes the Plan (§12); this command is also usable on its
+    /// own while the Plan still exists.
+    PrBody(pr_body::Args),
+    /// Close a cycle: `plan check`, render the PR description, record a
+    /// `confirmed` decision entry, delete the Plan directory (§3, §7, §12).
+    ///
+    /// All-or-nothing: a draft or changed Plan refuses before anything is
+    /// written, and a failure at any later step leaves nothing after it
+    /// done. Warns, but does not refuse, when uncommitted changes exist
+    /// outside `.invar/`.
+    Done(done::Args),
     // The rest of M1 (docs/TASKS-M1.md):
-    //   done                             M1-12
     //   clean-spec                       M1-13
     //   context show                     M1-14
     //   init                             M1-15
-    //   pr-body                          M1-16
     // Later milestones: scenario validate | confirm, generate, lint, doctor.
 }
 
@@ -68,8 +89,26 @@ impl Cli {
             Command::Hash(args) => hash::run(args).map(|()| ExitCode::SUCCESS),
             Command::Plan(command) => plan::run(command),
             Command::Decision(command) => decision::run(command).map(|()| ExitCode::SUCCESS),
+            Command::PrBody(args) => pr_body::run(args).map(|()| ExitCode::SUCCESS),
+            Command::Done(args) => done::run(args).map(|()| ExitCode::SUCCESS),
         }
     }
+}
+
+/// A command's free-text body from stdin (`decision record`, `done`). A
+/// terminal is refused: nobody is going to type it there, and waiting would
+/// only look like a hang.
+fn read_stdin() -> Result<String> {
+    let stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        bail!("no text for the entry: give it with `--message \"…\"`, or pipe it on stdin");
+    }
+    let mut body = String::new();
+    stdin
+        .lock()
+        .read_to_string(&mut body)
+        .context("cannot read the entry's text from stdin")?;
+    Ok(body)
 }
 
 /// Read `invar.yaml` for a command: warnings to stderr, `scenarios: true`
