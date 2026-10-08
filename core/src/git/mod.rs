@@ -73,6 +73,45 @@ pub fn now(dir: &Path) -> Result<Instant, GitError> {
     })
 }
 
+/// Paths with uncommitted changes — staged, unstaged or untracked — relative
+/// to `dir`: `git status --porcelain=v1`, parsed leniently.
+///
+/// Used only to warn (`invar done`, `docs/TASKS-M1.md` M1-12), never to
+/// refuse: a developer may legitimately close a cycle and commit everything
+/// into the same PR. `-z` is NUL-separated and never quotes a path, so a
+/// filename with a space or a non-ASCII character still parses; a rename or a
+/// copy carries its old path as a second NUL-terminated field, which is
+/// skipped.
+pub fn uncommitted(dir: &Path) -> Result<Vec<PathBuf>, GitError> {
+    const COMMAND: &str = "git status --porcelain=v1 -z";
+    let output = run(
+        dir,
+        &["status", "--porcelain=v1", "--untracked-files=all", "-z"],
+    )?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    let mut paths = Vec::new();
+    let mut fields = output
+        .stdout
+        .split(|&byte| byte == 0)
+        .filter(|field| !field.is_empty());
+    while let Some(entry) = fields.next() {
+        // `XY <path>`: two status characters, a space, then the path.
+        if entry.len() < 3 {
+            continue;
+        }
+        let (x, y) = (entry[0], entry[1]);
+        paths.push(PathBuf::from(
+            String::from_utf8_lossy(&entry[3..]).into_owned(),
+        ));
+        if x == b'R' || x == b'C' || y == b'R' || y == b'C' {
+            fields.next();
+        }
+    }
+    Ok(paths)
+}
+
 /// A moment in time, as git reports it: seconds since the Unix epoch, and
 /// the UTC offset of the clock that read it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
