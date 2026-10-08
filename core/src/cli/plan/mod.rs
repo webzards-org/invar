@@ -10,7 +10,10 @@ use super::mode;
 mod approve;
 mod check;
 mod guard;
-mod target;
+// `done` and `pr-body` sit directly under `invar`, not under `plan`, but name
+// and locate a Plan the same way `plan check`/`plan approve` do — so this is
+// shared with them rather than reimplemented per command.
+pub(super) mod target;
 mod validate;
 
 #[derive(Debug, Subcommand)]

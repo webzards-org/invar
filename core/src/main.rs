@@ -14,10 +14,12 @@ mod cli;
 mod decision;
 mod diagnostics;
 mod digest;
+mod done;
 mod format;
 mod fs;
 mod gate;
 mod git;
+mod pr_body;
 
 use std::process::ExitCode;
 
