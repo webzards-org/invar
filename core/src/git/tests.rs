@@ -1,9 +1,12 @@
-//! Tests for the date and time arithmetic, and for what can be decided
-//! without running `git` (a directory that is not there). Running `git`
-//! itself is covered by the CLI tests, which control its configuration
+//! Tests for the date and time arithmetic, for what can be decided without
+//! running `git` (a directory that is not there), and for the branch queries
+//! — which run against a real repository built here. The identity and date
+//! commands run `git` in the CLI tests, which control its configuration
 //! through the environment.
 
-use super::{GitError, Instant, today, user_name};
+use std::path::Path;
+
+use super::{GitError, Instant, base_branch, branch_name, merged_branches, today, user_name};
 use crate::calendar::civil_from_days;
 
 fn date(ident: &str) -> Option<String> {
@@ -196,4 +199,196 @@ fn a_file_where_a_directory_was_expected_is_reported_the_same_way() {
     let err = user_name(&file).unwrap_err();
     assert!(matches!(err, GitError::NotADirectory { .. }), "{err:?}");
     assert!(err.to_string().contains("a-file"), "{err}");
+}
+
+// --- branches ---------------------------------------------------------------
+
+/// A real repository in a temporary directory. `git` is run here with the
+/// developer's own configuration out of the way, so a global `init.defaultBranch`
+/// or a signing key cannot change what the tests see.
+struct Repo {
+    dir: tempfile::TempDir,
+}
+
+impl Repo {
+    /// `main`, with one commit.
+    fn new() -> Self {
+        let repo = Self {
+            dir: tempfile::tempdir().unwrap(),
+        };
+        repo.git(&["init", "--quiet", "-b", "main"]);
+        repo.commit("initial");
+        repo
+    }
+
+    fn path(&self) -> &Path {
+        self.dir.path()
+    }
+
+    fn git(&self, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(self.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", self.path().join(".no-global-config"))
+            .env("HOME", self.path())
+            .output()
+            .expect("git runs");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    fn commit(&self, message: &str) {
+        self.git(&["commit", "--quiet", "--allow-empty", "-m", message]);
+    }
+}
+
+/// `main` at the initial commit; `feat/PROJ-1-merged` at the same commit, so
+/// it is merged; `feat/PROJ-2-open` one commit ahead, so it is not.
+fn repo_with_branches() -> Repo {
+    let repo = Repo::new();
+    repo.git(&["branch", "feat/PROJ-1-merged"]);
+    repo.git(&["checkout", "--quiet", "-b", "feat/PROJ-2-open"]);
+    repo.commit("work in progress");
+    repo.git(&["checkout", "--quiet", "main"]);
+    repo
+}
+
+#[test]
+fn a_configured_base_branch_is_used_as_it_is_and_git_is_not_asked() {
+    // `run` would refuse this directory, so git is demonstrably not called.
+    let nowhere = Path::new("/no/such/directory");
+    assert_eq!(base_branch(nowhere, Some("develop")).unwrap(), "develop");
+}
+
+#[test]
+fn without_origin_head_the_base_branch_is_main() {
+    let repo = Repo::new();
+    assert_eq!(base_branch(repo.path(), None).unwrap(), "main");
+}
+
+#[test]
+fn outside_a_repository_the_base_branch_is_still_main() {
+    // Not an error: whoever needs the branch asks git about it, and gets
+    // git's own answer.
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(base_branch(dir.path(), None).unwrap(), "main");
+}
+
+#[test]
+fn the_base_branch_is_what_origin_head_points_to() {
+    let repo = Repo::new();
+    repo.git(&["update-ref", "refs/remotes/origin/develop", "HEAD"]);
+    repo.git(&[
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/develop",
+    ]);
+    assert_eq!(base_branch(repo.path(), None).unwrap(), "origin/develop");
+    // What the project says wins over what is detected.
+    assert_eq!(
+        base_branch(repo.path(), Some("release")).unwrap(),
+        "release"
+    );
+}
+
+#[test]
+fn merged_branches_are_the_ones_already_in_the_base() {
+    let repo = repo_with_branches();
+    assert_eq!(
+        merged_branches(repo.path(), "main").unwrap(),
+        ["feat/PROJ-1-merged", "main"]
+    );
+}
+
+#[test]
+fn a_branch_and_its_remote_twin_are_one_branch() {
+    let repo = repo_with_branches();
+    repo.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    repo.git(&[
+        "update-ref",
+        "refs/remotes/origin/feat/PROJ-1-merged",
+        "HEAD",
+    ]);
+    repo.git(&[
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+    ]);
+    // Counted once, so a ticket does not look ambiguous because its branch
+    // exists here and on the server; and `origin/HEAD` is not a branch.
+    assert_eq!(
+        merged_branches(repo.path(), "origin/main").unwrap(),
+        ["feat/PROJ-1-merged", "main"]
+    );
+}
+
+#[test]
+fn a_merged_branch_that_exists_only_on_the_remote_is_found() {
+    let repo = repo_with_branches();
+    repo.git(&[
+        "update-ref",
+        "refs/remotes/origin/feat/PROJ-3-remote",
+        "HEAD",
+    ]);
+    let merged = merged_branches(repo.path(), "main").unwrap();
+    assert!(
+        merged.contains(&"feat/PROJ-3-remote".to_owned()),
+        "{merged:?}"
+    );
+}
+
+#[test]
+fn a_base_that_does_not_exist_is_git_failing_not_an_empty_list() {
+    // An empty list would read as "nothing is merged" and quietly skip every
+    // Plan; git's own error says what is wrong.
+    let repo = repo_with_branches();
+    let err = merged_branches(repo.path(), "no-such-branch").unwrap_err();
+    assert!(matches!(err, GitError::Failed { .. }), "{err:?}");
+}
+
+#[test]
+fn a_base_that_looks_like_an_option_is_not_taken_for_one() {
+    // `--merged=--all` names a commit called `--all`; it does not turn the
+    // option on and list everything.
+    let repo = repo_with_branches();
+    let err = merged_branches(repo.path(), "--all").unwrap_err();
+    assert!(matches!(err, GitError::Failed { .. }), "{err:?}");
+}
+
+#[test]
+fn ref_names_are_reduced_to_branch_names() {
+    assert_eq!(
+        branch_name("refs/heads/feat/PROJ-1-x").as_deref(),
+        Some("feat/PROJ-1-x")
+    );
+    assert_eq!(
+        branch_name("refs/remotes/origin/feat/PROJ-1-x").as_deref(),
+        Some("feat/PROJ-1-x")
+    );
+    assert_eq!(
+        branch_name("refs/remotes/upstream/main").as_deref(),
+        Some("main")
+    );
+    for not_a_branch in [
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin",
+        "refs/tags/v1",
+        "(HEAD detached at 1a2b3c4)",
+        "",
+    ] {
+        assert_eq!(branch_name(not_a_branch), None, "{not_a_branch:?}");
+    }
 }

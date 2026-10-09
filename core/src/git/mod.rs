@@ -5,6 +5,7 @@
 //! sees — global, per-repository, `includeIf`, environment overrides — without
 //! reimplementing any of it.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -110,6 +111,73 @@ pub fn uncommitted(dir: &Path) -> Result<Vec<PathBuf>, GitError> {
         }
     }
     Ok(paths)
+}
+
+/// The base branch (§12): `configured` — `git.base_branch` — when the
+/// project names one, else the branch `origin/HEAD` points to (`origin/main`),
+/// else `main`.
+///
+/// Not finding `origin/HEAD` is ordinary, not a failure: it exists in a clone
+/// and not in a repository that was `git init`ed, and §12 says what to use
+/// instead. Whether the branch exists is not checked here; the command that
+/// uses it asks git, and reports git's own answer.
+pub fn base_branch(dir: &Path, configured: Option<&str>) -> Result<String, GitError> {
+    if let Some(branch) = configured {
+        return Ok(branch.to_owned());
+    }
+    let output = run(
+        dir,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    )?;
+    if output.status.success() {
+        let name = text("git symbolic-ref", &output.stdout)?.trim();
+        if !name.is_empty() {
+            return Ok(name.to_owned());
+        }
+    }
+    Ok("main".to_owned())
+}
+
+/// The branches already merged into `base`, local and remote-tracking alike,
+/// by name without the remote — `origin/feat/x` is `feat/x` — each once and
+/// sorted: `git branch --all --merged=<base>`. `base` itself is among them.
+///
+/// Remote-tracking branches are included because a branch merged on the
+/// server and not yet deleted here is merged all the same, and counting one
+/// branch twice — as `feat/x` and as `origin/feat/x` — would make every such
+/// ticket look ambiguous. A merged branch that was deleted everywhere cannot
+/// be found: nothing remembers it.
+pub fn merged_branches(dir: &Path, base: &str) -> Result<Vec<String>, GitError> {
+    const COMMAND: &str = "git branch --all --merged";
+    // One argument, `--merged=<base>`: a base that begins with `-` cannot be
+    // taken for an option.
+    let merged = format!("--merged={base}");
+    let output = run(dir, &["branch", "--all", &merged, "--format=%(refname)"])?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    let listing = text(COMMAND, &output.stdout)?;
+    let names: BTreeSet<String> = listing
+        .lines()
+        .filter_map(|line| branch_name(line.trim()))
+        .collect();
+    Ok(names.into_iter().collect())
+}
+
+/// `refs/heads/feat/x` and `refs/remotes/origin/feat/x` are both `feat/x`.
+/// `None` for anything that is not a branch — the symbolic `origin/HEAD`, a
+/// detached `HEAD` — and for an empty line.
+fn branch_name(refname: &str) -> Option<String> {
+    if let Some(name) = refname.strip_prefix("refs/heads/") {
+        return Some(name.to_owned());
+    }
+    let (_remote, name) = refname.strip_prefix("refs/remotes/")?.split_once('/')?;
+    (name != "HEAD").then(|| name.to_owned())
 }
 
 /// A moment in time, as git reports it: seconds since the Unix epoch, and
