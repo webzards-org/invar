@@ -17,6 +17,7 @@ use crate::format::config;
 use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
 
+mod clean_spec;
 mod decision;
 mod done;
 mod hash;
@@ -74,8 +75,23 @@ pub enum Command {
     /// done. Warns, but does not refuse, when uncommitted changes exist
     /// outside `.invar/`.
     Done(done::Args),
+    /// Delete the Plans that abandoned cycles left behind (§12).
+    ///
+    /// A dry run by default: it lists what would be deleted, and why, and
+    /// deletes nothing. `--force` deletes the Plans listed as eligible.
+    ///
+    /// Only `.invar/plans/` is touched — never `.invar/decisions/`, never
+    /// project code. A Plan with no decision entry for its ticket is never
+    /// deleted: that is a cycle that did not close properly, a signal and not
+    /// garbage. Record a `failed` or `note` entry first (`invar decision
+    /// record`), which is the honest way to close an abandoned cycle.
+    ///
+    /// `TICKET` limits the run to one Plan; `--merged` to Plans whose ticket
+    /// names a branch already merged into the base branch. A run over
+    /// everything keeps an approved Plan, because its cycle may still be
+    /// running: name it, or use `--merged`, to delete it.
+    CleanSpec(clean_spec::Args),
     // The rest of M1 (docs/TASKS-M1.md):
-    //   clean-spec                       M1-13
     //   context show                     M1-14
     //   init                             M1-15
     // Later milestones: scenario validate | confirm, generate, lint, doctor.
@@ -91,6 +107,7 @@ impl Cli {
             Command::Decision(command) => decision::run(command).map(|()| ExitCode::SUCCESS),
             Command::PrBody(args) => pr_body::run(args).map(|()| ExitCode::SUCCESS),
             Command::Done(args) => done::run(args).map(|()| ExitCode::SUCCESS),
+            Command::CleanSpec(args) => clean_spec::run(args).map(|()| ExitCode::SUCCESS),
         }
     }
 }
@@ -113,12 +130,18 @@ fn read_stdin() -> Result<String> {
 
 /// Read `invar.yaml` for a command: warnings to stderr, `scenarios: true`
 /// refused (invar-yaml.md §3.1).
-fn mode(root: &ProjectRoot) -> Result<Mode> {
+fn config(root: &ProjectRoot) -> Result<config::Config> {
     let loaded = config::load_for_command(root)?;
     for warning in &loaded.warnings {
         eprintln!("warning: {}: {warning}", loaded.path.display());
     }
-    Ok(Mode::of(&loaded.config))
+    Ok(loaded.config)
+}
+
+/// The Plan shape the config selects, for the commands that need nothing else
+/// from it.
+fn mode(root: &ProjectRoot) -> Result<Mode> {
+    Ok(Mode::of(&config(root)?))
 }
 
 /// A path relative to the current directory when it is under it, so the paths
