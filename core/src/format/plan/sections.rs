@@ -254,37 +254,11 @@ fn report_missing(
 fn has_text(name: &str, content: &str) -> bool {
     let mut in_comment = false;
     content.lines().any(|line| {
-        let visible = without_comments(line, &mut in_comment);
+        let visible = crate::format::values::without_comments(line, &mut in_comment);
         let text = strip_checkbox(strip_list_marker(visible.trim()));
         text.chars().any(char::is_alphanumeric)
             && !(name == ACCEPTANCE_CRITERIA && is_placeholder(text))
     })
-}
-
-/// `line` without HTML comments. `in_comment` carries an unclosed `<!--` over
-/// to the next line, so a comment that spans lines hides all of them; one
-/// that is never closed hides the rest of the section, as it does when the
-/// Markdown is rendered.
-fn without_comments(line: &str, in_comment: &mut bool) -> String {
-    let mut visible = String::new();
-    let mut rest = line;
-    loop {
-        if *in_comment {
-            let Some(end) = rest.find("-->") else {
-                return visible;
-            };
-            rest = &rest[end + 3..];
-            *in_comment = false;
-        } else {
-            let Some(start) = rest.find("<!--") else {
-                visible.push_str(rest);
-                return visible;
-            };
-            visible.push_str(&rest[..start]);
-            rest = &rest[start + 4..];
-            *in_comment = true;
-        }
-    }
 }
 
 /// The line after a leading list marker: `-`, `*` or `+`, or digits followed
