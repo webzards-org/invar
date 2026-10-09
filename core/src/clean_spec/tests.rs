@@ -514,7 +514,7 @@ fn delete_removes_the_eligible_plans_and_leaves_everything_else() {
     let found = everything(&root);
     let removed = delete(&root, &found).unwrap();
 
-    assert_eq!(removed, [eligible.clone()]);
+    assert_eq!(removed.as_slice(), std::slice::from_ref(&eligible));
     assert!(!eligible.exists());
     assert!(no_entry.exists(), "no entry, never deleted");
     assert!(approved_dir.exists(), "approved, not asked for");
@@ -655,7 +655,7 @@ fn a_failed_removal_says_what_was_removed_before_it() {
     match result {
         Err(CleanError::Remove { path, removed, .. }) => {
             assert_eq!(path, second);
-            assert_eq!(removed, [first.clone()]);
+            assert_eq!(removed.as_slice(), std::slice::from_ref(&first));
         }
         other => panic!("expected Remove, got {other:?}"),
     }
