@@ -33,3 +33,35 @@ pub fn is_slug(value: &str) -> bool {
                     .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
         })
 }
+
+/// `line` without HTML comments (`<!-- … -->`).
+///
+/// A text rule rather than a value shape, but shared for the same reason as
+/// the shapes above: what counts as a comment decides what counts as written
+/// content, in a Plan's sections (plan-header.md D-14) and in a context file
+/// (`context`), and the two must not disagree.
+///
+/// `in_comment` carries an unclosed `<!--` over to the next line, so a comment
+/// that spans lines hides all of them; one that is never closed hides the rest
+/// of the text, as it does when the Markdown is rendered.
+pub fn without_comments(line: &str, in_comment: &mut bool) -> String {
+    let mut visible = String::new();
+    let mut rest = line;
+    loop {
+        if *in_comment {
+            let Some(end) = rest.find("-->") else {
+                return visible;
+            };
+            rest = &rest[end + 3..];
+            *in_comment = false;
+        } else {
+            let Some(start) = rest.find("<!--") else {
+                visible.push_str(rest);
+                return visible;
+            };
+            visible.push_str(&rest[..start]);
+            rest = &rest[start + 4..];
+            *in_comment = true;
+        }
+    }
+}
