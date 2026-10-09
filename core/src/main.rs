@@ -12,6 +12,7 @@
 mod calendar;
 mod clean_spec;
 mod cli;
+mod context;
 mod decision;
 mod diagnostics;
 mod digest;
