@@ -18,6 +18,7 @@ use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
 
 mod clean_spec;
+mod context;
 mod decision;
 mod done;
 mod hash;
@@ -91,8 +92,11 @@ pub enum Command {
     /// everything keeps an approved Plan, because its cycle may still be
     /// running: name it, or use `--merged`, to delete it.
     CleanSpec(clean_spec::Args),
+    /// Print the context the agents read: `AI_CONTEXT.md`,
+    /// `BUSINESS_CONTEXT.md` and the decision log (§5, §5c, §7).
+    #[command(subcommand)]
+    Context(context::Command),
     // The rest of M1 (docs/TASKS-M1.md):
-    //   context show                     M1-14
     //   init                             M1-15
     // Later milestones: scenario validate | confirm, generate, lint, doctor.
 }
@@ -108,6 +112,7 @@ impl Cli {
             Command::PrBody(args) => pr_body::run(args).map(|()| ExitCode::SUCCESS),
             Command::Done(args) => done::run(args).map(|()| ExitCode::SUCCESS),
             Command::CleanSpec(args) => clean_spec::run(args).map(|()| ExitCode::SUCCESS),
+            Command::Context(command) => context::run(command).map(|()| ExitCode::SUCCESS),
         }
     }
 }
