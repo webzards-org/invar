@@ -113,6 +113,35 @@ pub fn uncommitted(dir: &Path) -> Result<Vec<PathBuf>, GitError> {
     Ok(paths)
 }
 
+/// Where `dir` stands in relation to a git work tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkTree {
+    /// Inside a work tree whose top-level directory is this one.
+    Inside(PathBuf),
+    /// Not inside one — not a repository, or inside `.git` itself, or git
+    /// refused to look (an unsafe-ownership repository, say). Carries what git
+    /// said, so a refusal can pass it on instead of guessing.
+    Outside(String),
+}
+
+/// Whether `dir` is inside a git work tree, and where its top level is:
+/// `git rev-parse --show-toplevel`.
+///
+/// Being outside one is an answer, not a failure: `init` turns it into a
+/// message. Only a `git` that cannot run at all is an error.
+pub fn work_tree(dir: &Path) -> Result<WorkTree, GitError> {
+    let output = run(dir, &["rev-parse", "--show-toplevel"])?;
+    if output.status.success() {
+        let top = text("git rev-parse", &output.stdout)?.trim();
+        if !top.is_empty() {
+            return Ok(WorkTree::Inside(PathBuf::from(top)));
+        }
+    }
+    let said = String::from_utf8_lossy(&output.stderr);
+    let said = said.lines().next().unwrap_or("").trim();
+    Ok(WorkTree::Outside(said.to_owned()))
+}
+
 /// The base branch (§12): `configured` — `git.base_branch` — when the
 /// project names one, else the branch `origin/HEAD` points to (`origin/main`),
 /// else `main`.
