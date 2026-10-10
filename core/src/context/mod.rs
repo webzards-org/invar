@@ -533,12 +533,6 @@ impl fmt::Display for ContextError {
     }
 }
 
-impl std::error::Error for ContextError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Read { source, .. } => Some(source),
-            Self::Log(err) => Some(err),
-            Self::NotUtf8 { .. } | Self::InvalidModule { .. } | Self::OverLimit(_) => None,
-        }
-    }
-}
+// No `source()`: every variant's message already carries its cause, and
+// `main` prints the whole chain, so exposing it would print it twice.
+impl std::error::Error for ContextError {}
