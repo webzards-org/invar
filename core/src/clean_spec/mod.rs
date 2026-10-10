@@ -412,13 +412,6 @@ impl fmt::Display for CleanError {
     }
 }
 
-impl std::error::Error for CleanError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Lookup(err) => Some(err),
-            Self::Log(err) => Some(err),
-            Self::Remove { source, .. } => Some(source),
-            Self::AmbiguousBranches(_) | Self::NotAPlanName { .. } => None,
-        }
-    }
-}
+// No `source()`: every variant's message already carries its cause, and
+// `main` prints the whole chain, so exposing it would print it twice.
+impl std::error::Error for CleanError {}
