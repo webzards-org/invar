@@ -22,6 +22,7 @@ mod context;
 mod decision;
 mod done;
 mod hash;
+mod init;
 mod plan;
 mod pr_body;
 
@@ -96,8 +97,25 @@ pub enum Command {
     /// `BUSINESS_CONTEXT.md` and the decision log (§5, §5c, §7).
     #[command(subcommand)]
     Context(context::Command),
-    // The rest of M1 (docs/TASKS-M1.md):
-    //   init                             M1-15
+    /// Scaffold this directory as an invar project, in light mode.
+    ///
+    /// Run it in the directory that should hold `invar.yaml` — the project
+    /// root — inside a git repository. Creates `invar.yaml` (with `scenarios:
+    /// false` stated outright), `.invar/plans/`, `.invar/decisions/`, and
+    /// `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md` holding the marker and the
+    /// section headings only: never content, which only your team knows.
+    ///
+    /// Adds to `.gitattributes` (Plan line endings), `.gitignore`
+    /// (`.invar/out/`) and `.claude/settings.json` (a rule denying the Read
+    /// tool `.invar/decisions/**`; the planner reads the log through `invar
+    /// context show`). Those usually exist already: what is in them stays
+    /// exactly as it is, and a settings file that is not valid JSON is refused,
+    /// not replaced.
+    ///
+    /// Safe to run again: it says `unchanged` for every file that is already
+    /// right, and never touches `invar.yaml` or the context files once they
+    /// exist.
+    Init,
     // Later milestones: scenario validate | confirm, generate, lint, doctor.
 }
 
@@ -113,6 +131,7 @@ impl Cli {
             Command::Done(args) => done::run(args).map(|()| ExitCode::SUCCESS),
             Command::CleanSpec(args) => clean_spec::run(args).map(|()| ExitCode::SUCCESS),
             Command::Context(command) => context::run(command).map(|()| ExitCode::SUCCESS),
+            Command::Init => init::run().map(|()| ExitCode::SUCCESS),
         }
     }
 }
