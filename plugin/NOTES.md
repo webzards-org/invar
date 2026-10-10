@@ -606,3 +606,44 @@ claude -p "Use the Edit tool to change 403 to 409 in .invar/plans/<dir>/spec.md;
 
 `< /dev/null` matters: without it `claude -p` waits three seconds for stdin
 and prints a warning.
+
+## 12. The deny rule `invar init` writes — **not yet verified** (M1-15)
+
+`invar init` adds `Read(/.invar/decisions/**)` to `permissions.deny` in the
+project's `.claude/settings.json` (§13a). The planner gets the decision log
+through `invar context show`, which is a command and reads files itself, so
+denying the Read *tool* costs the planner nothing; the point is that the main
+session, which writes the code, does not stumble into the log and start
+"improving" the Plan instead of implementing it (§7).
+
+Nothing below was exercised against Claude Code. It is what the rule is
+assumed to do, from the permissions documentation:
+
+- A leading `/` anchors a Read rule at the **project root**, where `./` would
+  mean the current directory. That is why the rule is written with `/`: it has
+  to hold when the agent is working in `app/Http/`.
+- A Read deny is applied, on a best-effort basis, to the tools that read files
+  — `Grep` and `Glob` too — so a search does not surface the entries.
+- It does **not** stop a shell. `cat .invar/decisions/*.md` through `Bash` is
+  not covered. That is acceptable for the reason §13a gives: the log is
+  advisory, and a leak degrades Phase 2's focus; it cannot break a gate or
+  falsify a verdict.
+- Whether a *plugin* can ship a permission rule itself is still open (§11). If it
+  cannot, `init` is the only way the rule gets there.
+
+To verify, in a throwaway repository:
+
+```bash
+mkdir /tmp/deny-test && cd /tmp/deny-test && git init -q -b main && invar init
+invar decision record --ticket SHOP-1 --type note --module global -m "LOG-ONLY-TEXT"
+claude -p "Use the Read tool on .invar/decisions/*.md ... report what happened verbatim" \
+  --allowedTools Read,Grep < /dev/null
+```
+
+Expect the read to be denied and `LOG-ONLY-TEXT` not to appear. Then repeat from
+subdirectory (`mkdir sub && cd sub`) to check that the `/` anchor holds, with
+`Grep` for the text, and look at `/permissions` in an interactive session to see
+the rule listed. Record what happened here, and once it holds, remove "not yet
+verified" from the doc comment on `DENY_RULE` in `core/src/init/mod.rs`. If the
+anchor does not behave as assumed, the rule to write is `Read(./.invar/decisions/**)`
+and the limitation (a subdirectory) goes in this section.
