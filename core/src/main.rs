@@ -21,6 +21,7 @@ mod format;
 mod fs;
 mod gate;
 mod git;
+mod init;
 mod pr_body;
 
 use std::process::ExitCode;
