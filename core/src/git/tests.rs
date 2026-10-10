@@ -6,7 +6,10 @@
 
 use std::path::Path;
 
-use super::{GitError, Instant, base_branch, branch_name, merged_branches, today, user_name};
+use super::{
+    GitError, Instant, WorkTree, base_branch, branch_name, merged_branches, today, user_name,
+    work_tree,
+};
 use crate::calendar::civil_from_days;
 
 fn date(ident: &str) -> Option<String> {
@@ -366,6 +369,43 @@ fn a_base_that_looks_like_an_option_is_not_taken_for_one() {
     let repo = repo_with_branches();
     let err = merged_branches(repo.path(), "--all").unwrap_err();
     assert!(matches!(err, GitError::Failed { .. }), "{err:?}");
+}
+
+#[test]
+fn a_directory_inside_a_repository_reports_its_top_level() {
+    let repo = Repo::new();
+    let nested = repo.path().join("app/Http");
+    std::fs::create_dir_all(&nested).unwrap();
+    let top = repo.path().canonicalize().unwrap();
+
+    for dir in [repo.path(), nested.as_path()] {
+        match work_tree(dir).unwrap() {
+            WorkTree::Inside(found) => {
+                assert_eq!(found.canonicalize().unwrap(), top, "from {}", dir.display());
+            }
+            other => panic!("expected Inside, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_directory_outside_any_repository_is_an_answer_carrying_what_git_said() {
+    let dir = tempfile::tempdir().unwrap();
+
+    match work_tree(dir.path()).unwrap() {
+        WorkTree::Outside(said) => assert!(!said.is_empty(), "git said nothing"),
+        other => panic!("expected Outside, got {other:?}"),
+    }
+}
+
+#[test]
+fn inside_the_git_directory_itself_is_not_a_work_tree() {
+    let repo = Repo::new();
+
+    assert!(matches!(
+        work_tree(&repo.path().join(".git")).unwrap(),
+        WorkTree::Outside(_)
+    ));
 }
 
 #[test]
