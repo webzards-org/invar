@@ -27,5 +27,10 @@ Thumbs.db
 .env
 .env.local
 
+# The plugin's per-platform binaries are built by CI and published on the
+# `dist` branch, never committed (plugin/NOTES.md section 13). The launcher,
+# plugin/bin/invar, is committed.
+plugin/bin/invar-*
+
 # Invar's own state, when this repo is used as a test subject
 .invar/plans/
