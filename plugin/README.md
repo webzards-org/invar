@@ -17,6 +17,8 @@ together.
 plugin/
 ├── .claude-plugin/plugin.json   the manifest
 ├── hooks/hooks.json             three hooks, each one `invar` call
+├── agents/planner.md            Phase 1: a ticket becomes a draft Plan
+├── skills/invar/SKILL.md        the cycle, as the main session lives it
 ├── bin/invar                    the launcher: picks invar-<os>-<arch> and runs it
 ├── marketplace.json             what the `dist` branch lists (release.yml)
 ├── NOTES.md
@@ -32,9 +34,11 @@ development, build the core and copy it beside the launcher (NOTES section 13).
 - `.claude-plugin/plugin.json` — the manifest. It lives inside
   `.claude-plugin/`, while every other directory sits at the plugin root.
 - `hooks/` — hook definitions. Each one is a single call of `bin/invar`.
-- `agents/` — the planning sub-agent that isolates Phase 1 (§13a), from M1-18.
-- `skills/` — the protocol skill: longer explanations, loaded on demand (§5c),
-  from M1-18.
+- `agents/` — the planning sub-agent that isolates Phase 1 (§13a).
+- `skills/` — the protocol skill: longer explanations, loaded on demand (§5c).
+  Both are prompts, and whether they work is only found out by running them on
+  real tickets: NOTES section 14 is the protocol for that and the log of what
+  changed.
 
 ## Must not
 
