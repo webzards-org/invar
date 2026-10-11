@@ -159,6 +159,38 @@ fn refuses_on_a_draft_plan_and_writes_nothing() {
 }
 
 #[test]
+fn a_refusal_is_printed_once() {
+    // An error whose cause repeats its message would print it twice.
+    let project = Project::new(&draft_plan());
+
+    let assert = project.done(&["SHOP-214", "-m", "x"]).failure();
+
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert_eq!(stderr.matches("is still a draft").count(), 1, "{stderr}");
+}
+
+#[test]
+fn a_plan_that_is_not_valid_lists_its_problems_and_writes_nothing() {
+    // The refusal says "fix every problem listed above": the list has to be
+    // there, on stdout, as `plan validate` prints it.
+    let project = Project::new(
+        &approved_plan().replace("## Acceptance criteria\n", "## Acceptance criterion\n"),
+    );
+
+    project
+        .done(&["SHOP-214", "-m", "x"])
+        .failure()
+        .stdout(contains("spec.md:"))
+        .stdout(contains("Acceptance criteria"))
+        .stderr(contains("the Plan is not valid"))
+        .stderr(contains("listed above"));
+
+    assert!(!project.root().join(".invar/out").exists());
+    assert!(!project.root().join(".invar/decisions").exists());
+    assert!(project.root().join(SPEC).exists());
+}
+
+#[test]
 fn refuses_on_a_plan_changed_after_approval_and_writes_nothing() {
     let project = Project::new(&approved_plan());
     let edited = project

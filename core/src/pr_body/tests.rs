@@ -167,6 +167,65 @@ fn a_section_the_plan_does_not_have_renders_as_none() {
 }
 
 #[test]
+fn the_indentation_of_a_sections_first_line_is_kept() {
+    // `trim` would turn this code block into a paragraph.
+    let text = LIGHT.replace(
+        "## Scope\nOnly orders.\n",
+        "## Scope\n\n\n    $order->cancel();\n    $order->save();\n",
+    );
+    let rendered = render(&plan(&text, Mode::Light), "SHOP-214", false);
+
+    assert!(
+        rendered.contains(
+            "## Scope\n\n    $order->cancel();\n    $order->save();\n\n## Open questions"
+        ),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn blank_lines_around_a_section_are_dropped_and_text_inside_it_is_not() {
+    let text = LIGHT.replace(
+        "## Intent\nDo the thing.\n",
+        "## Intent\n\n\nDo the thing.\n\nThen the next thing.\n\n\n",
+    );
+    let rendered = render(&plan(&text, Mode::Light), "SHOP-214", false);
+
+    assert!(
+        rendered.contains("## Intent\n\nDo the thing.\n\nThen the next thing.\n\n## Scope"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn the_same_plan_with_other_line_endings_renders_the_same_bytes() {
+    // A Plan checked out with CRLF is the same Plan; its description must be
+    // too, or the description would depend on whose machine rendered it.
+    //
+    // Once as the fixture is, and once with a blank line right after a
+    // heading: a lone `\r` has no `\n` to look for, which is where this goes
+    // wrong if line endings are not normalized first.
+    let spaced = LIGHT.replace("Do the thing.", "\nDo the thing.\n");
+    for text in [LIGHT, spaced.as_str()] {
+        let lf = render(&plan(text, Mode::Light), "SHOP-214", true);
+        let crlf = render(
+            &plan(&text.replace('\n', "\r\n"), Mode::Light),
+            "SHOP-214",
+            true,
+        );
+        let cr = render(
+            &plan(&text.replace('\n', "\r"), Mode::Light),
+            "SHOP-214",
+            true,
+        );
+
+        assert_eq!(lf, crlf);
+        assert_eq!(lf, cr);
+        assert!(!lf.contains('\r'));
+    }
+}
+
+#[test]
 fn an_unapproved_header_renders_a_placeholder_approval_line() {
     let draft = LIGHT
         .replace("Status: approved", "Status: draft")
