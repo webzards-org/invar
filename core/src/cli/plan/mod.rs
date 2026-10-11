@@ -10,6 +10,7 @@ use super::mode;
 mod approve;
 mod check;
 mod guard;
+mod subagent_stop;
 // The same check `plan check` makes, for `pr-body` and `done`, which sit
 // outside `plan` and must not stand on lighter ground.
 pub(super) mod require_approved;
@@ -27,6 +28,9 @@ pub enum Command {
     /// Checks form, not approval: a draft with empty approval fields is
     /// valid. Every problem is reported in one run, each as
     /// `path:line: what to change`. Exits non-zero when any Plan is invalid.
+    ///
+    /// With `--all-drafts --hook` it answers a `SubagentStop` hook instead:
+    /// see the flag.
     Validate(validate::Args),
 
     /// Approve a Plan: the human gate.
@@ -73,6 +77,9 @@ pub enum Command {
 pub fn run(command: Command) -> Result<ExitCode> {
     let done = |result: Result<()>| result.map(|()| ExitCode::SUCCESS);
     match command {
+        // The hook form answers in exit codes, which `validate::run` has no
+        // way to do: only a block (exit 2) reaches the planner.
+        Command::Validate(args) if args.hook => subagent_stop::run(),
         Command::Validate(args) => done(validate::run(args)),
         Command::Approve(args) => done(approve::run(args)),
         Command::Check(args) => done(check::run(args)),

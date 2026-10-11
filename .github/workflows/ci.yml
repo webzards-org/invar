@@ -75,3 +75,34 @@ jobs:
 
       - name: Test
         run: cargo test --locked
+
+  # What `core` cannot see: that Claude Code itself accepts the plugin. The
+  # structure of the plugin, its agreement with the CLI and its launcher are
+  # tested in `core/tests/plugin.rs`, which the `core` job runs.
+  plugin:
+    name: plugin (claude plugin validate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # All this job needs from Claude Code is its validator.
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate the plugin
+        run: claude plugin validate ./plugin --strict
+
+      # The tree `release.yml` publishes: a marketplace with the plugin in
+      # `invar/`. Built here without binaries, which are not part of what is
+      # being checked.
+      - name: Validate the marketplace
+        run: |
+          set -eu
+          mkdir -p /tmp/marketplace/.claude-plugin /tmp/marketplace/invar
+          cp plugin/marketplace.json /tmp/marketplace/.claude-plugin/marketplace.json
+          cp -R plugin/.claude-plugin plugin/hooks plugin/bin /tmp/marketplace/invar/
+          claude plugin validate /tmp/marketplace --strict

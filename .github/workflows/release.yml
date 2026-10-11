@@ -1,0 +1,134 @@
+name: Release plugin
+
+# Builds the `invar` binary for each platform the plugin supports and publishes
+# the plugin, binaries included, on the `dist` branch, which is the marketplace
+# developers install from (plugin/NOTES.md section 13).
+#
+# Why a branch and not the binaries in `main`: a binary in git is one nobody
+# reviewed that every clone carries forever (and `core/tests/plugin.rs` fails if
+# one is committed). Why not a release asset: a plugin installed from a git
+# marketplace is a checkout, and what is not in the checkout is not there.
+#
+# The binaries are static (musl on Linux): nothing to install first on a
+# developer's machine, which is why the core is written in Rust (design 14.2).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            name: invar-linux-x86_64
+          # Both macOS binaries are built on the Apple-silicon runner: the
+          # Intel one is a cross-compile, which needs nothing more than the
+          # target installed.
+          - os: macos-14
+            target: aarch64-apple-darwin
+            name: invar-darwin-arm64
+          - os: macos-14
+            target: x86_64-apple-darwin
+            name: invar-darwin-x86_64
+
+    defaults:
+      run:
+        working-directory: core
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the musl toolchain
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      # rustup reads core/rust-toolchain.toml from here, so this adds the
+      # target to the pinned compiler.
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Name the binary for the launcher
+        run: cp target/${{ matrix.target }}/release/invar "$GITHUB_WORKSPACE/${{ matrix.name }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+          if-no-files-found: error
+
+  dist:
+    name: publish the plugin on `dist`
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # The marketplace is `dist` itself: `.claude-plugin/marketplace.json` at
+      # its root, the plugin in `invar/`. Only what runs is copied — no notes,
+      # no README, no spike.
+      - name: Assemble the marketplace
+        run: |
+          set -eu
+          mkdir -p dist/.claude-plugin dist/invar
+          cp plugin/marketplace.json dist/.claude-plugin/marketplace.json
+          for part in .claude-plugin hooks agents skills bin; do
+            if [ -e "plugin/$part" ]; then
+              cp -R "plugin/$part" dist/invar/
+            fi
+          done
+          cp artifacts/*/invar-* dist/invar/bin/
+          chmod +x dist/invar/bin/invar dist/invar/bin/invar-*
+          ls -l dist/invar/bin
+
+      # Every platform's binary has to be there, or the launcher would fail on
+      # that platform with exit 127 for every developer who has it.
+      - name: Check that every binary arrived
+        run: |
+          set -eu
+          for name in invar-linux-x86_64 invar-darwin-arm64 invar-darwin-x86_64; do
+            test -x "dist/invar/bin/$name" || { echo "missing $name"; exit 1; }
+          done
+
+      # The one binary this runner can run: through the launcher, as a hook
+      # would.
+      - name: Smoke test
+        run: dist/invar/bin/invar --version
+
+      - name: Publish on dist
+        run: |
+          set -eu
+          cd dist
+          git init -q -b dist
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "invar plugin ${GITHUB_REF_NAME}"
+          git push --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:dist

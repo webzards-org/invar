@@ -14,7 +14,7 @@ Section references (§13, §5c, …) point into [`../docs/DESIGN.md`](../docs/DE
 
 | M5 component (§13) | Mechanism | Location in the plugin | Exercised by the spike? |
 |---|---|---|---|
-| **CLI binary** | A bundled executable, invoked by path or via `bin/` | `bin/invar` (see §6 below — unresolved) | No |
+| **CLI binary** | A bundled executable, invoked by path or via `bin/` | `bin/invar` (§6, §13) | No |
 | **Hooks** | `hooks/hooks.json` | `hooks/hooks.json` | **Yes** — `PostToolUse` |
 | **Planning sub-agent** (§13a) | An agent definition | `agents/<name>.md` | No |
 | **Protocol skill** (§5c) | A skill | `skills/<name>/SKILL.md` | No |
@@ -168,7 +168,7 @@ That last row is a real constraint for §5c: `invar context show --binding` must
 stay well under 10k characters, or binding context silently stops arriving.
 Worth a hard check in the CLI.
 
-## 6. Shipping the binary — unresolved for M5
+## 6. Shipping the binary — decided in M1-17 (§13)
 
 A `bin/` directory at the plugin root puts its files on the **Bash tool's
 `PATH`** while the plugin is enabled, so Claude can run `invar` as a bare
@@ -196,6 +196,9 @@ replaced on every plugin update, so nothing durable may be written there.
 `${CLAUDE_PLUGIN_DATA}` (`~/.claude/plugins/data/<id>/`) survives updates and is
 the place for caches — which is where §5b's context cache will have to live if
 it is not project-local.
+
+**Decided in M1-17: option 1, `bin/invar`.** The reasons and what it takes are
+in §13.
 
 ## 7. What a hook receives and returns
 
@@ -647,3 +650,125 @@ the rule listed. Record what happened here, and once it holds, remove "not yet
 verified" from the doc comment on `DENY_RULE` in `core/src/init/mod.rs`. If the
 anchor does not behave as assumed, the rule to write is `Read(./.invar/decisions/**)`
 and the limitation (a subdirectory) goes in this section.
+
+## 13. The real plugin — M1-17
+
+`plugin/` is now the real plugin; the spike (`spike-m0-6/`) is gone. Sections 1–11
+record what the spike established and stay as they are.
+
+### The three hooks
+
+Each is one invocation of `${CLAUDE_PLUGIN_ROOT}/bin/invar` in exec form (§7),
+with a timeout, and none runs `plan approve` or `done`. There is no lint hook
+and no test hook (L-3).
+
+| Event | Matcher | Command | Effect |
+|---|---|---|---|
+| `SessionStart` | — | `context show --binding` | Binding context in every session |
+| `SubagentStop` | `.*planner` | `plan validate --all-drafts --hook` | The planner is told once what to fix |
+| `PreToolUse` | `Write\|Edit\|Bash` | `plan guard` | Approved Plans cannot be edited; `plan approve` is not the agent's to run (§11) |
+
+`core/tests/plugin.rs` checks all of this by reading `hooks.json`, and runs each
+hook's command line against the real binary, so a plugin written for another
+version of `invar` fails in CI.
+
+### `SubagentStop` needs `--hook`, and the reason is in §7
+
+The design table names plain `plan validate --all-drafts`. That prints the
+problems on stdout and exits 1, and by §7 neither reaches an agent: plain stdout
+goes to the debug log and any exit code but 2 is a non-blocking error nobody is
+shown. Only a **block** is delivered. So `--hook` reads the hook's JSON and
+answers as a stop hook does: exit 2, the problems as the reason.
+
+It blocks **once**. Blocking a stop makes the subagent carry on, and when it
+stops again the hook runs again with `stop_hook_active: true`; blocking then too
+would hold a planner that cannot fix the problem — one that needs an answer from
+the developer — until it runs out of turns. The second time it lets go and tells
+the developer. Every doubt (unreadable input, an unloadable `invar.yaml`) lets
+the planner stop, as `plan guard` does for the edit tools.
+
+### Decision: how the binary ships
+
+**`bin/invar`, with one binary per platform behind it.** Of the three options in
+§6:
+
+1. **`bin/invar`** — chosen. The protocol has the agent run `invar plan validate`,
+   `invar plan check` and `invar done` itself, and a `bin/` directory is what puts
+   `invar` on the Bash tool's `PATH`. The cost is that claude.ai and Cowork refuse
+   a plugin with a top-level `bin/`; for a pilot inside one company, distributed
+   through a git marketplace, that distribution is irrelevant.
+2. The binary elsewhere, with `${CLAUDE_PLUGIN_ROOT}/…` paths in every protocol
+   instruction — rejected: every instruction gets longer and every agent has to
+   get a path right.
+3. Installation onto `PATH` — rejected: it is a setup step outside the plugin,
+   and §10 promises that installing the plugin is the only one.
+
+**`bin/invar` is a launcher, not the binary.** A plugin is one directory for every
+platform, so something has to pick the binary: a script of a dozen lines that
+runs `invar-<os>-<arch>` next to it and passes arguments, input and exit code
+through untouched. It is the only script in the plugin; `plugin.rs` fails if
+anything else appears, and if the launcher grows past what can be read at a
+glance. It downloads nothing.
+
+**The binaries are not committed.** CI builds them on a `v*` tag
+(`.github/workflows/release.yml`) — Linux x86_64 (static, musl) and macOS arm64
+and x86_64 — and publishes the plugin with them on the **`dist` branch**, which is
+itself the marketplace: `.claude-plugin/marketplace.json` at its root, the plugin
+in `invar/`. A plugin from a git marketplace is a checkout, so a release asset
+would not be there; and a binary in `main` is one nobody reviewed that every
+clone carries forever. `plugin.rs` fails if one is committed.
+
+Not supported: Windows, and Linux on arm64. The launcher says so, in one line, and
+exits 127.
+
+### A missing or crashing binary does not break a session
+
+- **Missing for this platform, or not executable:** the launcher exits **127**,
+  never 2. Exit 2 from a `PreToolUse` hook means *deny*; any other code is a
+  non-blocking error.
+- **Crashing:** a Rust panic exits 101, also non-blocking. A usage error exits 1
+  (`main.rs`), never 2, so a plugin and a CLI of different versions cannot block
+  every tool call.
+- What the developer sees is a hook error in the transcript at each start (§9: a
+  crashing hook is loud but harmless). That is the point: nothing is held, and
+  nothing fails silently.
+
+### Installing, and what has not been exercised
+
+For development, build the core and put it where the launcher looks:
+
+```bash
+cd core && cargo build --release
+cp target/release/invar ../plugin/bin/invar-$(uname -s | tr A-Z a-z)-$(uname -m)
+claude --plugin-dir plugin
+```
+
+The `plugin/bin/invar-*` names are ignored by git.
+
+**Nothing below has been run against Claude Code.** The files follow what the spike
+verified (§9) and what the documentation says; this is the checklist for the first
+run, and each item that holds is ticked here.
+
+- [ ] `claude plugin validate ./plugin --strict` passes (CI runs it), and the same
+      for the marketplace tree `release.yml` assembles
+- [ ] `/hooks` lists the three hooks, with the plugin as their source
+- [ ] Exec form with a `command` that is itself a path (`${CLAUDE_PLUGIN_ROOT}/bin/invar`)
+      and `args`. The spike verified `python3` plus `args` only
+- [ ] The `SubagentStop` matcher `.*planner` selects the planner. M1-18 names the
+      agent, and a plugin's agents may be namespaced (`invar:planner`); the pattern
+      matches either way if matchers are searched, not anchored
+- [ ] A `SubagentStop` block — exit 2 with stderr, and `{"decision": "block"}` — makes
+      the planner carry on and shows it the reason; the second stop arrives with
+      `stop_hook_active: true`
+- [ ] A `Bash` payload carries `tool_input.command` (taken from §8 and the docs)
+- [ ] Plain stdout of the `SessionStart` hook reaches the session (§7 says it does)
+- [ ] Removing a binary makes a hook error and not a blocked session
+- [ ] Adding the `dist` branch as a marketplace and installing the plugin from it
+
+**Open: a project that is not an invar project.** The plugin is installed for
+every project it is enabled in. `plan validate --hook` is silent there (tested)
+and `plan guard` passes, but `context show --binding` exits 1 with "not inside an
+invar project", which would be a hook error at the start of every session. The
+answer is probably to enable the plugin per project rather than per user
+(`init` could write it into `.claude/settings.json`), not to make the command
+silent for a person typing it. To decide once the plugin has run for real.

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin.json",
+  "name": "invar",
+  "displayName": "Invar",
+  "version": "0.1.0",
+  "description": "Holds the specification fixed while code is generated against it: a Plan the developer approves and the coder cannot quietly move. Binding context in every session, a guard on approved Plans, and a check on the planner's drafts. All the logic is the `invar` CLI; this plugin only fires it.",
+  "author": {
+    "name": "Radomir Brkovic"
+  },
+  "license": "MIT",
+  "keywords": ["spec-driven", "plan", "gate", "context"]
+}

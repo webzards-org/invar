@@ -28,6 +28,20 @@ pub struct Args {
     /// `approved`.
     #[arg(long)]
     pub all_drafts: bool,
+
+    /// Answer as a `SubagentStop` hook, for the planner that is about to stop.
+    ///
+    /// Reads the hook's JSON from stdin. If a draft Plan is still not valid,
+    /// the stop is blocked (exit 2) and the problems are returned as the
+    /// reason, so the planner sees what to fix. It is blocked once: a planner
+    /// that stops again with the problems still there is let go, and the
+    /// developer is told. Anything it cannot make sense of lets the planner
+    /// stop, with the problem reported.
+    ///
+    /// Plain `--all-drafts` prints the same problems and exits 1, which a hook
+    /// would deliver to nobody: only a block reaches the agent.
+    #[arg(long, requires = "all_drafts")]
+    pub hook: bool,
 }
 
 pub fn run(args: Args) -> Result<()> {
