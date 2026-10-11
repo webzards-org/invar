@@ -61,8 +61,8 @@ fn add_entry(root: &ProjectRoot, module: &str, second: u32, body: &str) -> Strin
     id
 }
 
-fn decisions(root: &ProjectRoot, module: Option<&str>) -> Decisions {
-    load_decisions(root, module).unwrap()
+fn decisions(root: &ProjectRoot) -> Decisions {
+    load_decisions(root).unwrap()
 }
 
 /// Where each needle first appears in `haystack`, which must be in order.
@@ -257,8 +257,8 @@ fn an_empty_marked_file_is_indistinguishable_from_an_absent_one() {
     assert!(a.unrecognized().is_empty(), "nothing to report for either");
     assert_eq!(a.render_within(0).unwrap(), e.render_within(0).unwrap());
     assert_eq!(
-        planner_output(&a, &decisions(&absent, None)),
-        planner_output(&e, &decisions(&empty, None))
+        planner_output(&a, &decisions(&absent)),
+        planner_output(&e, &decisions(&empty))
     );
 }
 
@@ -396,75 +396,34 @@ fn nothing_loaded_is_never_over_any_limit() {
 // --- the decision log ---------------------------------------------------------------------
 
 #[test]
-fn the_modules_entries_come_first_then_global_each_newest_first() {
+fn every_entry_is_shown_whatever_its_module_newest_first() {
     let (_dir, root) = project();
     add_entry(&root, "orders", 10, "orders-old");
     add_entry(&root, "global", 20, "global-old");
-    add_entry(&root, "orders", 30, "orders-new");
-    add_entry(&root, "global", 40, "global-new");
-    add_entry(&root, "payments", 50, "payments-entry");
+    add_entry(&root, "billing", 30, "billing-entry");
+    add_entry(&root, "payments", 40, "payments-entry");
+    add_entry(&root, "global", 50, "global-new");
 
-    let found = decisions(&root, Some("orders"));
+    let found = decisions(&root);
     let out = found.render();
 
     assert!(
         in_order(
             &out,
-            &["orders-new", "orders-old", "global-new", "global-old"]
+            &[
+                "global-new",
+                "payments-entry",
+                "billing-entry",
+                "global-old",
+                "orders-old"
+            ]
         ),
         "{out}"
     );
-    assert!(
-        !out.contains("payments-entry"),
-        "another module's entry: {out}"
-    );
-    assert_eq!(found.shown.len(), 4);
-    assert_eq!(found.other_modules, [("payments".to_owned(), 1)]);
-    assert!(out.contains("Showing the entries for module `orders`, then `global`."));
-    assert!(
-        out.contains("Other modules have entries too: payments (1)."),
-        "{out}"
-    );
-}
-
-#[test]
-fn without_a_module_only_global_is_shown_and_the_other_modules_are_listed() {
-    let (_dir, root) = project();
-    add_entry(&root, "orders", 10, "orders-a");
-    add_entry(&root, "orders", 20, "orders-b");
-    add_entry(&root, "payments", 30, "payments-a");
-    add_entry(&root, "global", 40, "global-a");
-
-    let found = decisions(&root, None);
-    let out = found.render();
-
-    assert_eq!(found.shown.len(), 1);
-    assert!(out.contains("global-a"), "{out}");
-    assert!(
-        !out.contains("orders-a") && !out.contains("payments-a"),
-        "{out}"
-    );
-    assert!(out.contains("Showing the `global` entries."), "{out}");
-    assert!(
-        out.contains("Other modules have entries too: orders (2), payments (1)."),
-        "{out}"
-    );
-    assert!(
-        out.contains("`invar context show --module <name>`"),
-        "{out}"
-    );
-}
-
-#[test]
-fn asking_for_global_does_not_show_it_twice() {
-    let (_dir, root) = project();
-    add_entry(&root, "global", 10, "global-a");
-    add_entry(&root, "global", 20, "global-b");
-
-    let found = decisions(&root, Some("global"));
-
-    assert_eq!(found.shown.len(), 2);
-    assert_eq!(found.module, None);
+    assert_eq!(found.shown.len(), 5);
+    assert_eq!(found.omitted, 0);
+    assert!(!out.contains("--module"), "{out}");
+    assert!(!out.contains("Other modules"), "{out}");
 }
 
 #[test]
@@ -472,7 +431,7 @@ fn an_entry_is_a_header_line_and_its_text() {
     let (_dir, root) = project();
     let id = add_entry(&root, "orders", 12, "Reservation is released on cancel.");
 
-    let found = decisions(&root, Some("orders"));
+    let found = decisions(&root);
 
     assert_eq!(
         found.shown,
@@ -484,25 +443,13 @@ fn an_entry_is_a_header_line_and_its_text() {
 }
 
 #[test]
-fn a_name_that_is_not_a_module_is_refused() {
-    let (_dir, root) = project();
-    for module in ["Orders", "", "or-ders", "orders/x"] {
-        let err = load_decisions(&root, Some(module)).unwrap_err();
-        assert!(
-            matches!(err, ContextError::InvalidModule { .. }),
-            "{module:?}"
-        );
-    }
-}
-
-#[test]
 fn at_most_fifty_entries_are_shown_and_the_rest_are_counted() {
     let (_dir, root) = project();
     for second in 0..60 {
         add_entry(&root, "global", second, &format!("Entry {second}."));
     }
 
-    let found = decisions(&root, None);
+    let found = decisions(&root);
     let out = found.render();
 
     assert_eq!(found.shown.len(), MAX_ENTRIES);
@@ -526,7 +473,7 @@ fn the_character_budget_stops_before_an_entry_that_would_not_fit() {
         add_entry(&root, "global", second, &"x".repeat(5000));
     }
 
-    let found = decisions(&root, None);
+    let found = decisions(&root);
 
     // 5,000 characters and a header each: three fit in 16,000, a fourth does
     // not — and an entry is never cut in the middle.
@@ -544,23 +491,6 @@ fn the_character_budget_stops_before_an_entry_that_would_not_fit() {
 }
 
 #[test]
-fn the_budget_is_shared_so_the_modules_entries_use_it_first() {
-    let (_dir, root) = project();
-    for second in 0..50 {
-        add_entry(&root, "orders", second, &format!("Orders {second}."));
-    }
-    for second in 50..55 {
-        add_entry(&root, "global", second, &format!("Global {second}."));
-    }
-
-    let found = decisions(&root, Some("orders"));
-
-    assert_eq!(found.shown.len(), 50);
-    assert!(found.shown.iter().all(|text| text.contains("Orders")));
-    assert_eq!(found.omitted, 5, "the global entries did not fit");
-}
-
-#[test]
 fn an_entry_that_cannot_be_read_is_skipped_and_reported_and_the_rest_are_shown() {
     let (_dir, root) = project();
     add_entry(&root, "global", 10, "A good entry.");
@@ -571,7 +501,7 @@ fn an_entry_that_cannot_be_read_is_skipped_and_reported_and_the_rest_are_shown()
     )
     .unwrap();
 
-    let found = decisions(&root, None);
+    let found = decisions(&root);
 
     assert_eq!(found.shown.len(), 1);
     assert_eq!(found.total, 1, "the broken one is not an entry");
@@ -586,26 +516,10 @@ fn an_entry_that_cannot_be_read_is_skipped_and_reported_and_the_rest_are_shown()
 #[test]
 fn a_log_with_no_entries_renders_nothing() {
     let (_dir, root) = project();
-    assert_eq!(decisions(&root, None).render(), "");
+    assert_eq!(decisions(&root).render(), "");
 
     fs::create_dir_all(root.decisions_dir()).unwrap();
-    assert_eq!(decisions(&root, Some("orders")).render(), "");
-}
-
-#[test]
-fn entries_only_in_other_modules_still_say_where_they_are() {
-    let (_dir, root) = project();
-    add_entry(&root, "orders", 10, "orders-a");
-    add_entry(&root, "orders", 20, "orders-b");
-
-    let out = decisions(&root, None).render();
-
-    assert!(out.contains("(no entries for this selection)"), "{out}");
-    assert!(
-        out.contains("Other modules have entries too: orders (2)."),
-        "{out}"
-    );
-    assert!(!out.contains("orders-a"), "{out}");
+    assert_eq!(decisions(&root).render(), "");
 }
 
 // --- both together ----------------------------------------------------------------------------
@@ -621,7 +535,7 @@ fn the_planner_reads_the_binding_context_then_the_log() {
     add_entry(&root, "global", 10, "global-a");
 
     let found = binding(&root);
-    let log = decisions(&root, None);
+    let log = decisions(&root);
     let out = planner_output(&found, &log);
 
     assert_eq!(out, format!("{}\n{}", found.render(), log.render()));
@@ -641,18 +555,18 @@ fn the_planner_reads_the_binding_context_then_the_log() {
 #[test]
 fn the_planner_output_is_whichever_part_there_is() {
     let (_dir, root) = project();
-    assert_eq!(planner_output(&binding(&root), &decisions(&root, None)), "");
+    assert_eq!(planner_output(&binding(&root), &decisions(&root)), "");
 
     write(
         &root,
         "AI_CONTEXT.md",
         &marked("Convention: thin controllers.\n"),
     );
-    let only_binding = planner_output(&binding(&root), &decisions(&root, None));
+    let only_binding = planner_output(&binding(&root), &decisions(&root));
     assert_eq!(only_binding, binding(&root).render());
 
     let (_other_dir, other) = project();
     add_entry(&other, "global", 10, "global-a");
-    let only_log = planner_output(&binding(&other), &decisions(&other, None));
-    assert_eq!(only_log, decisions(&other, None).render());
+    let only_log = planner_output(&binding(&other), &decisions(&other));
+    assert_eq!(only_log, decisions(&other).render());
 }

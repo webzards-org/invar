@@ -228,17 +228,17 @@ fn by_default_the_decision_log_follows_the_binding_context() {
 }
 
 #[test]
-fn a_module_selects_its_entries_and_global_always_follows() {
+fn every_entry_is_shown_whatever_its_module_newest_first() {
     let project = Project::new("");
     project.entry("orders", 10, "orders-old");
     project.entry("global", 20, "global-a");
-    project.entry("orders", 30, "orders-new");
+    project.entry("billing", 30, "billing-a");
     project.entry("payments", 40, "payments-a");
 
-    let assert = project.show(&["--module", "orders"]).success();
+    let assert = project.show(&[]).success().stderr("");
 
     let out = stdout_of(&assert);
-    let positions: Vec<usize> = ["orders-new", "orders-old", "global-a"]
+    let positions: Vec<usize> = ["payments-a", "billing-a", "global-a", "orders-old"]
         .iter()
         .map(|needle| {
             out.find(needle)
@@ -246,25 +246,7 @@ fn a_module_selects_its_entries_and_global_always_follows() {
         })
         .collect();
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{out}");
-    assert!(!out.contains("payments-a"), "another module's entry: {out}");
-    assert!(
-        out.contains("Other modules have entries too: payments (1)."),
-        "{out}"
-    );
-}
-
-#[test]
-fn without_a_module_the_global_entries_are_shown_and_the_other_modules_named() {
-    let project = Project::new("");
-    project.entry("orders", 10, "orders-a");
-    project.entry("global", 20, "global-a");
-
-    project
-        .show(&[])
-        .success()
-        .stdout(contains("global-a"))
-        .stdout(contains("orders-a").not())
-        .stdout(contains("Other modules have entries too: orders (1)."));
+    assert!(!out.contains("Other modules"), "{out}");
 }
 
 #[test]
@@ -358,7 +340,7 @@ fn an_empty_marked_file_and_an_absent_one_give_identical_output() {
         project.entry("global", 20, "Same global entry in both.");
     }
 
-    for args in [&["--binding"][..], &[], &["--module", "orders"]] {
+    for args in [&["--binding"][..], &[]] {
         let (a, e) = (absent.show(args).success(), empty.show(args).success());
         assert_eq!(
             a.get_output().stdout,
@@ -390,26 +372,14 @@ fn a_file_that_cannot_be_read_is_an_error_not_a_quiet_absence() {
 // --- arguments ---------------------------------------------------------------------------------
 
 #[test]
-fn binding_and_a_module_do_not_go_together() {
-    // `--module` selects decision entries, which `--binding` leaves out.
+fn there_is_no_module_option() {
+    // The module dimension is gone for the MVP: the planner reads everything.
     let project = Project::new("");
 
     project
-        .show(&["--binding", "--module", "orders"])
+        .show(&["--module", "orders"])
         .failure()
-        .code(1)
-        .stderr(contains("cannot be used with"));
-}
-
-#[test]
-fn a_name_that_is_not_a_module_is_refused() {
-    let project = Project::new("");
-
-    project
-        .show(&["--module", "Orders"])
-        .failure()
-        .code(1)
-        .stderr(contains("`Orders` is not a module name"));
+        .stderr(contains("--module"));
 }
 
 #[test]
@@ -433,7 +403,7 @@ fn the_help_describes_both_outputs() {
         .assert()
         .success()
         .stdout(contains("--binding"))
-        .stdout(contains("--module"))
+        .stdout(contains("--module").not())
         .stdout(contains("binding_limit"));
 
     Command::cargo_bin("invar")
