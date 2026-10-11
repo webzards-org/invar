@@ -1,4 +1,4 @@
-//! `invar context show [--binding] [--module <m>]` (M1-14).
+//! `invar context show [--binding]` (M1-14).
 //!
 //! What the agents read, on stdout — and nothing else there, because stdout is
 //! what reaches the agent (a `SessionStart` hook delivers it as it is). What a
@@ -16,7 +16,7 @@ pub enum Command {
     /// Print the context the agents read, each source labelled with its origin.
     ///
     /// Without `--binding`, this is the planner's context: the binding
-    /// context, then the decision log. Only the planner receives it; the coder
+    /// context, then the whole decision log (every module). Only the planner receives it; the coder
     /// must not see the log (§7).
     ///
     /// `--binding` prints `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md` and
@@ -37,17 +37,8 @@ pub enum Command {
 pub struct ShowArgs {
     /// Print only the binding context: both context files, nothing from the
     /// decision log.
-    #[arg(long, conflicts_with = "module")]
+    #[arg(long)]
     pub binding: bool,
-
-    /// The module whose decision entries come first, newest first; the
-    /// `global` entries always follow.
-    ///
-    /// Without it only the `global` entries are shown, and the output says
-    /// which other modules have entries. The log is read within a budget of 50
-    /// entries or about 4000 tokens; older entries are left out.
-    #[arg(long, value_name = "MODULE")]
-    pub module: Option<String>,
 }
 
 pub fn run(command: Command) -> Result<()> {
@@ -74,7 +65,7 @@ fn show(args: ShowArgs) -> Result<()> {
         return Ok(());
     }
 
-    let decisions = context::load_decisions(&root, args.module.as_deref())?;
+    let decisions = context::load_decisions(&root)?;
     for (path, problems) in &decisions.unreadable {
         eprintln!(
             "warning: {} is not a valid decision entry; skipped:\n{}",

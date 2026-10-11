@@ -16,11 +16,13 @@ pub fn is_ticket(value: &str) -> bool {
         && number.chars().all(|c| c.is_ascii_digit())
 }
 
-/// `^[a-z][a-z0-9_]*$` — which `global` satisfies too.
+/// `^[A-Za-z][A-Za-z0-9_]*$` — which `global` satisfies too. Case is kept as
+/// written: Laravel projects name modules `Billing`, and nothing compares
+/// modules case-insensitively.
 pub fn is_module(value: &str) -> bool {
     let mut chars = value.chars();
-    chars.next().is_some_and(|c| c.is_ascii_lowercase())
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// `^[a-z0-9]+(-[a-z0-9]+)*$`: `reserve-stock`.

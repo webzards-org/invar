@@ -1,6 +1,6 @@
 # Contract: Decision entry
 
-**Version:** 1.0.0
+**Version:** 1.1.0 — `module` may use capital letters; see §13
 **Status:** stable
 **Implements:** §7 (Decision log), §4c (a `failed` entry resets the cycle),
 §12 (the entry survives the Plan); light mode L-1, L-4 (`docs/TASKS-M1.md`)
@@ -34,8 +34,9 @@ is free text and is not parsed.
 - `<YYYY-MM-DD>-<HHMMSS>` is the moment the entry was written, **in UTC**
   (D-2). Filenames therefore sort chronologically as plain strings, whoever
   wrote them and wherever.
-- `<module>` equals the `module` field (§4): `^[a-z][a-z0-9_]*$`, or `global`
-  for an entry not tied to one module. It contains no `-`, so the first `-`
+- `<module>` equals the `module` field (§4): `^[A-Za-z][A-Za-z0-9_]*$`, or
+  `global` for an entry not tied to one module. Case is kept as written
+  (`Billing`), the same as in the Plan header (plan-header.md D-15). It contains no `-`, so the first `-`
   after it starts the slug.
 - `<slug>` matches `^[a-z0-9]+(-[a-z0-9]+)*$`. The tool uses the slug of the
   ticket's Plan directory (`PROJ-412-reserve-stock` → `reserve-stock`), or
@@ -81,7 +82,7 @@ The free-text body.
 | `id` | yes | `d-` followed by 4 to 32 lowercase hex digits. The tool writes 8. Unique across `.invar/decisions/` (D-4) |
 | `date` | yes | `YYYY-MM-DDTHH:MM:SS` followed by `Z` or `±HH:MM` — the local time of writing, with its offset (D-2) |
 | `ticket` | yes | `^[A-Z][A-Z0-9]*-[0-9]+$`, the ticket of the cycle the entry belongs to (D-7) |
-| `module` | yes | `^[a-z][a-z0-9_]*$`, or `global`. Equal to `<module>` in the filename |
+| `module` | yes | `^[A-Za-z][A-Za-z0-9_]*$`, or `global`. Equal to `<module>` in the filename, letter for letter |
 | `type` | yes | `confirmed`, `correction`, `failed` or `note` (§5) |
 | `scenario` | **no** | The `.feature` scenario the entry is about, when `scenarios: true`. **Absent in light mode** (L-1) |
 
@@ -151,8 +152,9 @@ In M1:
   `…-reserve-stock` and `…-10` newer than `…-9` within one second (D-3), and
   is otherwise a plain comparison that puts the UTC timestamp first.
   `invar decision log` prints newest first.
-- `invar context show` (M1-14) reads module entries newest first, then
-  `global`, within a budget (§7).
+- `invar context show` (M1-14) reads **every** entry, whatever its module,
+  newest first, within a budget (§7). The module is a label in the entry's
+  header line, not a filter.
 - A reader that meets an entry it cannot parse reports it and goes on. The log
   is advisory; one hand-edited file must not hide the others.
 
@@ -284,5 +286,19 @@ type: note
 the body is empty — an entry that records nothing.
 
 ## 13. Version history
+
+**1.1.0 — capitalized module names.**
+
+- §2 and §4.1: `module` matches `^[A-Za-z][A-Za-z0-9_]*$` (or `global`).
+- §9: `context show` reads all entries, not a module's and then `global`.
+
+**Why:** the project's modules are capitalized (`Billing`), and the Plan header
+now accepts that (plan-header.md 1.5.0); an entry could not name the module of
+its own Plan. Selecting entries by module was dropped for the MVP: tickets
+touch several modules, and the planner is better served by all the facts.
+
+**Compatibility:** every entry and filename that was valid stays valid. The
+filename's module is compared with the front matter's exactly, so `billing` and
+`Billing` are different modules.
 
 **1.0.0** — initial version (M1-11).

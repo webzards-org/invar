@@ -44,12 +44,12 @@
 //!
 //! # The decision log
 //!
-//! Entries are read newest first (decision-entry.md §9): those of the requested
-//! module, then those of `global`. Without a module, the `global` entries only —
-//! the planner learns which other modules have entries from one line at the end
-//! and asks for one. The budget is **50 entries or about 4,000 tokens**,
-//! whichever comes first, and is shared by both groups; an entry is never cut
-//! in the middle, and older entries fall off the end (§7). Tokens are estimated
+//! **Every** entry is shown, newest first (decision-entry.md §9), whatever its
+//! module: for the MVP the planner reads all the facts rather than a selection
+//! (the module is only a label in each entry's header line). The budget is
+//! **50 entries or about 4,000 tokens**, whichever comes first; an entry is
+//! never cut in the middle, and older entries fall off the end (§7), with a
+//! line saying so. Tokens are estimated
 //! at four characters each: nothing here ships a tokenizer, and the budget is
 //! "roughly" by its own definition.
 //!
@@ -57,7 +57,6 @@
 //! on what an entry says. An entry that cannot be parsed is skipped and
 //! reported, because one hand-edited file must not hide the others.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -66,7 +65,7 @@ use std::path::{Path, PathBuf};
 use crate::decision::{self, RecordError};
 use crate::diagnostics::Diagnostics;
 use crate::format::decision::{Entry, normalize_body};
-use crate::format::values::{is_module, without_comments};
+use crate::format::values::without_comments;
 use crate::fs::ProjectRoot;
 
 #[cfg(test)]
@@ -310,35 +309,18 @@ pub struct OverLimit {
 /// The decision entries a planner is shown.
 #[derive(Debug)]
 pub struct Decisions {
-    /// The module asked for, when it was one other than `global`.
-    pub module: Option<String>,
-    /// Entries that can be read, whatever was selected.
+    /// Entries that can be read.
     pub total: usize,
-    /// The selected entries within the budget, each already rendered.
+    /// The entries within the budget, each already rendered.
     pub shown: Vec<String>,
-    /// Selected entries that did not fit.
+    /// Entries that did not fit.
     pub omitted: usize,
-    /// Other modules that have entries, with how many: what the planner could
-    /// ask for next.
-    pub other_modules: Vec<(String, usize)>,
     /// Files in the log that could not be read as entries, with why.
     pub unreadable: Vec<(PathBuf, Diagnostics)>,
 }
 
-/// Read the log for `module` (and always `global`), newest first, within the
-/// budget.
-pub fn load_decisions(root: &ProjectRoot, module: Option<&str>) -> Result<Decisions, ContextError> {
-    if let Some(module) = module
-        && !is_module(module)
-    {
-        return Err(ContextError::InvalidModule {
-            module: module.to_owned(),
-        });
-    }
-    // `global` is always shown after the module's entries; asking for it by
-    // name must not show it twice.
-    let wanted = module.filter(|module| *module != "global");
-
+/// Read the whole log, newest first, within the budget.
+pub fn load_decisions(root: &ProjectRoot) -> Result<Decisions, ContextError> {
     let mut entries = Vec::new();
     let mut unreadable = Vec::new();
     for item in decision::log(root)
@@ -351,16 +333,10 @@ pub fn load_decisions(root: &ProjectRoot, module: Option<&str>) -> Result<Decisi
         }
     }
 
-    // The log arrives newest first, and each filter keeps that order.
-    let mut selected: Vec<&Entry> = Vec::new();
-    if let Some(wanted) = wanted {
-        selected.extend(entries.iter().filter(|entry| entry.module == wanted));
-    }
-    selected.extend(entries.iter().filter(|entry| entry.module == "global"));
-
+    // The log arrives newest first.
     let mut shown = Vec::new();
     let mut used = 0;
-    for entry in &selected {
+    for entry in &entries {
         let text = render_entry(entry);
         let size = text.chars().count();
         if shown.len() >= MAX_ENTRIES || used + size > MAX_CHARS {
@@ -369,25 +345,12 @@ pub fn load_decisions(root: &ProjectRoot, module: Option<&str>) -> Result<Decisi
         used += size;
         shown.push(text);
     }
-    let omitted = selected.len() - shown.len();
-
-    let mut others: BTreeMap<&str, usize> = BTreeMap::new();
-    for entry in &entries {
-        if entry.module != "global" && Some(entry.module.as_str()) != wanted {
-            *others.entry(entry.module.as_str()).or_default() += 1;
-        }
-    }
-    let other_modules = others
-        .into_iter()
-        .map(|(module, count)| (module.to_owned(), count))
-        .collect();
+    let omitted = entries.len() - shown.len();
 
     Ok(Decisions {
-        module: wanted.map(str::to_owned),
         total: entries.len(),
         shown,
         omitted,
-        other_modules,
         unreadable,
     })
 }
@@ -402,24 +365,16 @@ fn render_entry(entry: &Entry) -> String {
 
 impl Decisions {
     /// The decision log block. Empty when the log holds no readable entry at
-    /// all; otherwise printed even when the selection is empty, so the planner
-    /// learns where the entries are.
+    /// all.
     pub fn render(&self) -> String {
         if self.total == 0 {
             return String::new();
         }
-        let selection = match &self.module {
-            Some(module) => format!("Showing the entries for module `{module}`, then `global`."),
-            None => "Showing the `global` entries.".to_owned(),
-        };
-        let mut out = format!(
-            "=== decision log — advisory, newest first ===\n{selection} What was built \
-             before, and why. Nothing here binds: if this change goes against an entry, \
-             say so (\"previously decided X — intentional?\") and carry on.\n"
+        let mut out = String::from(
+            "=== decision log — advisory, newest first ===\nWhat was built before, and \
+             why. Nothing here binds: if this change goes against an entry, say so \
+             (\"previously decided X — intentional?\") and carry on.\n",
         );
-        if self.shown.is_empty() {
-            out.push_str("\n(no entries for this selection)\n");
-        }
         for entry in &self.shown {
             out.push('\n');
             out.push_str(entry);
@@ -434,18 +389,6 @@ impl Decisions {
                 } else {
                     "entries are"
                 }
-            ));
-        }
-        if !self.other_modules.is_empty() {
-            let modules: Vec<String> = self
-                .other_modules
-                .iter()
-                .map(|(module, count)| format!("{module} ({count})"))
-                .collect();
-            out.push_str(&format!(
-                "\n(Other modules have entries too: {}. Ask for one with `invar context \
-                 show --module <name>`.)\n",
-                modules.join(", ")
             ));
         }
         out.push_str("\n=== end of decision log ===\n");
@@ -481,10 +424,6 @@ pub enum ContextError {
     },
     /// The decision log could not be listed.
     Log(RecordError),
-    /// `--module` is not a module name.
-    InvalidModule {
-        module: String,
-    },
     /// The binding output is longer than `context.binding_limit`.
     OverLimit(OverLimit),
 }
@@ -500,11 +439,6 @@ impl fmt::Display for ContextError {
                 path.display()
             ),
             Self::Log(err) => write!(f, "{err}"),
-            Self::InvalidModule { module } => write!(
-                f,
-                "`{module}` is not a module name; give a lowercase name such as `orders`, or \
-                 `global`"
-            ),
             Self::OverLimit(over) => {
                 write!(
                     f,

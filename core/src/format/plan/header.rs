@@ -333,8 +333,8 @@ pub(super) fn parse(lines: &[Line], first_line: usize, found: &mut Diagnostics) 
         found.at(
             line,
             format!(
-                "`Module` must be a lowercase module name such as `orders` (letters, \
-                 digits, `_`), or `global`; found `{value}`"
+                "`Module` must be a module name such as `Orders` or `orders` (letters, \
+                 digits, `_`, starting with a letter), or `global`; found `{value}`"
             ),
         );
     }
