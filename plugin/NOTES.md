@@ -772,3 +772,151 @@ invar project", which would be a hook error at the start of every session. The
 answer is probably to enable the plugin per project rather than per user
 (`init` could write it into `.claude/settings.json`), not to make the command
 silent for a person typing it. To decide once the plugin has run for real.
+
+## 14. The planner and the protocol skill — M1-18
+
+The code is small; getting an agent to behave is not. This section is the
+protocol for finding out whether it does, and the log of what changed when it
+did not. **v1 has not been run.** Everything below the first row of the log is
+empty on purpose.
+
+### What exists
+
+| File | For | Read by |
+|---|---|---|
+| `agents/planner.md` | Phase 1: a ticket becomes a draft Plan | the planner, in its own context |
+| `skills/invar/SKILL.md` | the cycle, as the main session lives it | the main session, when it loads the skill |
+
+**The planner cannot pause to ask the developer.** A subagent runs to its end and
+returns one answer to the main session. So the planner's answer has a fixed shape,
+and the loop is the main session's: `QUESTIONS` (no Plan written) → the main
+session puts them to the developer and calls the planner again with the answers →
+`PLAN <path>` and a summary of at most eight lines. Whether `AskUserQuestion` is
+available to a subagent was not examined; the design does not depend on it.
+
+**The planner is the log's only reader.** It runs `invar context show` (binding
+context plus the decision log). The main session runs `--binding` only, and the
+skill says so; the `init` deny rule keeps it off the files (§12). What the log
+changes in a Plan is said by the planner in its own words, as reasoning (a rejected
+alternative, a question) — never as a quoted entry, and never as an
+`Implementation context` source, which the contract limits to `AI_CONTEXT` and
+`BUSINESS_CONTEXT` (plan-header.md §6.3). That is how the Plan stays something a
+person approves while the log stays out of Phase 2.
+
+### What CI checks, and what only a run can
+
+`core/tests/plugin_prompts.rs` holds what can drift unseen: the example Plan
+inside the planner's prompt passes the real `plan validate` (so a contract change
+fails here and not in a planner that learned the old shape); every `invar` command
+and flag either prompt names exists; the skill never points the main session at
+the log; the agent is the one the `SubagentStop` matcher selects; the skill has
+every part of the cycle, including the sentence an agent says when it skips.
+
+It cannot say whether the planner **behaves**. That is a property of a model
+reading a prompt, and the test is the walkthrough below.
+
+### The walkthrough
+
+Set up the pilot project once: `invar init`, the team's own `AI_CONTEXT.md` and
+`BUSINESS_CONTEXT.md` (the tool writes neither), the plugin installed with its
+binary (§13). Then run these, each in a fresh session, and fill one row of the
+record for each.
+
+| # | Ticket | What it is for |
+|---|---|---|
+| 1 | A real ticket that touches a **business invariant** | The criterion that would catch the incident; a distilled Implementation context |
+| 2 | A real ticket that touches a **regional or parameterized fact** | The mandatory question |
+| 3 | An ordinary real ticket | A valid Plan with no invariant in play |
+| 4 | A trivial change (a copy fix) | The skill skips the cycle, and says so |
+| 5 | Phase 2 on a Plan that is still a draft | `invar plan check` refuses and no code is written |
+
+Tickets 1–3 together are the first acceptance criterion: a Plan that passes
+`plan validate` on at least three real tickets, one touching an invariant. Take
+them from the backlog, not from the examples in the contract: a prompt that was
+tuned on its own examples proves nothing.
+
+**Record, per run:** the ticket; how many planner calls it took; the questions it
+asked and whether each was needed; whether `plan validate` passed first time; how
+many files it read (the lower the better, and more than about fifteen is a sign it
+is scanning); the length of Implementation context against the binding context; and
+for each invariant in it, whether a criterion would **fail** if the invariant were
+broken — judged by someone who knows the incident, not by the planner. Then read the
+main session's transcript for the log: any `invar context show` without
+`--binding`, any `invar decision log`, any text that is plainly a log entry. One is a
+failure of the third acceptance criterion.
+
+**Exit criteria**, from the task: three tickets valid, one with an invariant; the
+regional question asked; the main session never receives the log; the skill skips
+and says so; Phase 2 refuses a draft; and the iterations recorded below.
+
+### The iteration log
+
+One row per change to either prompt. **Observed** is what a run showed, with the
+ticket; **Changed** is the edit, in a sentence; **Effect** is what the next run
+showed. A change with no observation behind it does not go in the log — it goes in
+the next row's **Observed** once it has one.
+
+| v | Date | Observed | Changed | Effect |
+|---|---|---|---|---|
+| 1 | 2026-10-11 | Nothing yet; first draft. | Planner: procedure in six steps; one answer shape (`QUESTIONS` or `PLAN`); the regional question mandatory, with one exception (the ticket names the value); Implementation context as a distillate with a test per item ("would the coder get this wrong without it?"); one criterion per invariant, written as the negative case; one worked example, in a different domain from the pilot's; the log reasoned from, never quoted. Skill: when to skip and the sentence to say; Phase 2 begins with `plan check`; never edit an approved Plan; a `failed` entry for an impossible one; `done` to close; the log is the planner's alone. | Not run. |
+
+### What to watch for, and the lever for each
+
+These are predictions, written down before the first run so the run can prove them
+wrong. Each names the first thing to change.
+
+1. **Criteria that restate the implementation, or the conventions.** The planner
+   writes "the action uses the scope" instead of a behavior a person could observe.
+   *Lever:* a second worked example, this time with a bad criterion beside the good
+   one — at the cost of tokens on every call.
+2. **An invariant with no criterion of its own.** The criterion exists but would
+   pass with the invariant broken. *Lever:* turn "ask how this change could violate
+   it" into explicit steps; if that is not enough, the planner's `model` (below).
+3. **The planner's model.** `planner.md` sets none, so a subagent runs on whatever
+   the default is. Criteria that would catch the incident are a reasoning task, and
+   this is the cheapest lever: `model: opus`. Not set in v1 because the `claude
+   plugin validate` of an agent's `model` value was not checked.
+4. **The skill is not loaded.** It is loaded when its description matches, which is
+   a judgement. If the main session starts coding without a Plan, the fix is not a
+   longer description: §5c puts the critical rules in the `SessionStart` hook, where
+   they arrive deterministically, and M1-17's hook carries only the binding context.
+   A short protocol summary printed by the CLI is the lever.
+5. **Asking too much, or too little.** More than five questions, or questions the
+   code answers, mean the "ask nothing the code already answers" line is not holding;
+   a regional fact the ticket only implies (a currency, a date format) and no question
+   means the table was not read. *Lever:* quote the table's columns in the rule.
+6. **The log leaks through a question.** A question that begins "an earlier decision
+   said…" is the planner's own words and the main session's context. One sentence is
+   the allowance; a pasted entry is the failure.
+7. **Exploration.** A planner that reads thirty files has not understood
+   "targeted". *Lever:* a hard number in the prompt.
+8. **Skipping that should not happen, or not skipping.** A one-line change to a
+   price calculation is not trivial; a typo is. Record the cases and tighten the
+   test sentence in the skill.
+
+### Change after v1: the planner reads everything
+
+Decided with the developer, for the MVP: `invar context show` has no `--module`.
+It prints the binding context and **every** decision entry, newest first, within
+the existing budget (50 entries / ~4,000 tokens, with a line naming how many
+older entries were left out). The module on an entry is only a label in its header
+line. Reason: tickets touch several modules, and the planner is better served by
+all the facts than by a selection it has to guess. The budget stays as the one
+safeguard; if the log outgrows it, the planner will say so and that is the signal
+to revisit (summaries, or search). `planner.md` step 1 changed accordingly.
+
+**Still open:** the Plan header still requires `Module` and `is_module` is still
+lowercase-only (`^[a-z][a-z0-9_]*$`), for the Plan header, decision entries and
+filenames. A firm that names modules `Billing` hits this. Options: (a) drop
+`Module` from the Plan header and from entries/filenames (contract bump, old
+Plans stay valid because unknown keys are preserved); (b) widen `is_module` to
+allow capitals. Not done yet.
+
+### Not exercised
+
+- [ ] A plugin agent is invoked by name (`planner`, or `invar:planner`) from the
+      main session, and the `SubagentStop` matcher selects it
+- [ ] `claude plugin validate --strict` accepts the agent and skill frontmatter
+- [ ] The `QUESTIONS` → answers → `PLAN` loop works across two planner calls without
+      the planner remembering the first (it is not resumed)
+- [ ] The skill is loaded by a ticket-shaped request that does not name invar
