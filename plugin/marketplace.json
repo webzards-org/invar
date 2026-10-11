@@ -1,7 +1,11 @@
 {
   "name": "invar",
+  "description": "Invar: a spec-driven plan, approve and verify loop for Claude Code. The Plan the developer approves is the one the code is held to.",
   "owner": {
     "name": "Radomir Brkovic"
+  },
+  "metadata": {
+    "description": "Invar: a spec-driven plan, approve and verify loop for Claude Code. The Plan the developer approves is the one the code is held to."
   },
   "plugins": [
     {
