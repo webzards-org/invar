@@ -10,6 +10,9 @@ use super::mode;
 mod approve;
 mod check;
 mod guard;
+// The same check `plan check` makes, for `pr-body` and `done`, which sit
+// outside `plan` and must not stand on lighter ground.
+pub(super) mod require_approved;
 // `done` and `pr-body` sit directly under `invar`, not under `plan`, but name
 // and locate a Plan the same way `plan check`/`plan approve` do — so this is
 // shared with them rather than reimplemented per command.

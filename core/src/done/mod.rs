@@ -172,13 +172,7 @@ impl fmt::Display for DoneError {
     }
 }
 
-impl std::error::Error for DoneError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Check(err) => Some(err),
-            Self::ReadPlan(err) => Some(err),
-            Self::Io { source, .. } | Self::RemovePlan { source, .. } => Some(source),
-            Self::Record(err) => Some(err),
-        }
-    }
-}
+// No `source()`: every variant's message already carries its cause, and
+// `main` prints the whole chain, so exposing it would print each refusal twice
+// ("the Plan ... is still a draft: the Plan ... is still a draft").
+impl std::error::Error for DoneError {}

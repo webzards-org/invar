@@ -3,12 +3,12 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Context as _, Result};
 
-use crate::format::plan::{Plan, Status};
+use crate::format::plan::Plan;
 use crate::pr_body;
 
-use super::plan::target;
+use super::plan::{require_approved, target};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -24,7 +24,8 @@ pub struct Args {
     #[arg(long)]
     pub with_ticket: bool,
 
-    /// Write the description to this file instead of stdout.
+    /// Write the description to this file instead of stdout, creating its
+    /// directory if there is none. Prints the path it wrote.
     #[arg(long)]
     pub out: Option<PathBuf>,
 }
@@ -34,19 +35,30 @@ pub fn run(args: Args) -> Result<()> {
     let (root, spec) = target::resolve(&args.target, &cwd)?;
     let mode = super::mode(&root)?;
 
+    // A PR description describes an approved specification: one that has been
+    // approved, and has not changed since. That is the question `plan check`
+    // and `invar done` ask, and this asks it too, in the same words. A lighter
+    // rule — refusing only a draft — would let a Plan edited after approval be
+    // described under an "Approved by …" line it no longer has any right to.
+    require_approved::require(&root, &spec, mode, &cwd).context(
+        "a PR description describes an approved specification, and this Plan is not one",
+    )?;
+
     let plan = Plan::read(&spec, mode)?;
     let ticket = plan.header().ticket.clone();
-    if plan.header().status == Status::Draft {
-        bail!(
-            "{}: the Plan for {ticket} is still a draft; a PR description describes an \
-             approved specification. Approve it first with `invar plan approve {ticket}`",
-            target::shown(&spec, &cwd)
-        );
-    }
 
     let rendered = pr_body::render(&plan, &ticket, args.with_ticket);
     match args.out {
         Some(path) => {
+            // `.invar/out/` is where `invar done` writes, and `init` does not
+            // create it: a description asked for there must not fail on that.
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("cannot create {}", parent.display()))?;
+            }
             fs::write(&path, &rendered)
                 .with_context(|| format!("cannot write {}", path.display()))?;
             println!("{}", target::shown(&path, &cwd));

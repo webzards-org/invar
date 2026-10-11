@@ -5,11 +5,12 @@ use std::path::{Component, Path};
 
 use anyhow::{Context as _, Result};
 
-use crate::done::{self, Request};
+use crate::done::{self, DoneError, Request};
 use crate::fs::ProjectRoot;
+use crate::gate::check::CheckError;
 use crate::git;
 
-use super::plan::target;
+use super::plan::{require_approved, target};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -48,7 +49,16 @@ pub fn run(args: Args) -> Result<()> {
         body,
         with_ticket: args.with_ticket,
     };
-    let closed = done::close(&root, request, mode, now)?;
+    let closed = match done::close(&root, request, mode, now) {
+        Ok(closed) => closed,
+        // The refusal for a Plan that is not valid in form says "fix every
+        // problem listed above"; here is the list it points at.
+        Err(DoneError::Check(CheckError::Invalid(report))) => {
+            require_approved::print_problems(&report, &cwd);
+            return Err(DoneError::Check(CheckError::Invalid(report)).into());
+        }
+        Err(err) => return Err(err.into()),
+    };
 
     println!(
         "pr description: {}",

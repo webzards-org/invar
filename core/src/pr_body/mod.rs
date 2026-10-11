@@ -32,10 +32,11 @@ const SECTIONS: [&str; 6] = [
 
 /// Render `plan` as a PR description for `ticket`.
 ///
-/// Does not look at `Status`: a caller decides whether a draft Plan may be
-/// rendered, since `invar done` and the standalone `pr-body` command refuse
-/// one for different reasons (§12) — `done` through the stronger `plan check`
-/// (M1-10), `pr-body` through its own, lighter "not a draft" rule.
+/// Does not look at the approval: a caller decides whether a Plan may be
+/// rendered. Both callers — `invar done` and the standalone `pr-body` command
+/// — run `plan check` (M1-10) first, so only a Plan that is approved and
+/// unchanged since reaches this function, and the "Approved by …" line is
+/// true of the text rendered under it.
 pub fn render(plan: &Plan, ticket: &str, with_ticket: bool) -> String {
     let header = plan.header();
     let mut out = String::new();
@@ -66,7 +67,30 @@ fn write_section(out: &mut String, heading: &str, content: Option<&str>) {
     let _ = writeln!(out);
     let _ = writeln!(out, "## {heading}");
     let _ = writeln!(out);
-    let text = content.map(str::trim).filter(|text| !text.is_empty());
+    // One line ending before anything is looked at: a Plan may be written
+    // with `\r\n` or a lone `\r` (plan-header.md §3), and the blank lines at
+    // the edges of a section must go whichever it is.
+    let normalized = content.map(|text| text.replace("\r\n", "\n").replace('\r', "\n"));
+    let text = normalized
+        .as_deref()
+        .map(strip_blank_edges)
+        .filter(|text| !text.is_empty());
     out.push_str(text.unwrap_or("none"));
     out.push('\n');
+}
+
+/// `text` without the blank lines before it and the whitespace after it.
+///
+/// Not `str::trim`: that would also take the indentation off the first line,
+/// and a section that opens with an indented code block, or a nested list,
+/// would stop being one in the description a reviewer reads.
+fn strip_blank_edges(text: &str) -> &str {
+    let mut rest = text;
+    while let Some((line, after)) = rest.split_once('\n') {
+        if !line.trim().is_empty() {
+            break;
+        }
+        rest = after;
+    }
+    rest.trim_end()
 }
