@@ -1,0 +1,451 @@
+//! The planner agent and the protocol skill, tested as what they can be tested
+//! as: files (M1-18).
+//!
+//! Whether the planner *behaves* — asks the regional question, writes criteria
+//! that would catch the incident, returns only a path and a summary — is a
+//! property of a model reading a prompt, and the only test of it is running it
+//! on real tickets: `plugin/NOTES.md` §14 is the protocol, and the iteration log
+//! is where the results go. What these tests hold is everything around that
+//! which can drift without anybody noticing:
+//!
+//! - the **example Plan in the prompt is valid** under the real `plan validate`,
+//!   so a change to the Plan contract that outdates the template fails here and
+//!   not in a planner that learned the old shape;
+//! - **every `invar` command and flag the prompts name exists**, so a prompt
+//!   cannot send an agent to a flag that was renamed or never was;
+//! - the **main session is never pointed at the decision log**, and the skill
+//!   says what the acceptance criteria require of it;
+//! - the planner **is the agent the `SubagentStop` hook selects**.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use assert_cmd::Command;
+use serde_json::Value;
+
+fn plugin_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugin")
+}
+
+fn read(relative: &str) -> String {
+    let path = plugin_dir().join(relative);
+    fs::read_to_string(&path).unwrap_or_else(|err| panic!("cannot read {}: {err}", path.display()))
+}
+
+/// The flat `key: value` frontmatter of an agent or a skill, and what follows.
+fn frontmatter(relative: &str) -> (BTreeMap<String, String>, String) {
+    let text = read(relative);
+    let rest = text
+        .strip_prefix("---\n")
+        .unwrap_or_else(|| panic!("{relative} has no frontmatter"));
+    let (head, body) = rest
+        .split_once("\n---\n")
+        .unwrap_or_else(|| panic!("{relative}: the frontmatter is never closed"));
+    let meta = head
+        .lines()
+        .map(|line| {
+            let (key, value) = line
+                .split_once(": ")
+                .unwrap_or_else(|| panic!("{relative}: `{line}` is not `key: value`"));
+            (key.to_owned(), value.to_owned())
+        })
+        .collect();
+    (meta, body.to_owned())
+}
+
+// --- the planner ---------------------------------------------------------------------
+
+#[test]
+fn the_planner_is_the_agent_the_stop_hook_selects() {
+    let (meta, _) = frontmatter("agents/planner.md");
+    let hooks: Value = serde_json::from_str(&read("hooks/hooks.json")).unwrap();
+    let matcher = hooks["hooks"]["SubagentStop"][0]["matcher"]
+        .as_str()
+        .unwrap();
+
+    assert_eq!(meta["name"], "planner");
+    // The matcher is `.*planner`: the name has to end the way it expects.
+    assert!(
+        meta["name"].ends_with(matcher.trim_start_matches(".*")),
+        "the SubagentStop matcher `{matcher}` does not select `{}`",
+        meta["name"]
+    );
+}
+
+#[test]
+fn the_frontmatter_stays_valid_yaml_without_quoting() {
+    // A flat reader like this one is what an unquoted value can be read by; a
+    // `: ` or a ` #` inside a value would make a real YAML parser read it
+    // differently.
+    for file in ["agents/planner.md", "skills/invar/SKILL.md"] {
+        let (meta, _) = frontmatter(file);
+        for (key, value) in &meta {
+            assert!(!value.contains(": "), "{file}: `{key}` contains `: `");
+            assert!(!value.contains(" #"), "{file}: `{key}` contains ` #`");
+            assert!(!value.is_empty(), "{file}: `{key}` is empty");
+        }
+    }
+}
+
+#[test]
+fn the_planner_has_the_tools_to_read_the_code_and_write_one_file_and_no_more() {
+    let (meta, _) = frontmatter("agents/planner.md");
+    let tools: BTreeSet<&str> = meta["tools"].split(',').map(str::trim).collect();
+
+    // It reads (`Read`, `Grep`, `Glob`), runs `invar` (`Bash`) and writes the
+    // Plan (`Write`, `Edit`).
+    for needed in ["Read", "Grep", "Glob", "Bash", "Write", "Edit"] {
+        assert!(tools.contains(needed), "the planner lacks {needed}");
+    }
+    // It does not start other agents: Phase 1 is one context.
+    for forbidden in ["Agent", "Task"] {
+        assert!(!tools.contains(forbidden), "the planner has {forbidden}");
+    }
+}
+
+#[test]
+fn the_planners_description_tells_the_main_session_what_to_give_it_and_what_it_returns() {
+    let (meta, _) = frontmatter("agents/planner.md");
+    let description = &meta["description"];
+
+    assert!(description.contains("ticket id"), "{description}");
+    assert!(description.contains("verbatim") || description.contains("exactly as written"));
+    assert!(description.contains("QUESTIONS"), "{description}");
+    // The main session is told, where it chooses the agent, that the log is not
+    // its to read.
+    assert!(
+        description.contains("main session must not"),
+        "{description}"
+    );
+}
+
+#[test]
+fn the_planners_prompt_has_each_part_the_pilot_depends_on() {
+    let (_, body) = frontmatter("agents/planner.md");
+
+    for heading in [
+        "## What you are given",
+        "## What you return",
+        "## Procedure",
+        "## Questions you must ask",
+        "## Implementation context is a distillate",
+        "## Acceptance criteria that would catch the incident",
+        "### Example of a complete Plan",
+        "## A Plan that came back",
+        "## What you never do",
+    ] {
+        assert!(
+            body.contains(heading),
+            "the planner prompt lost `{heading}`"
+        );
+    }
+    for phrase in [
+        // The two shapes of the answer, which the skill parses by eye.
+        "QUESTIONS",
+        "PLAN .invar/plans/",
+        // Reading is narrow.
+        "Never a full scan",
+        // The mandatory question, and its single exception.
+        "asking is\nmandatory",
+        "stated in the ticket",
+        // The distillate, and what is not a source.
+        "never a copy",
+        "Past decisions are not a source",
+        // The criterion per invariant, as the negative case.
+        "gets at least one criterion that fails if the invariant is\nbroken",
+        // What it must not do.
+        "Run `invar plan approve`",
+        "Quote the decision log",
+    ] {
+        assert!(
+            body.contains(phrase) || body.replace("\n", " ").contains(&phrase.replace('\n', " ")),
+            "the planner prompt lost: {phrase:?}"
+        );
+    }
+}
+
+/// The first complete Plan in the planner's prompt.
+fn example_plan() -> String {
+    let (_, body) = frontmatter("agents/planner.md");
+    let after = body
+        .split_once("### Example of a complete Plan")
+        .expect("the planner prompt has an example Plan")
+        .1;
+    let fenced = after.split_once("```markdown\n").unwrap().1;
+    fenced.split_once("\n```\n").unwrap().0.to_owned() + "\n"
+}
+
+#[test]
+fn the_example_plan_in_the_prompt_passes_plan_validate() {
+    // The template is what the planner imitates. If the contract moves, this is
+    // where it is noticed — not in a planner that learned the old shape.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("invar.yaml"), "").unwrap();
+    let plan_dir = dir.path().join(".invar/plans/ACME-87-export-invoices-csv");
+    fs::create_dir_all(&plan_dir).unwrap();
+    fs::write(plan_dir.join("spec.md"), example_plan()).unwrap();
+
+    Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["plan", "validate", "ACME-87"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn the_example_plan_shows_what_it_asks_of_the_planner() {
+    let plan = example_plan();
+
+    // A draft: the status the planner writes, with the approval keys present
+    // and empty.
+    for line in [
+        "Status: draft",
+        "Approved-by:",
+        "Approved-at:",
+        "Approved-checksum:",
+    ] {
+        assert!(
+            plan.lines().any(|l| l == line),
+            "the example lacks `{line}`"
+        );
+    }
+    // A business invariant in Implementation context, and a criterion for the
+    // negative case: another account's customer is a 404.
+    assert!(plan.contains("BUSINESS_CONTEXT invariant:"));
+    assert!(plan.contains("belongs to another account"));
+    assert!(plan.contains("the response is 404"));
+    // Only the two sources the contract allows.
+    let context = plan.split_once("## Implementation context\n").unwrap().1;
+    for line in context.lines().filter(|l| l.starts_with("- ")) {
+        assert!(
+            line.starts_with("- AI_CONTEXT:") || line.starts_with("- BUSINESS_CONTEXT invariant:"),
+            "{line}"
+        );
+    }
+}
+
+// --- the skill ---------------------------------------------------------------------------
+
+fn skill() -> (BTreeMap<String, String>, String) {
+    frontmatter("skills/invar/SKILL.md")
+}
+
+#[test]
+fn the_skill_is_found_by_what_a_developer_asks() {
+    let (meta, _) = skill();
+    let description = &meta["description"];
+
+    assert_eq!(meta["name"], "invar");
+    // The description is what decides whether the skill is loaded at all (§5c).
+    for word in ["ticket", "Plan", "invar.yaml", "skip"] {
+        assert!(description.contains(word), "no `{word}` in: {description}");
+    }
+    assert!(
+        description.len() <= 1024,
+        "{} characters",
+        description.len()
+    );
+}
+
+#[test]
+fn the_skill_has_every_part_of_the_cycle() {
+    let (_, body) = skill();
+
+    for heading in [
+        "## Is this a job for the cycle?",
+        "## Phase 1 — plan",
+        "## The developer approves",
+        "## Phase 2 — implement",
+        "## When the Plan cannot be implemented",
+        "## Closing",
+        "## The decision log is not yours",
+        "## Never",
+    ] {
+        assert!(body.contains(heading), "the skill lost `{heading}`");
+    }
+}
+
+#[test]
+fn the_skill_tells_the_agent_to_skip_the_cycle_for_trivial_work_and_to_say_so() {
+    let (_, body) = skill();
+
+    assert!(body.contains("**Skip it** for trivial work"));
+    // The exact sentence to say, so a skip is a visible decision and not an
+    // oversight (L-9).
+    assert!(body.contains("*\"Skipping the invar cycle:"), "{body}");
+    assert!(body.contains("When you skip, say so, before you start"));
+    // And the escape for the case it cannot tell.
+    assert!(body.contains("Plan this, or just do it?"));
+}
+
+#[test]
+fn the_skill_states_the_rules_of_phase_two() {
+    let flat = skill().1.replace('\n', " ");
+
+    // Phase 2 begins with the check, and a refusal means no code.
+    assert!(flat.contains("**Phase 2 begins with `invar plan check <TICKET>`.**"));
+    assert!(flat.contains("do not write code"));
+    // An approved Plan is never edited.
+    assert!(flat.contains("**Never edit the approved Plan**"));
+    // An impossible Plan goes back, with a `failed` entry — not "fixed".
+    assert!(flat.contains("--type failed"));
+    assert!(flat.contains("returns the Plan to `draft`"));
+    assert!(flat.contains("Do not weaken a criterion"));
+    // The cycle closes with `done`.
+    assert!(flat.contains("`invar done <TICKET> -m"));
+    // The developer's step is theirs.
+    assert!(flat.contains("**Stop and wait.** Never run `invar plan approve` yourself"));
+}
+
+#[test]
+fn the_main_session_is_never_pointed_at_the_decision_log() {
+    // "The main session never receives the decision log." Every mention of a
+    // way to read it, in the skill, is a prohibition or the binding-only form.
+    let (_, body) = skill();
+    let mut mentions = 0;
+    for line in body.lines() {
+        let reads_the_log = line.contains("invar context show")
+            || line.contains("invar decision log")
+            || line.contains(".invar/decisions");
+        if !reads_the_log {
+            continue;
+        }
+        mentions += 1;
+        assert!(
+            ["never", "Never", "do not", "Do not", "--binding"]
+                .iter()
+                .any(|word| line.contains(word)),
+            "the skill points the main session at the log: {line}"
+        );
+    }
+    assert!(
+        mentions >= 3,
+        "the skill no longer says where the log is not to be read"
+    );
+}
+
+#[test]
+fn the_planner_alone_is_told_to_read_the_log() {
+    let (_, planner) = frontmatter("agents/planner.md");
+    assert!(planner.contains("`invar context show`"));
+    assert!(planner.contains("the decision log"));
+}
+
+// --- the commands and flags both prompts name -----------------------------------------------
+
+/// Every inline `` `invar …` `` span in `text`, outside fenced blocks.
+fn inline_commands(text: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut in_fence = false;
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        let mut rest = line;
+        while let Some(start) = rest.find("`invar ") {
+            let after = &rest[start + 1..];
+            let Some(end) = after.find('`') else { break };
+            found.push(after[..end].to_owned());
+            rest = &after[end + 1..];
+        }
+    }
+    found
+}
+
+/// `invar plan approve <TICKET> --reapprove` → (`plan approve`, [`--reapprove`]).
+fn command_and_flags(span: &str) -> (Vec<String>, Vec<String>) {
+    let tokens: Vec<&str> = span.split_whitespace().skip(1).collect();
+    let path: Vec<String> = tokens
+        .iter()
+        .take_while(|token| {
+            !token.is_empty()
+                && token.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+                && !token.starts_with('-')
+        })
+        .map(|token| (*token).to_owned())
+        .collect();
+    let flags = tokens
+        .iter()
+        .filter(|token| token.starts_with("--"))
+        .map(|token| {
+            token
+                .trim_end_matches([',', '.', ')', ';', '"'])
+                .split('=')
+                .next()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    (path, flags)
+}
+
+#[test]
+fn every_invar_command_and_flag_the_prompts_name_exists() {
+    let mut texts = vec![frontmatter("agents/planner.md").1, skill().1];
+    texts
+        .iter_mut()
+        .for_each(|text| *text = text.replace("\\\"", "\""));
+
+    let mut seen: BTreeSet<(Vec<String>, String)> = BTreeSet::new();
+    let mut commands: BTreeSet<Vec<String>> = BTreeSet::new();
+    for text in &texts {
+        for span in inline_commands(text) {
+            let (path, flags) = command_and_flags(&span);
+            assert!(!path.is_empty(), "`{span}` names no command");
+            commands.insert(path.clone());
+            for flag in flags {
+                seen.insert((path.clone(), flag));
+            }
+        }
+    }
+    // The extraction itself has to be finding things.
+    assert!(commands.len() >= 6, "found only {commands:?}");
+    assert!(seen.len() >= 4, "found only {seen:?}");
+
+    for path in &commands {
+        let assert = Command::cargo_bin("invar")
+            .unwrap()
+            .args(path)
+            .arg("--help")
+            .assert()
+            .success();
+        let help = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+        for (_, flag) in seen.iter().filter(|(p, _)| p == path) {
+            assert!(
+                help.contains(flag.as_str()),
+                "`invar {}` has no {flag}",
+                path.join(" ")
+            );
+        }
+    }
+}
+
+#[test]
+fn the_commands_the_two_prompts_split_between_them_are_the_ones_each_is_allowed() {
+    // The skill, which the main session reads, names no command only the
+    // planner may run; the planner is told not to run what is the developer's
+    // or the coder's.
+    let skill_commands: BTreeSet<Vec<String>> = inline_commands(&skill().1)
+        .iter()
+        .map(|span| command_and_flags(span).0)
+        .collect();
+    let planner_commands: BTreeSet<Vec<String>> =
+        inline_commands(&frontmatter("agents/planner.md").1)
+            .iter()
+            .map(|span| command_and_flags(span).0)
+            .collect();
+
+    // `plan check` and `done` are the main session's (Phase 2 and closing);
+    // the planner names them only in what it never does.
+    assert!(skill_commands.contains(&vec!["plan".to_owned(), "check".to_owned()]));
+    assert!(skill_commands.contains(&vec!["done".to_owned()]));
+    // `plan validate` and the full `context show` are the planner's.
+    assert!(planner_commands.contains(&vec!["plan".to_owned(), "validate".to_owned()]));
+    assert!(planner_commands.contains(&vec!["context".to_owned(), "show".to_owned()]));
+}
