@@ -1,6 +1,6 @@
 # Contract: Plan header and required sections
 
-**Version:** 1.4.1 — a draft's approval values are not an error; see §10 for what changed and why
+**Version:** 1.5.0 — `Module` may use capital letters; see §10 for what changed and why
 **Status:** stable
 **Implements:** §4a (Plan document structure), §4d (Checksums), §5c (Context
 delivery), §12 (Plan lifecycle); light mode L-1, L-2, L-5
@@ -110,7 +110,7 @@ part of the body (see D-1).
 | Field | Required | Allowed values | Written by |
 |---|---|---|---|
 | `Ticket` | yes | `^[A-Z][A-Z0-9]*-[0-9]+$`; must match the directory name | Agent |
-| `Module` | yes | `^[a-z][a-z0-9_]*$`, or `global` | Agent |
+| `Module` | yes | `^[A-Za-z][A-Za-z0-9_]*$`, or `global`; case is kept as written (D-15) | Agent |
 | `Status` | yes | `draft` or `approved`, lowercase, exactly | `plan approve` sets `approved`; `decision record --type failed` sets `draft`; the agent writes `draft` on creation |
 | `Approved-by` | key present always; value only when `Status: approved` | Non-empty; a git `user.name` | **Command only** (`plan approve`) |
 | `Approved-at` | key present always; value only when `Status: approved` | `YYYY-MM-DD` | **Command only** (`plan approve`) |
@@ -511,6 +511,13 @@ learn to satisfy any mechanical check, so this one only removes what is
 unambiguously not a criterion. Whether a criterion is a *good* one remains what
 the person at the gate is for.
 
+**D-15 — `Module` may be capitalized** (1.5.0). Laravel projects name their
+modules `Billing`, `Invoicing`; a rule that only accepted `billing` would make
+the planner write a name that exists nowhere else in the project. The value is
+a label: nothing in the core compares modules, so case is kept as written and
+no normalization is applied. `-` stays out of the name because the decision
+entry's filename (`decision-entry.md` §2) ends the module at the first `-`.
+
 ## 8. Open questions
 
 **OQ-1 — Re-approving an already approved Plan.** *Resolved in 1.3.0 by
@@ -705,6 +712,17 @@ There is nothing for the developer to approve the change against, nothing for
 validate` reports it as an empty required section, naming the heading.
 
 ## 10. Version history
+
+**1.5.0 — capitalized module names.**
+
+- §5: `Module` matches `^[A-Za-z][A-Za-z0-9_]*$` (or `global`) instead of
+  `^[a-z][a-z0-9_]*$`. New D-15.
+
+**Why:** the project's own modules are capitalized (`Billing`), and the lowercase
+rule made `plan validate` refuse a Plan that named the module correctly.
+
+**Compatibility:** every Plan that was valid stays valid; one that named a
+capitalized module was invalid and now passes.
 
 **1.4.1 — a draft's approval values, and when they are checked (M1-9).**
 

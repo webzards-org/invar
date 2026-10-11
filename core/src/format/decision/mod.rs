@@ -344,7 +344,7 @@ pub fn parse(text: &str) -> Result<Entry, Diagnostics> {
     let module = field(
         MODULE,
         is_module,
-        "a lowercase module name such as `orders`, or `global`",
+        "a module name such as `Orders` or `orders` (letters, digits, `_`), or `global`",
     );
     let kind = field(
         TYPE,

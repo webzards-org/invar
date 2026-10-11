@@ -96,7 +96,7 @@ fn an_approved_plan_with_an_empty_checksum_is_valid_in_form() {
 fn every_problem_is_printed_as_path_line_message_in_one_run() {
     let project = Project::new("");
     let text = plan_text("PROJ-413")
-        .replace("Module: orders", "Module: Orders")
+        .replace("Module: orders", "Module: or-ders")
         .replace(
             "## Implementation context\n- AI_CONTEXT: controllers stay thin\n",
             "",

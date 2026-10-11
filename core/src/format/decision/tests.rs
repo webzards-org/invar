@@ -153,7 +153,7 @@ fn crlf_comments_blank_lines_and_unknown_keys_are_accepted() {
 
 #[test]
 fn every_problem_is_reported_in_one_run() {
-    let text = "---\nid: 7c41\ndate: 2026-10-06 18:37\nticket: shop-214\nmodule: Orders\n\
+    let text = "---\nid: 7c41\ndate: 2026-10-06 18:37\nticket: shop-214\nmodule: or-ders\n\
         type: failed\ntype: note\nscenario: Reserve Stock\nnot a key\n---\n";
     let found = parse(text).unwrap_err().to_string();
     for needle in [
@@ -227,10 +227,15 @@ fn filenames_parse_and_render() {
         "proj-412-3"
     );
 
+    // Capitals are kept: Laravel modules are `Billing`, not `billing`.
+    let capitalized = FileName::parse("2026-10-06-163712-Orders-x.md").unwrap();
+    assert_eq!(capitalized.module, "Orders");
+    assert_eq!(capitalized.render(1), "2026-10-06-163712-Orders-x.md");
+
     for bad in [
         "2026-10-06-163712-orders.md",
         "2026-10-06-163712-orders-.md",
-        "2026-10-06-163712-Orders-x.md",
+        "2026-10-06-163712-1orders-x.md",
         "2026-10-06-163712-orders-x.txt",
         "2026-10-06-246000-orders-x.md",
         "2026-02-30-120000-orders-x.md",

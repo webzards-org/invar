@@ -434,8 +434,8 @@ fn values_are_checked_against_the_contract() {
         ),
         (
             "Module: orders",
-            "Module: Orders",
-            "`Module` must be a lowercase module name",
+            "Module: or-ders",
+            "`Module` must be a module name",
         ),
         (
             "Approved-at:",
@@ -1002,7 +1002,7 @@ fn check_reads_ticket_and_status_when_other_fields_are_wrong() {
     // ticket and the status are still known, so `plan validate` can compare
     // the ticket with the directory in the same run.
     let text = valid()
-        .replace("Module: orders", "Module: Orders")
+        .replace("Module: orders", "Module: or-ders")
         .replace("Status: draft", "Status: approved")
         .replace("## Scope\n", "## Scoped\n");
     let checked = Plan::check(&text, Mode::Light);

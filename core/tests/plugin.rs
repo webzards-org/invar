@@ -416,6 +416,32 @@ mod launcher {
         format!("{os}-{arch}")
     }
 
+    /// Wait until `path` can be executed.
+    ///
+    /// A file that was just written cannot always be run at once: the tests in
+    /// this file run on parallel threads, and a child forked by one thread
+    /// between another's `write` and `close` still holds the write descriptor
+    /// until it execs, so `exec` of the new file fails with "Text file busy"
+    /// (ETXTBSY, 26). The window is a few microseconds; trying again closes it.
+    /// Any other outcome — success, a non-zero exit, "permission denied" — is
+    /// the file's real behaviour and ends the wait.
+    fn wait_until_executable(path: &Path) {
+        const ETXTBSY: i32 = 26;
+        for _ in 0..100 {
+            let started = std::process::Command::new(path)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            match started {
+                Err(err) if err.raw_os_error() == Some(ETXTBSY) => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                _ => return,
+            }
+        }
+    }
+
     /// The launcher copied into `<tmp>/bin/`, ready for a fake binary to be put
     /// beside it. Returns the temporary directory and the `bin` directory.
     fn installed() -> (tempfile::TempDir, PathBuf) {
@@ -424,6 +450,7 @@ mod launcher {
         fs::create_dir_all(&bin).unwrap();
         fs::copy(plugin_dir().join("bin/invar"), bin.join("invar")).unwrap();
         fs::set_permissions(bin.join("invar"), fs::Permissions::from_mode(0o755)).unwrap();
+        wait_until_executable(&bin.join("invar"));
         (dir, bin)
     }
 
@@ -433,6 +460,7 @@ mod launcher {
         let path = bin.join(format!("invar-{}", platform()));
         fs::write(&path, "#!/bin/sh\nprintf '%s\\n' \"$@\"\ncat\nexit 7\n").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+        wait_until_executable(&path);
     }
 
     #[test]

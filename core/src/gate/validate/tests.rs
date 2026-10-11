@@ -102,10 +102,10 @@ fn approval_fields_are_not_checked() {
 #[test]
 fn every_category_is_reported_in_one_run() {
     let (_dir, root) = project();
-    // Directory name: lowercase ticket. Header: bad Module. Sections: one
+    // Directory name: lowercase ticket. Header: bad Module (a dash). Sections: one
     // missing, one misspelled, one empty, two out of order.
     let text = plan_text("PROJ-412")
-        .replace("Module: orders", "Module: Orders")
+        .replace("Module: orders", "Module: or-ders")
         .replace("## Intent\n", "## intent\n")
         .replace("## Rejected alternatives\nNone considered.\n", "")
         .replace(
@@ -181,7 +181,7 @@ fn a_header_ticket_that_disagrees_with_the_directory_fails_at_its_line() {
 #[test]
 fn the_ticket_mismatch_is_reported_alongside_other_header_problems() {
     let (_dir, root) = project();
-    let text = plan_text("PROJ-413").replace("Module: orders", "Module: Orders");
+    let text = plan_text("PROJ-413").replace("Module: orders", "Module: or-ders");
     let report = validate(&root, &write_plan(&root, "PROJ-412-reserve-stock", &text));
     assert_mentions(&report, &["`Module` must be", "`Ticket: PROJ-413`"]);
     assert_eq!(report.problems.len(), 2, "{}", report.problems);

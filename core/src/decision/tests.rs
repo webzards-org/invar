@@ -159,7 +159,7 @@ fn a_module_that_disagrees_with_the_plan_is_refused() {
 #[test]
 fn a_plan_with_an_unreadable_module_needs_the_argument() {
     let (_dir, root) = project(Some(
-        &approved_plan().replace("Module: orders", "Module: Orders"),
+        &approved_plan().replace("Module: orders", "Module: or-ders"),
     ));
     assert!(matches!(
         record(
@@ -195,7 +195,7 @@ fn bad_input_is_refused_before_anything_is_written() {
     assert!(matches!(
         record(
             &root,
-            request("SHOP-214", Type::Note, Some("Orders")),
+            request("SHOP-214", Type::Note, Some("or-ders")),
             NOW,
             Mode::Light
         ),
