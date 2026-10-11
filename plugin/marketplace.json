@@ -1,0 +1,13 @@
+{
+  "name": "invar",
+  "owner": {
+    "name": "Radomir Brkovic"
+  },
+  "plugins": [
+    {
+      "name": "invar",
+      "source": "./invar",
+      "description": "Holds the specification fixed while code is generated against it: an approved Plan the coder cannot quietly move."
+    }
+  ]
+}

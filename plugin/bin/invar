@@ -1,0 +1,28 @@
+#!/bin/sh
+# invar -- picks the binary built for this platform, and runs it. Nothing else.
+#
+# The plugin ships one binary per platform next to this file, named
+# `invar-<os>-<arch>` (plugin/NOTES.md section 13). Every argument, the standard
+# input and the exit code pass through untouched: this file decides nothing, and
+# there is no logic in the plugin but the logic of finding the right binary
+# (design section 13b).
+#
+# A platform without a binary fails with exit code 127, never 2. Claude Code
+# reads exit code 2 from a PreToolUse hook as "deny this tool call", and a
+# missing binary must not stop anybody's work: any other non-zero code is a
+# non-blocking error.
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd) || exit 127
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+arch=$(uname -m)
+case "$arch" in
+  aarch64) arch=arm64 ;;
+  amd64) arch=x86_64 ;;
+esac
+
+binary="$here/invar-$os-$arch"
+if [ ! -x "$binary" ]; then
+  echo "invar: no binary for $os-$arch in $here (this plugin has: linux-x86_64, darwin-arm64, darwin-x86_64)" >&2
+  exit 127
+fi
+exec "$binary" "$@"
