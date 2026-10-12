@@ -121,14 +121,22 @@ it back to Phase 1 as above.
 
 When every acceptance criterion is met and the project's own checks pass:
 
+**Offer the review, if the project asks for it.** If `invar.yaml` sets
+`review.offer: true`, ask the developer once, before closing: *"Run `/invar:review`
+before closing? It checks the branch against the approved Plan."* The review needs
+the Plan, and `done` removes it, so it comes first. It reads only what is committed
+on the branch: the change has to be committed before it runs, the way this project
+commits. The developer runs it, not you: do not start the reviewer yourself. It is
+advisory; if the developer declines, go on.
+
+Then:
+
 `invar done <TICKET> -m "<what was actually built, including any deviation from the Plan>"`
 
 Say honestly what came out; the message becomes the permanent decision entry. `done`
 checks the Plan once more, renders the PR description to `.invar/out/<TICKET>-pr.md`,
 records the entry and removes the Plan. Tell the developer the path of the PR
-description, and to commit everything into the same PR. If `invar.yaml` sets
-`review.offer: true` and the plugin provides `/invar:review`, offer it first, once;
-it is advisory.
+description, and to commit everything into the same PR.
 
 ## The decision log is not yours
 
@@ -157,4 +165,5 @@ implementing it.
 | `invar plan approve <TICKET>` | the developer's, from their own terminal |
 | `invar decision record --ticket <TICKET> --type failed -m "..."` | the Plan cannot be implemented |
 | `invar done <TICKET> -m "..."` | close the cycle |
+| `/invar:review` | the developer's, before `done`, when `review.offer: true` |
 | `invar context show --binding` | the binding context, which you already have |
