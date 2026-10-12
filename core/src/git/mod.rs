@@ -198,6 +198,95 @@ pub fn merged_branches(dir: &Path, base: &str) -> Result<Vec<String>, GitError> 
     Ok(names.into_iter().collect())
 }
 
+/// What a review reads of a branch (M1-20): the patch, and the same
+/// comparison as one `--numstat` line per file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchDiff {
+    pub patch: String,
+    pub numstat: String,
+}
+
+/// The options every review diff runs with. Each one fixes something a
+/// developer's git configuration could otherwise change about the output —
+/// colour, an external diff driver, textconv filters, relative paths, rename
+/// detection, the diff algorithm, the context size, the path prefixes
+/// (`diff.noprefix`, `diff.mnemonicPrefix`), the file order (`diff.orderFile`)
+/// and the quoting of non-ASCII names — so that the same commits give the same
+/// bytes on every machine, which is what `review-input` promises.
+const REVIEW_DIFF: &[&str] = &[
+    "-c",
+    "core.quotepath=false",
+    "diff",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-relative",
+    "--find-renames",
+    "--diff-algorithm=myers",
+    "--indent-heuristic",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+    "-O/dev/null",
+];
+
+/// The committed changes of the current branch since it left `base`, in
+/// `dir` and below, with `.invar/` left out: `git diff <merge-base> HEAD`.
+///
+/// Committed only, and from the merge base rather than from `base` itself, so
+/// that what is compared is what the pull request will contain: not the
+/// developer's uncommitted edits, and not what landed on `base` after the
+/// branch was cut. `.invar/` is left out because the decision log is in it,
+/// and the reviewer must not see the log (M1-20, §7); the Plan is in it too,
+/// and is shown separately.
+pub fn branch_diff(dir: &Path, base: &str) -> Result<BranchDiff, GitError> {
+    // `--end-of-options`: a base that begins with `-` is a name, not an option.
+    let wanted = format!("{base}^{{commit}}");
+    let output = run(
+        dir,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            &wanted,
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(GitError::BaseNotFound {
+            base: base.to_owned(),
+        });
+    }
+    let base_commit = text("git rev-parse", &output.stdout)?.trim().to_owned();
+
+    const MERGE_BASE: &str = "git merge-base";
+    let output = run(dir, &["merge-base", &base_commit, "HEAD"])?;
+    if !output.status.success() {
+        return Err(failed(MERGE_BASE, &output));
+    }
+    let fork = text(MERGE_BASE, &output.stdout)?.trim().to_owned();
+
+    // The context size is given only to the patch: `--unified` implies `-p`,
+    // and the `--numstat` run would print the whole patch after its stats.
+    Ok(BranchDiff {
+        patch: review_diff(dir, &fork, &["--unified=3", "--inter-hunk-context=0"])?,
+        numstat: review_diff(dir, &fork, &["--numstat"])?,
+    })
+}
+
+fn review_diff(dir: &Path, fork: &str, extra: &[&str]) -> Result<String, GitError> {
+    const COMMAND: &str = "git diff";
+    let mut args: Vec<&str> = REVIEW_DIFF.to_vec();
+    args.extend_from_slice(extra);
+    args.extend([fork, "HEAD", "--", ".", ":(exclude).invar"]);
+    let output = run(dir, &args)?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    // The patch carries file contents, which need not be UTF-8. Lossy, but
+    // the same bytes always give the same text.
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 /// `refs/heads/feat/x` and `refs/remotes/origin/feat/x` are both `feat/x`.
 /// `None` for anything that is not a branch — the symbolic `origin/HEAD`, a
 /// detached `HEAD` — and for an empty line.
@@ -360,6 +449,8 @@ pub enum GitError {
     UserNameMissing { dir: PathBuf },
     /// The directory `git` was to run in does not exist, or is not a directory.
     NotADirectory { dir: PathBuf },
+    /// The base branch a diff is taken against is not a commit here.
+    BaseNotFound { base: String },
 }
 
 impl fmt::Display for GitError {
@@ -371,6 +462,12 @@ impl fmt::Display for GitError {
                  and the current date and time — install git, or add it to PATH"
             ),
             Self::CannotRun { source } => write!(f, "cannot run `git`: {source}"),
+            Self::BaseNotFound { base } => write!(
+                f,
+                "the base branch `{base}` is not a branch or commit in this repository; the \
+                 review compares this branch with the one it will be merged into — fetch \
+                 it, or set `git.base_branch` in invar.yaml to its name"
+            ),
             Self::NotADirectory { dir } => write!(
                 f,
                 "cannot run `git` in {}: it does not exist, or it is not a directory",
