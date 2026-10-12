@@ -84,7 +84,10 @@ fn write_section(out: &mut String, heading: &str, content: Option<&str>) {
 /// Not `str::trim`: that would also take the indentation off the first line,
 /// and a section that opens with an indented code block, or a nested list,
 /// would stop being one in the description a reviewer reads.
-fn strip_blank_edges(text: &str) -> &str {
+///
+/// Shared with `review-input` (M1-20), which shows the same sections and must
+/// not trim them differently.
+pub(crate) fn strip_blank_edges(text: &str) -> &str {
     let mut rest = text;
     while let Some((line, after)) = rest.split_once('\n') {
         if !line.trim().is_empty() {
