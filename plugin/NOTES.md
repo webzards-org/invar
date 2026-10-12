@@ -920,3 +920,47 @@ allow capitals. Not done yet.
 - [ ] The `QUESTIONS` → answers → `PLAN` loop works across two planner calls without
       the planner remembering the first (it is not resumed)
 - [ ] The skill is loaded by a ticket-shaped request that does not name invar
+
+## 15. `/invar:approve` (M1-19)
+
+`plugin/skills/approve/SKILL.md`, invoked as `/invar:approve [ticket]`.
+
+**Why a skill and not a `commands/` file.** Both accept `disable-model-invocation`
+(Claude Code docs, "Frontmatter fields"); a skill's `name` gives the
+`/invar:approve` form directly.
+
+**How the gate holds, in two independent places.**
+1. `disable-model-invocation: true` keeps the model from loading the skill. The
+   docs say an unrecognized field is ignored *without an error*, so
+   `tests/plugin_prompts.rs` asserts the exact spelling.
+2. The command runs through `` ```! `` shell injection, which Claude Code
+   executes *before* the model sees the message, as the developer's action. The
+   model never runs `invar plan approve`; and if it tried, the `PreToolUse`
+   guard (M1-17) denies that command with exit 2.
+
+**Why not let the model run it.** The guard would deny it, correctly. The
+injection is what makes the developer the one who runs it.
+
+**No ticket.** The block counts `.invar/plans/*/spec.md`: one Plan is approved;
+several are listed and nothing is approved; none says so. The ticket is checked
+against `[A-Za-z0-9._/-]` before it reaches the shell. (Better placed in the CLI,
+so a terminal behaves the same: `plan approve` without a ticket.)
+
+**Output.** The block ends every path with `exit 0` and runs the CLI with `2>&1`,
+because an injection that fails aborts the invocation and the developer would
+see no reason. `plan approve` prints the Acceptance criteria before it writes,
+so they are the first thing in the output.
+
+### Not exercised (needs a real Claude Code session)
+
+- [ ] `/invar:approve` appears in the `/` menu with the `argument-hint`
+- [ ] Asking the agent "approve the Plan" does NOT run it: the skill is not
+      offered to the model, and the agent says it is the developer's step
+- [ ] `invar` resolves on PATH inside `` ```! `` (the plugin's `bin/` is on the
+      Bash tool's PATH; whether injection shares it is unverified). If not, the
+      block must call `${CLAUDE_PLUGIN_ROOT}/bin/invar`
+- [ ] `$ARGUMENTS` is substituted inside the fenced block
+- [ ] A refused approval (stale, invalid) shows its message
+- [ ] `claude plugin validate --strict` accepts the skill
+- [ ] `disableSkillShellExecution: true` in settings makes the command unusable:
+      say so in the docs for teams that set it

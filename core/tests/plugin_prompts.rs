@@ -449,3 +449,111 @@ fn the_commands_the_two_prompts_split_between_them_are_the_ones_each_is_allowed(
     assert!(planner_commands.contains(&vec!["plan".to_owned(), "validate".to_owned()]));
     assert!(planner_commands.contains(&vec!["context".to_owned(), "show".to_owned()]));
 }
+
+// --- /invar:approve (M1-19) --------------------------------------------------------------
+
+#[test]
+fn approve_cannot_be_invoked_by_the_model() {
+    // The gate is the developer's (§13). `disable-model-invocation` is the
+    // field Claude Code honours; an unknown field is ignored without a word, so
+    // a misspelling would abolish the gate silently. Hence the exact string.
+    let (meta, body) = frontmatter("skills/approve/SKILL.md");
+
+    assert_eq!(meta["name"], "approve");
+    assert_eq!(meta["disable-model-invocation"], "true");
+    assert!(
+        !meta.contains_key("user-invocable"),
+        "it must stay in the / menu"
+    );
+    // The model is told not to run it either; belt and braces.
+    assert!(body.contains("Do not run `invar plan approve` yourself"));
+}
+
+#[test]
+fn approve_runs_the_cli_and_lists_the_plans_instead_of_guessing() {
+    let (_, body) = frontmatter("skills/approve/SKILL.md");
+
+    assert!(body.contains("invar plan approve \"$t\""));
+    assert!(body.contains("Plans are waiting; say which: /invar:approve <ticket>"));
+    assert!(body.contains("there is no Plan in .invar/plans/ to approve"));
+}
+
+#[cfg(unix)]
+mod approve_block {
+    use super::*;
+
+    /// The shell block of the skill, with `$ARGUMENTS` replaced, run in `dir`
+    /// with a stand-in `invar` that records what it was asked to approve.
+    fn run(dir: &Path, arguments: &str) -> String {
+        use std::os::unix::fs::PermissionsExt as _;
+        let (_, body) = frontmatter("skills/approve/SKILL.md");
+        let block = body
+            .split_once("```!\n")
+            .unwrap()
+            .1
+            .split_once("\n```")
+            .unwrap()
+            .0
+            .replace("$ARGUMENTS", arguments);
+        let bin = dir.join("fakebin");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("invar"), "#!/bin/sh\necho \"approved: $3\"\n").unwrap();
+        fs::set_permissions(bin.join("invar"), fs::Permissions::from_mode(0o755)).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&block)
+            .current_dir(dir)
+            .env(
+                "PATH",
+                format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+            )
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    fn plan(dir: &Path, name: &str) {
+        let p = dir.join(".invar/plans").join(name);
+        fs::create_dir_all(&p).unwrap();
+        fs::write(p.join("spec.md"), "").unwrap();
+    }
+
+    #[test]
+    fn one_plan_needs_no_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        plan(dir.path(), "SHOP-214-cancel-unpaid-order");
+        assert_eq!(
+            run(dir.path(), ""),
+            "approved: SHOP-214-cancel-unpaid-order\n"
+        );
+    }
+
+    #[test]
+    fn several_plans_are_listed_and_nothing_is_approved() {
+        let dir = tempfile::tempdir().unwrap();
+        plan(dir.path(), "SHOP-214-cancel-unpaid-order");
+        plan(dir.path(), "SHOP-300-refunds");
+        let out = run(dir.path(), "");
+        assert!(out.contains("2 Plans are waiting"), "{out}");
+        assert!(out.contains("  SHOP-214-cancel-unpaid-order\n"), "{out}");
+        assert!(out.contains("  SHOP-300-refunds\n"), "{out}");
+        assert!(!out.contains("approved:"), "{out}");
+    }
+
+    #[test]
+    fn a_ticket_is_passed_through_and_shell_syntax_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        plan(dir.path(), "SHOP-214-a");
+        plan(dir.path(), "SHOP-300-b");
+        assert_eq!(run(dir.path(), "SHOP-300"), "approved: SHOP-300\n");
+        let out = run(dir.path(), "x; touch pwned");
+        assert!(out.contains("is not a ticket"), "{out}");
+        assert!(!dir.path().join("pwned").exists());
+    }
+
+    #[test]
+    fn no_plan_is_said_plainly() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(run(dir.path(), "").contains("no Plan in .invar/plans/"));
+    }
+}
