@@ -178,6 +178,9 @@ fn no_hook_ever_runs_what_is_the_developers() {
                 "clean-spec",
                 "init",
                 "pr-body",
+                // The review is advisory and the developer's to ask for (M1-20,
+                // L-7): a hook that ran it would make it a step of the cycle.
+                "review-input",
             ] {
                 assert_ne!(arg, forbidden, "{}: a hook runs `{forbidden}`", hook.event);
             }

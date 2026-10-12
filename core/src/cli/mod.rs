@@ -25,6 +25,7 @@ mod hash;
 mod init;
 mod plan;
 mod pr_body;
+mod review_input;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -69,6 +70,21 @@ pub enum Command {
     /// before it deletes the Plan (§12); this command is also usable on its
     /// own while the Plan still exists.
     PrBody(pr_body::Args),
+    /// Print what the reviewer reads: the approved Plan, the binding context
+    /// and the branch's diff.
+    ///
+    /// The Plan's Intent, Scope, Acceptance criteria and Implementation
+    /// context; `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`; and the diff of
+    /// what is committed on this branch since it left the base branch
+    /// (`git.base_branch`, else `origin/HEAD`, else `main`), with `.invar/`
+    /// left out. A diff above 40,000 characters is replaced by the list of
+    /// changed files with their line counts. Never the decision log.
+    ///
+    /// The same Plan and the same commits print the same bytes. Refuses on a
+    /// draft Plan, or one changed after approval: reviewing against an
+    /// unapproved specification proves nothing. Advisory: `done` does not
+    /// depend on it, and no hook runs it.
+    ReviewInput(review_input::Args),
     /// Close a cycle: `plan check`, render the PR description, record a
     /// `confirmed` decision entry, delete the Plan directory (§3, §7, §12).
     ///
@@ -128,6 +144,7 @@ impl Cli {
             Command::Plan(command) => plan::run(command),
             Command::Decision(command) => decision::run(command).map(|()| ExitCode::SUCCESS),
             Command::PrBody(args) => pr_body::run(args).map(|()| ExitCode::SUCCESS),
+            Command::ReviewInput(args) => review_input::run(args).map(|()| ExitCode::SUCCESS),
             Command::Done(args) => done::run(args).map(|()| ExitCode::SUCCESS),
             Command::CleanSpec(args) => clean_spec::run(args).map(|()| ExitCode::SUCCESS),
             Command::Context(command) => context::run(command).map(|()| ExitCode::SUCCESS),
