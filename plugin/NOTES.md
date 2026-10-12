@@ -964,3 +964,65 @@ so they are the first thing in the output.
 - [ ] `claude plugin validate --strict` accepts the skill
 - [ ] `disableSkillShellExecution: true` in settings makes the command unusable:
       say so in the docs for teams that set it
+
+## 16. The review (M1-20)
+
+Three parts: `invar review-input <TICKET>` (core), `agents/reviewer.md`, and
+`/invar:review` (`skills/review/SKILL.md`). Advisory throughout (L-7): no hook runs
+any of it (`tests/plugin.rs` forbids `review-input` in a hook), and `done` neither
+calls it nor waits for it (`tests/review_input.rs`).
+
+**What the reviewer sees, and what it does not.**
+- It is started with the ticket line only. `/invar:review` tells the main session
+  — which wrote the code — to add nothing; the reviewer is told to ignore anything
+  added anyway. The main session's justifications are the one input that would
+  make the review agree with the code for the wrong reason.
+- `review-input` leaves `.invar/` out of the diff, so the decision log cannot reach
+  it through a committed entry. The reviewer's prompt forbids reading the log, and
+  `init`'s deny rule on `Read(/.invar/decisions/**)` (§12, still unverified)
+  applies to subagents too, if it holds at all.
+- The Plan sections it gets are the four the branch is judged against. Not the
+  ticket, the questions or the rejected alternatives: they are the planner's
+  reasons, and a reviewer that reads reasons starts weighing them.
+
+**Determinism.** `review-input` is a pure render of the Plan, the context files
+and two `git diff` runs whose options pin everything a git configuration can change
+(`git::REVIEW_DIFF`). The diff is from the merge base to `HEAD`, committed only, so
+uncommitted work is named on stderr and left out. Above 40,000 characters the patch
+is replaced by `--numstat` per file.
+
+**Why the review is committed-only.** What is reviewed is what the PR will hold.
+The protocol skill therefore offers the review after the change is committed and
+before `done` — which removes the Plan the review needs.
+
+### Seeded branches
+
+`eval/review-seeds.sh <empty-dir>` (outside `plugin/`, which holds no scripts)
+builds a small Laravel-shaped repository with example 9.1's Plan approved and two
+branches. In it: `git checkout <branch>`, start Claude Code, run
+`/invar:review SHOP-214`.
+
+| Branch | The review must report |
+|---|---|
+| `seed-invariant` | criterion 2 (a paid order is refused with 403) `not met`, with the `file:line` of `CancelOrder::handle`; criterion 3 (another team's order is a 404) `not met`; under **Invariants**, the `BelongsToTeam` scope broken by `withoutGlobalScopes()` at `app/Actions/Orders/CancelOrder.php`; nothing outside Scope |
+| `seed-scope` | criteria 1–4 `met` or `unclear` (no tests are seeded, so `unclear` is honest for some); no invariant; under **Changes outside Scope**, `app/Http/Controllers/InvoiceController.php` |
+
+A report that adds style remarks, a summary or suggestions fails the shape, however
+correct its verdicts.
+
+### Iteration log
+
+| Version | Branch | Result | Changed |
+|---|---|---|---|
+| v1 | — | Not run | — |
+
+### Not exercised
+
+- [ ] The reviewer, started by `/invar:review`, receives only the ticket line
+      (check the subagent's first message in the transcript)
+- [ ] The reviewer's Bash call `invar review-input` is not denied by the
+      `PreToolUse` guard
+- [ ] The `Read` deny rule on `.invar/decisions/**` holds inside a subagent
+- [ ] Both seeded branches, as in the table above
+- [ ] With `review.offer: true`, the main session offers `/invar:review` once,
+      before `done`, and does not start the reviewer itself
