@@ -450,6 +450,172 @@ fn the_commands_the_two_prompts_split_between_them_are_the_ones_each_is_allowed(
     assert!(planner_commands.contains(&vec!["context".to_owned(), "show".to_owned()]));
 }
 
+// --- the reviewer and /invar:review (M1-20) ------------------------------------------------
+
+#[test]
+fn the_reviewer_reads_and_changes_nothing() {
+    let (meta, _) = frontmatter("agents/reviewer.md");
+    let tools: BTreeSet<&str> = meta["tools"].split(',').map(str::trim).collect();
+
+    assert_eq!(meta["name"], "reviewer");
+    // It reads the code and runs `invar review-input`.
+    for needed in ["Read", "Grep", "Glob", "Bash"] {
+        assert!(tools.contains(needed), "the reviewer lacks {needed}");
+    }
+    // It edits nothing and starts no one.
+    for forbidden in ["Write", "Edit", "NotebookEdit", "Agent", "Task"] {
+        assert!(!tools.contains(forbidden), "the reviewer has {forbidden}");
+    }
+    for (key, value) in &meta {
+        assert!(!value.contains(": "), "`{key}` contains `: `");
+        assert!(!value.contains(" #"), "`{key}` contains ` #`");
+    }
+}
+
+#[test]
+fn the_reviewers_output_has_the_fixed_shape() {
+    let (_, body) = frontmatter("agents/reviewer.md");
+    let flat = body.replace('\n', " ");
+
+    // The three sections, in this order, in the template.
+    let template = body
+        .split_once("## What you return")
+        .unwrap()
+        .1
+        .split_once("```\n")
+        .unwrap()
+        .1
+        .split_once("\n```")
+        .unwrap()
+        .0;
+    let order = [
+        "REVIEW <TICKET>",
+        "## Acceptance criteria",
+        "1. met —",
+        "Evidence: <file:line>",
+        "2. not met —",
+        "3. unclear —",
+        "Why:",
+        "## Invariants the change appears to break",
+        "## Changes outside Scope",
+    ];
+    let positions: Vec<usize> = order
+        .iter()
+        .map(|needle| {
+            template
+                .find(needle)
+                .unwrap_or_else(|| panic!("no {needle:?} in the template"))
+        })
+        .collect();
+    assert!(positions.windows(2).all(|w| w[0] < w[1]), "{template}");
+
+    // The rules that make the shape worth having.
+    for rule in [
+        "Every `met` and every `not met` has at least one `file:line`",
+        "**`unclear` is a correct answer, not a failure.**",
+        "**Nothing else.**",
+        "`None found.`",
+    ] {
+        assert!(flat.contains(rule), "the reviewer prompt lost: {rule:?}");
+    }
+}
+
+#[test]
+fn the_reviewer_is_independent_of_the_coder_and_the_log() {
+    let (_, body) = frontmatter("agents/reviewer.md");
+    let flat = body.replace('\n', " ");
+
+    assert!(flat.contains("Run `invar review-input <TICKET>`"));
+    assert!(
+        flat.contains("**ignore it**"),
+        "extra context from the caller"
+    );
+    assert!(flat.contains("**Change anything**"));
+    // Every mention of a way to the log is a prohibition.
+    for line in body.lines() {
+        let reads_the_log = line.contains(".invar/decisions")
+            || line.contains("invar decision log")
+            || (line.contains("invar context show") && !line.contains("--binding"));
+        if reads_the_log {
+            assert!(
+                line.contains("never") || line.contains("Never"),
+                "the reviewer is pointed at the log: {line}"
+            );
+        }
+    }
+    // And `review-input` exists, with the name the prompt uses.
+    Command::cargo_bin("invar")
+        .unwrap()
+        .args(["review-input", "--help"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn review_is_the_developers_and_passes_the_ticket_alone() {
+    let (meta, body) = frontmatter("skills/review/SKILL.md");
+    let flat = body.replace('\n', " ");
+
+    assert_eq!(meta["name"], "review");
+    assert_eq!(meta["disable-model-invocation"], "true");
+    assert!(flat.contains("**Give it the ticket line and nothing else**"));
+    assert!(flat.contains("exactly as it returns it"));
+    assert!(flat.contains("It is advisory."));
+}
+
+#[test]
+fn the_protocol_skill_offers_the_review_before_done_and_never_runs_it() {
+    let flat = skill().1.replace('\n', " ");
+
+    assert!(flat.contains("`review.offer: true`"));
+    assert!(flat.contains("Run `/invar:review` before closing?"));
+    assert!(flat.contains("do not start the reviewer yourself"));
+    // Offered before `done`, which removes the Plan the review needs.
+    let offer = flat.find("Offer the review").unwrap();
+    let done = flat.find("`invar done <TICKET> -m").unwrap();
+    assert!(offer < done);
+}
+
+#[cfg(unix)]
+#[test]
+fn review_resolves_the_ticket_like_approve_does() {
+    // The same block, with its own last line: it names the ticket instead of
+    // approving it.
+    let block = |file: &str| {
+        let (_, body) = frontmatter(file);
+        body.split_once("```!\n")
+            .unwrap()
+            .1
+            .split_once("\n```")
+            .unwrap()
+            .0
+            .to_owned()
+    };
+    let review = block("skills/review/SKILL.md");
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["SHOP-214-a", "SHOP-300-b"] {
+        let plan = dir.path().join(".invar/plans").join(name);
+        fs::create_dir_all(&plan).unwrap();
+        fs::write(plan.join("spec.md"), "").unwrap();
+    }
+    let run = |arguments: &str| {
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(review.replace("$ARGUMENTS", arguments))
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    };
+
+    assert_eq!(run("SHOP-300"), "Ticket: SHOP-300\n");
+    let listed = run("");
+    assert!(listed.contains("2 Plans exist"), "{listed}");
+    assert!(!listed.contains("Ticket:"), "{listed}");
+    assert!(run("x; rm -rf .").contains("is not a ticket"));
+    assert!(dir.path().join(".invar/plans/SHOP-214-a/spec.md").exists());
+}
+
 // --- /invar:approve (M1-19) --------------------------------------------------------------
 
 #[test]
