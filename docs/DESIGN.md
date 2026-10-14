@@ -67,6 +67,23 @@ any single ticket wants.)*
 > designed around later: an **external context API with an MCP front end**
 > (§14.1) and **multi-language support** (§14.2).
 
+> **Revision note (v3.1).** Phase 2 moves out of the main session. What
+> changes:
+>
+> - **The Codegen Agent is a sub-agent** (§13c), started by the main session
+>   after the gate, with its own context and a fixed answer shape (`DONE` or
+>   `BLOCKED`). The main session becomes the **dispatcher**: it talks to the
+>   developer and starts the planner, the coder and the reviewer, and writes
+>   code itself only for the trivial changes the protocol skips the cycle for.
+> - **`BUSINESS_CONTEXT.md` is read in Phase 1 and in review, not in Phase 2.**
+>   The coder receives the Invariants the ticket touches as the Plan's
+>   distillate, approved at the gate, and `AI_CONTEXT.md` through
+>   `invar context show --conventions`. The safety net for an Invariant the
+>   planner missed moves from the coder to the review (§5c, §13c).
+> - **Each sub-agent runs on a model the main session chooses**, from a
+>   default in its definition, and the main session may start **one coder per
+>   work unit** the approved Plan declares, in parallel (§4a, §13d). No
+>   verdict depends on either choice.
 
 ## 1. Purpose
 
@@ -83,15 +100,18 @@ present (whether authored by FastKit, hand-written, or by another tool).
 | Term | Definition |
 |---|---|
 | **Scenario** | A single behavior specification, written in Gherkin (`Given/When/Then`), stored as a `.feature` file. The unit of work for the whole pipeline. |
+| **Main session** | The developer's Claude Code session. Since v3.1 the **dispatcher**: it talks to the developer, starts the sub-agents, relays the planner's questions, waits at the gate, and chooses each sub-agent's model and how many coders run (§13c, §13d). It renders no verdict and, apart from the trivial changes the protocol skill skips the cycle for, writes no code. |
 | **Scenario Agent** (Phase 1) | Claude Code operating under the Phase 1 instructions, in a **planning sub-agent with its own context** (§13a). Converses to clarify intent, then drafts a Plan and the Scenario files, which are approved together at one gate. Does not write implementation code. |
-| **Codegen Agent** (Phase 2) | The main session operating under the Phase 2 instructions. Takes an approved Plan + `confirmed` Scenario (+ context, if present) and produces implementation code and its matching behavioral test. Does **not** read the decision log (§7) — enforced by context separation, not instruction. |
-| **Plugin** | The delivery form of the whole system: a Claude Code plugin bundling the `invar` CLI binary, the hook definitions (§13), the planning sub-agent (§13a), and the protocol skill. What the developer installs. |
+| **Codegen Agent** (Phase 2) | Claude Code operating under the Phase 2 instructions, in a **coder sub-agent with its own context** (§13c), started by the main session after the gate — one per work unit when the Plan declares them (§13d). Takes an approved Plan + `confirmed` Scenario and produces implementation code and its matching behavioral test. Reads `AI_CONTEXT.md`; receives `BUSINESS_CONTEXT.md` only as the Plan's distillate; does **not** read the decision log (§7). Both are enforced by context separation, not instruction. |
+| **Review Agent** | The review sub-agent (§13c). Judges the committed branch against the Plan's criteria, `AI_CONTEXT.md` and **every** Invariant in `BUSINESS_CONTEXT.md`, never against the decision log. Advisory: no verdict depends on it. |
+| **Work unit** | An optional, named part of a Plan's work, with the paths it may change and the units it depends on (§4a). The only thing a main session may run in parallel (§13d). |
+| **Plugin** | The delivery form of the whole system: a Claude Code plugin bundling the `invar` CLI binary, the hook definitions (§13), the planning, coder and review sub-agents (§13a, §13c), and the protocol skill. What the developer installs. |
 | **CLI** (`invar`) — the *core* | The Rust binary inside the plugin. Holds **all** language-neutral logic and is the only component that renders a verdict; language-specific operations are delegated to a language adapter (§14.2). Runnable on its own, which is why it also runs in CI where no agent exists (§13b). |
-| **Protocol** | The agent-facing rules of the two phases: when to stop and ask, what may be written in each phase, which command to call when, and why the gate exists. Delivered only through Claude Code mechanisms — the planning sub-agent's system prompt (Phase 1), a `SessionStart` hook (the short list of rules that must hold in every session), and a protocol skill (longer explanations, loaded on demand). A `CLAUDE.md` at the plugin root is not loaded by Claude Code, so the plugin ships none and `init` writes none (§5c, §13). |
+| **Protocol** | The agent-facing rules of the two phases: when to stop and ask, what may be written in each phase, which command to call when, and why the gate exists. Delivered only through Claude Code mechanisms — the sub-agents' system prompts (Phase 1, Phase 2, review), a `SessionStart` hook (the short list of rules that must hold in every session), and a protocol skill (longer explanations, loaded on demand). A `CLAUDE.md` at the plugin root is not loaded by Claude Code, so the plugin ships none and `init` writes none (§5c, §13). |
 | **Ticket** | The unit of work entering the pipeline — a JIRA (or equivalent) issue pasted by the developer. Its id (e.g. `PROJ-412`) links the Plan, the branch, and the decision entry. |
-| **Plan** | The prose specification derived from a Ticket, **written by the agent** and stored at `.invar/plans/<TICKET>-<slug>/spec.md` (structure: §4a). Carries what Gherkin cannot: ticket context, scope, open questions and answers, rejected alternatives, the ticket-specific implementation context Phase 2 needs (§5c), and any scenario the cycle intends to delete (§4c). Approved by the developer at the gate, consumed by the Codegen Agent, and **deleted within the same PR** once the cycle passes (§12). |
+| **Plan** | The prose specification derived from a Ticket, **written by the agent** and stored at `.invar/plans/<TICKET>-<slug>/spec.md` (structure: §4a). Carries what Gherkin cannot: ticket context, scope, open questions and answers, rejected alternatives, the ticket-specific implementation context Phase 2 needs (§5c), any scenario the cycle intends to delete (§4c), and optionally the work units Phase 2 may run in parallel (§13d). Approved by the developer at the gate, consumed by the Codegen Agent, and **deleted within the same PR** once the cycle passes (§12). |
 | **Project context** — `AI_CONTEXT.md` | Optional, machine-readable file describing **this project's own** architectural conventions (layer boundaries, naming, module import rules). Its presence activates the extended lint rule set, so its content is *binding* and must be the project's own decisions — never generic framework advice (§5a). May be FastKit's published version, hand-authored, or derived from the existing code with developer confirmation. Absence is a valid, supported state. |
-| **Business context** — `BUSINESS_CONTEXT.md` | Optional, machine-readable file describing business rules the *application* must obey — distinct from `AI_CONTEXT.md`, which describes how *code* must be structured. Read by **both** agents. Two categories: **Invariants** (always true, e.g. "every tenant-scoped model must be filtered by `account_id`") and **Regional/parameterized facts** (vary by a parameter such as country or plan tier). Owned and maintained by the developer or team; `invar` never generates its content (§5). Absence — and an empty-but-marked file — are valid, supported states. |
+| **Business context** — `BUSINESS_CONTEXT.md` | Optional, machine-readable file describing business rules the *application* must obey — distinct from `AI_CONTEXT.md`, which describes how *code* must be structured. Read by the **Scenario Agent and the Review Agent**; reaches the Codegen Agent only as the distillate in the Plan's Implementation context (§5c). Two categories: **Invariants** (always true, e.g. "every tenant-scoped model must be filtered by `account_id`") and **Regional/parameterized facts** (vary by a parameter such as country or plan tier). Owned and maintained by the developer or team; `invar` never generates its content (§5). Absence — and an empty-but-marked file — are valid, supported states. |
 | **Framework context** | External, read-only context for the *framework* at the exact installed version (e.g. "in this version use `@field_validator`, not `@validator`"). Answers what a model trained on mixed versions gets wrong. A separate source, never merged into `AI_CONTEXT.md` (§5b). |
 | **Package context** | External, read-only context for an installed third-party package, pinned to the exact version from the lockfile. Same channel and same rules as framework context (§5b, §14.1). |
 | **Context marker** | A header comment (`<!-- invar-context: v1 -->`) at the top of a context file that lets the tool distinguish a recognized context file from an unrelated document with the same filename. `invar init` writes the marker into the empty files it scaffolds. |
@@ -102,14 +122,16 @@ present (whether authored by FastKit, hand-written, or by another tool).
 | **Config file** | Single YAML file (`invar.yaml`) at project root controlling infrastructure hints, lint rule overrides, language selection, and pipeline behavior. |
 | **Language adapter** | A separate executable implementing the four language-specific operations — dependency discovery, test discovery, test execution, lint — behind a JSON protocol over stdin/stdout. Written in the language of its ecosystem (the Python adapter is Python). Complete when it passes the conformance suite. Everything else in `invar` is language-neutral (§14.2). |
 | **Contracts** | The versioned, documented definitions every component reads: the on-disk formats (§14.3) and the adapter protocol (§14.2). Stored in `contracts/` (§15) — the only place components meet. |
-| **Implementation context** | The ticket-specific distillate of all context sources, written by the Scenario Agent into the Plan (§4a) and approved with it. Phase 2's primary source of framework, package and convention guidance (§5c). |
+| **Implementation context** | The ticket-specific distillate of all context sources, written by the Scenario Agent into the Plan (§4a) and approved with it. Phase 2's primary source of framework, package and convention guidance, and its **only** source of business rules (§5c). |
 
 ## 3. Pipeline (two-phase loop)
 
 Both phases run inside Claude Code, driven by the plugin (§13): its hooks fire
 the deterministic commands at the right events, the protocol reaches the
-agent through Claude Code mechanisms (§5c), and its planning sub-agent isolates Phase 1. The CLI renders every
-verdict. `invar` still calls no LLM of its own (§11).
+agent through Claude Code mechanisms (§5c), and its sub-agents isolate Phase 1,
+Phase 2 and the review from each other and from the main session, which
+dispatches them. The CLI renders every verdict. `invar` still calls no LLM of
+its own (§11).
 
 ```
 [0] Setup (once per project)
@@ -132,12 +154,13 @@ Developer
    │   (module structure and public interfaces of the layers the ticket
    │    touches — never a full repo scan)
    │
-   ├── clarifying questions ──► Developer
+   ├── clarifying questions ──► Developer (relayed by the main session)
    │   (mandatory whenever the ticket touches a Regional/parameterized fact)
    │
    ▼
    drafts Plan → .invar/plans/<TICKET>-<slug>/spec.md
-   │  incl. ## Implementation context — distilled, ticket-specific (§4a)
+   │  incl. ## Implementation context — distilled, ticket-specific (§4a),
+   │  carrying every Invariant the ticket touches; optionally ## Work units
    │  `invar plan validate` — mechanical, agent-callable, run in-phase
    │
    ▼
@@ -149,19 +172,28 @@ Developer
    │     mandatory; nothing downstream runs without it
    │     (loop back to [1] if rejected)
    ▼
-[2] Codegen Agent
+[2] Codegen Agent — coder sub-agent(s), own context (§13c)
+   │  started by the main session: one coder, or one per work unit, the
+   │  independent units in parallel (§13d)
    │  reads: approved Plan (incl. Implementation context) + confirmed
-   │         Scenario + invar.yaml
-   │  receives: AI_CONTEXT.md + BUSINESS_CONTEXT.md via SessionStart hook
+   │         Scenario + invar.yaml + the code it modifies
+   │  receives: AI_CONTEXT.md via `invar context show --conventions`
+   │  receives BUSINESS_CONTEXT.md only as distilled in the Plan
    │  may pull: framework/package context via MCP, as a supplement (§5c)
    │  does NOT read: .invar/decisions/
    │  writes: implementation code + generated pytest-bdd step definitions
    │  may NOT write: any confirmed .feature file (§4)
+   │  answers: DONE + summary, or BLOCKED <reason>
    │
    │  If the Scenario turns out to be impossible or self-contradictory —
-   │  not merely failing — the cycle returns to [1]: `invar decision
-   │  record --type failed`, then a new Plan. The Codegen Agent never
-   │  repairs the specification (§4c).
+   │  not merely failing — the coder answers BLOCKED and the cycle returns
+   │  to [1]: `invar decision record --type failed`, then a new Plan. The
+   │  Codegen Agent never repairs the specification (§4c).
+   │
+   ▼
+[2b] Review (advisory) — review sub-agent, own context (§13c)
+   │  the committed branch against the Plan's criteria, AI_CONTEXT.md and
+   │  every Invariant in BUSINESS_CONTEXT.md; offered before [3]
    │
    ▼
 [3] Verification — `invar generate`
@@ -329,9 +361,14 @@ one-line reason. Empty in most cycles. See §4c.
 ## Implementation context
 The ticket-specific guidance Phase 2 needs, each item labelled with its
 source and version. A distillate, never a copy of the context files (§5c).
+
+## Work units
+Optional. The parts of the work the main session may give to separate
+coders, each with the paths it may change and the units it waits for
+(§13d). Absent means one unit.
 ```
 
-Example of the last section:
+Example of the last two sections:
 
 ```markdown
 ## Implementation context
@@ -339,6 +376,11 @@ Example of the last section:
   not `@validator`
 - AI_CONTEXT: no SQLAlchemy imports in `router.py`
 - BUSINESS_CONTEXT invariant: every tenant-scoped query filters by `account_id`
+
+## Work units
+- domain: modules/orders/service.py, modules/orders/repository.py
+- api: modules/orders/router.py, modules/orders/schemas.py (after: domain)
+- notifications: modules/notifications/
 ```
 
 Rules for this format:
@@ -363,6 +405,19 @@ Rules for this format:
   the token budget twice, and it becomes too long to be genuinely read at
   the gate — which is how a gate turns into a click. The section is
   required; when a ticket touches no context source it says so explicitly.
+- **Every Invariant the ticket touches is in the Implementation context**,
+  with the enforcement mechanism it names. Since v3.1 this section is the
+  Codegen Agent's only view of `BUSINESS_CONTEXT.md` (§5c), so an Invariant
+  missing here is missing from Phase 2; the review is where that omission is
+  caught (§13c).
+- **`## Work units` is optional, and its absence means one unit** (§14.3).
+  Each item is a unit name, the paths it may change, and optionally
+  `(after: <unit>, …)`. `plan validate` checks it mechanically: names are
+  unique, every unit names at least one path, no path is claimed by two
+  units (a directory claims everything under it), every `after:` names an
+  existing unit, and the dependencies contain no cycle. The exact syntax is
+  fixed in `contracts/formats/` when the section is implemented. Units are
+  part of the body, so the developer approves them with everything else.
 - **Open questions / answers** and **Rejected alternatives** are the sections
   that justify the Plan's existence. Everything else could be inferred from
   the ticket and the diff; these two cannot, and they are what a reviewer and
@@ -373,13 +428,13 @@ Rules for this format:
 
 **`plan validate` is mechanical; `plan approve` is human.** The split matters
 for where the developer's attention is spent. `validate` checks the path, the
-directory-name shape, the header fields and the presence of the required
-sections — the same result no matter who runs it — so the Scenario Agent runs
-it itself, inside Phase 1, and fixes what it finds. `approve` is the gate and
-only the developer runs it. **`approve` refuses when `validate` does not
-pass**, so there is no path in which a developer approves a mechanically
-broken Plan, and no cycle in which a human is asked to notice a misnamed
-directory.
+directory-name shape, the header fields, the presence of the required
+sections and, when present, the work units — the same result no matter who
+runs it — so the Scenario Agent runs it itself, inside Phase 1, and fixes what
+it finds. `approve` is the gate and only the developer runs it. **`approve`
+refuses when `validate` does not pass**, so there is no path in which a
+developer approves a mechanically broken Plan, and no cycle in which a human
+is asked to notice a misnamed directory or two units claiming the same file.
 
 **Honesty note on the gate.** With approval stored in the Plan header, a
 misbehaving agent could write `Status: approved` itself. `invar plan approve`
@@ -537,8 +592,9 @@ judgement.
 
 **An impossible Scenario returns to Phase 1.** If the Codegen Agent finds a
 confirmed Scenario self-contradictory or unimplementable — as opposed to merely
-failing — it stops, records a decision entry of `type: failed`, and the cycle
-restarts at Phase 1. It does not propose an edit and it does not proceed.
+failing — it stops and answers `BLOCKED` with the reason (§13c); the main
+session records a decision entry of `type: failed`, and the cycle restarts at
+Phase 1. The coder does not propose an edit and it does not proceed.
 "Scenario required X; impossible because Y" is one of the more valuable entries
 the log will ever hold, and the next Scenario Agent reads it as advisory
 context.
@@ -653,9 +709,14 @@ Rules for this file:
 - **An empty-but-marked file behaves exactly like an absent one.** No
   mandatory clarifying questions, no enforcement obligations. `init` must not
   switch on behavior the developer never asked for.
-- **Invariants** are binding on both agents at all times; the Scenario Agent
-  must not draft a scenario that contradicts one, and the Codegen Agent must
-  implement the stated enforcement mechanism when relevant.
+- **Invariants** are binding at all times, and each agent meets them in a
+  different form. The Scenario Agent reads them in full: it must not draft a
+  scenario that contradicts one, and it carries every Invariant the ticket
+  touches into the Plan's Implementation context and into a criterion that
+  would fail if the Invariant were broken. The Codegen Agent sees only those,
+  as the Plan states them, and implements the enforcement mechanism the Plan
+  names. The Review Agent reads them in full again and checks the branch
+  against every one, including one the Plan did not name (§13c).
 - **Regional/parameterized facts** are primarily consumed by the Scenario
   Agent. Whenever a scenario touches something covered by this table
   (e.g. billing, payment), asking "which country/tenant does this apply to?"
@@ -824,16 +885,19 @@ A skill loads only its name and description up front; the body is read when
 the agent judges it relevant. That is the right mechanism for long
 explanations and the wrong one for anything that must always hold. A
 `CLAUDE.md` at the plugin root is not loaded at all. The plugin therefore
-chooses a channel by the size and standing of what it delivers:
+chooses a channel by the size and standing of what it delivers, and since
+v3.1 by which agent it is for:
 
-| Content | Size | Channel | Guarantee |
+| Content | Reaches | Channel | Guarantee |
 |---|---|---|---|
-| `AI_CONTEXT.md`, `BUSINESS_CONTEXT.md` | small | `SessionStart` hook running `invar context show --binding` | Deterministic — in every session, no agent decision involved |
-| Critical protocol rules | small | Same hook, short summary | Deterministic |
-| Phase 1 protocol | medium | Planning sub-agent's system prompt (§13a) | Always applied in Phase 1 |
-| Ticket-specific framework, package and convention guidance | variable | Plan's `## Implementation context` (§4a) | Approved at the gate, checksummed |
-| External context the Plan did not anticipate | variable | MCP pull (§14.1) | Voluntary — a supplement only |
-| Longer protocol explanations | large | Protocol skill | Voluntary — loaded on demand |
+| `AI_CONTEXT.md`, `BUSINESS_CONTEXT.md` | main session | `SessionStart` hook running `invar context show --binding` | Deterministic — in every session, no agent decision involved |
+| Critical protocol rules | main session | Same hook, short summary | Deterministic |
+| All context sources + decision log | planner | `invar context show`, required by its system prompt (§13a) | Always applied in Phase 1 |
+| `AI_CONTEXT.md` | coder | `invar context show --conventions`, required by its system prompt (§13c) | Always applied in Phase 2 |
+| Ticket-specific framework, package, convention and business guidance | coder | Plan's `## Implementation context` (§4a) | Approved at the gate, checksummed |
+| Plan criteria, `AI_CONTEXT.md`, `BUSINESS_CONTEXT.md`, the diff | reviewer | `invar review-input` (§13c) | Always applied in review |
+| External context the Plan did not anticipate | coder | MCP pull (§14.1) | Voluntary — a supplement only |
+| Longer protocol explanations | main session | Protocol skill | Voluntary — loaded on demand |
 
 **Phase 1 selects; Phase 2 receives a distillate.** Loading context for every
 installed dependency would spend the context window on packages the ticket
@@ -848,13 +912,30 @@ Phase 2 still reads the code it modifies. The Plan removes *research* —
 searching the repository, inferring conventions, guessing versions — not the
 reading of target files.
 
-**Binding context is also pushed, as a safety net.** Phase 1 can miss
-something. `AI_CONTEXT.md` and the business Invariants are small enough to
-reach every session regardless, so an omission from the Plan does not remove
-them from Phase 2's view.
+**For business rules, the distillate is all Phase 2 gets.** Until v3.1 both
+binding files were also pushed into Phase 2, as a safety net for anything
+Phase 1 missed. The coder now receives `AI_CONTEXT.md` only — it describes how
+code is written, and the coder is the one writing it — and meets
+`BUSINESS_CONTEXT.md` solely through the Invariants the Plan carries. The
+reason is focus, not tokens: `--binding` is small. A coder that reads every
+Invariant starts weighing rules the ticket does not touch and interpreting
+the ones it does, instead of following the version the developer approved.
 
-**The decision log is never pushed.** `--binding` excludes it by
-construction; it reaches only the planning sub-agent (§7, §13a).
+**The safety net moves to review, and the cost is stated plainly.** An
+Invariant the planner failed to carry into the Plan is now invisible to the
+coder. It is caught later than before — by the developer at the gate, by the
+Review Agent, which checks the branch against every Invariant (§13c), and by
+any scenario that covers it — which means rework after the code exists rather
+than prevention before. That is the trade: a coder that follows one approved
+specification, against a review that has to be run. It is why the protocol
+offers the review by default (§13c).
+
+**The main session keeps the push.** It is the one session that writes code
+without a Plan — the trivial changes the protocol skill skips the cycle for —
+and those still need the binding context.
+
+**The decision log is never pushed.** `--binding` and `--conventions` exclude
+it by construction; it reaches only the planning sub-agent (§7, §13a).
 
 **There is a hard size limit on the push channel.** A hook's
 `additionalContext` is capped at 10,000 characters; beyond that the content is
@@ -967,10 +1048,12 @@ A chronological record of what was actually built and why. Read by the
 **Scenario Agent** as additional, *non-binding* context. The Codegen Agent does
 not read it in MVP: it receives a confirmed Scenario that is already the
 distillate of everything in the log, and giving it the log as well risks it
-"improving" the Scenario instead of implementing it. Because Phase 1 runs in
-the planning sub-agent (§13a), the log is never handed to Phase 2 — a boundary
-of default access rather than a hard one, which is adequate here only because
-the log is advisory (§13a).
+"improving" the Scenario instead of implementing it. Because Phase 1 and
+Phase 2 run in separate sub-agents (§13a, §13c), the log is never handed to
+Phase 2 — a boundary of default access rather than a hard one, which is
+adequate here only because the log is advisory (§13a). The Review Agent does
+not read it either: it judges the branch against the Plan and the binding
+context, not against the planner's history.
 
 Purpose: capture the changes that are not critical to business logic or to the
 architectural context, but that improve the quality of planning and the
@@ -1056,8 +1139,8 @@ say before?" — is answerable from `.invar/decisions/` alone. This is why
 
 Writing is the **last step of a cycle, after implementation** — the entry then
 describes what actually came out, including corrections made during
-generation, rather than what was intended. One entry per cycle:
-`invar scenario confirm` writes nothing.
+generation, rather than what was intended. One entry per cycle, however many
+coders ran (§13d): `invar scenario confirm` writes nothing.
 
 - `invar generate` calls `decision record` automatically at the end, on
   success (`confirmed`) and on failure (`failed`)
@@ -1113,6 +1196,9 @@ invar context show [--module m] # prints the assembled context — all sources,
 invar context show --binding    # AI_CONTEXT.md + BUSINESS_CONTEXT.md only;
                                   # never the decision log. Used by the
                                   # SessionStart hook (§5c)
+invar context show --conventions  # AI_CONTEXT.md only; never
+                                  # BUSINESS_CONTEXT.md, never the decision
+                                  # log. Run by the coder sub-agent (§13c)
 invar scenario validate <n>     # checks a .feature file: @invar tag,
                                   # metadata block, one behavior per Scenario
 invar scenario confirm <n>      # marks Status: confirmed and writes
@@ -1138,7 +1224,8 @@ invar decision record           # writes a decision entry; called
 invar decision log              # concatenates .invar/decisions/
                                   # newest-first (rendered view)
 invar plan validate <ticket>    # mechanical: path, directory-name shape,
-                                  # complete header, required sections.
+                                  # complete header, required sections, and
+                                  # work units when present (§4a).
                                   # Agent-callable, run inside Phase 1.
 invar plan approve <ticket>     # the human gate: records Approved-by /
                                   # Approved-at + body checksum +
@@ -1195,6 +1282,12 @@ invar clean-spec [ticket] [--dry-run]  # deletes plans under .invar/plans/;
   cache (§6), so an isolation boundary strong enough to be a security boundary
   is not connected enough for them to pass. Reproducibility (clean environment,
   locked dependencies) is the real need and is addressed without a sandbox.
+- **Enforcing a work unit's paths in-flight** — a guard that denies a coder's
+  `Write` or `Edit` outside its unit is possible (`plan guard` already reads
+  every one) but not in MVP; the review reports such changes (§13d)
+- **Parallel coders in separate worktrees** — MVP runs them in one working
+  tree on disjoint paths; worktrees would add a merge step the main session
+  would have to own (§13d)
 
 ## 10. Acceptance criteria for MVP completion
 
@@ -1254,9 +1347,9 @@ invar clean-spec [ticket] [--dry-run]  # deletes plans under .invar/plans/;
 - [ ] Codegen Agent produces implementation + matching `pytest-bdd` step
       definitions from a `confirmed` scenario, and never edits a confirmed
       `.feature` file
-- [ ] A confirmed Scenario found to be impossible produces a `failed` decision
-      entry and returns the cycle to Phase 1 — the Codegen Agent does not
-      propose a specification edit
+- [ ] A confirmed Scenario found to be impossible makes the coder answer
+      `BLOCKED`, produces a `failed` decision entry and returns the cycle to
+      Phase 1 — the Codegen Agent does not propose a specification edit
 - [ ] Base lint rule set runs on a project with no `AI_CONTEXT.md` present
 - [ ] Extended lint rule set activates automatically when a valid, marked
       `AI_CONTEXT.md` is present, and includes at least one working
@@ -1280,26 +1373,44 @@ invar clean-spec [ticket] [--dry-run]  # deletes plans under .invar/plans/;
       `global`) and treats them as advisory
 - [ ] When a valid `BUSINESS_CONTEXT.md` is present, the Scenario Agent asks a
       mandatory clarifying question whenever a scenario touches a
-      Regional/parameterized fact, and the Codegen Agent implements the stated
-      enforcement mechanism for at least one Invariant
+      Regional/parameterized fact, carries every touched Invariant into the
+      Implementation context, and the Codegen Agent implements the enforcement
+      mechanism the Plan names for at least one Invariant
 - [ ] The protocol reaches the agent only through Claude Code mechanisms —
-      the planning sub-agent's system prompt, the `SessionStart` hook and
-      the protocol skill; `init` writes no agent instruction files (§5c)
-- [ ] Every session receives `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`
+      the sub-agents' system prompts, the `SessionStart` hook and the
+      protocol skill; `init` writes no agent instruction files (§5c)
+- [ ] The main session receives `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`
       through the `SessionStart` hook, and never the decision log (§5c)
+- [ ] The coder sub-agent receives `AI_CONTEXT.md` through
+      `invar context show --conventions` and the Plan; it receives neither
+      `BUSINESS_CONTEXT.md` in full nor the decision log (§5c, §13c)
+- [ ] The Review Agent checks the branch against every Invariant in
+      `BUSINESS_CONTEXT.md`, and reports an Invariant the Plan did not name
+      (§13c)
 - [ ] The Scenario Agent writes `## Implementation context` into the Plan,
       each item labelled with origin and version; `plan validate` fails
       when the section is missing (§4a)
+- [ ] `plan validate` refuses work units that share a path, name an unknown
+      unit, or depend on each other in a cycle; a Plan without the section is
+      valid and runs one coder (§4a, §13d)
+- [ ] The main session runs coders in parallel only for units the approved
+      Plan declares and that do not depend on each other; parallel coders do
+      not run the behavioral tests, and one `generate` closes the cycle
+      (§13d)
+- [ ] No verdict depends on which model ran an agent: the same branch gets the
+      same `plan check`, lint and `generate` result whatever produced it
+      (§13d)
 - [ ] `plan approve` records `Lockfile-checksum`; `generate` warns, and
       never fails, when the lockfile changed since approval (§4a)
 - [ ] The core never links adapter code: the Python adapter is a separate
       process speaking the protocol defined in `contracts/`, and passes the
       conformance suite (§14.2, §15)
 - [ ] Installing the plugin is the only setup step: it brings the CLI, the
-      hooks, the protocol skill and the planning sub-agent, and the full
-      loop is completable without the developer wiring anything by hand
-- [ ] Phase 1 runs in the planning sub-agent, and the main session never
-      receives the decision log
+      hooks, the protocol skill and the sub-agents, and the full loop is
+      completable without the developer wiring anything by hand
+- [ ] Phase 1 runs in the planning sub-agent and Phase 2 in the coder
+      sub-agent, and neither the main session nor the coder receives the
+      decision log
 - [ ] Hooks run `context sync`, lint, and current-scenario tests
       non-blockingly, and never run `plan approve` or `scenario confirm` (§13)
 - [ ] The full loop runs in CI with no agent and no plugin present — the
@@ -1325,13 +1436,15 @@ runtimes. §11 then had to admit that an agent ignoring its instruction file
 cannot be stopped.
 
 MVP targets **Claude Code only**, and spends the difference on mechanism:
-hooks fire the commands instead of the agent remembering to (§13), and a
-planning sub-agent enforces the Phase 1 / Phase 2 context split
-architecturally instead of by instruction (§13a). One runtime where the
+hooks fire the commands instead of the agent remembering to (§13), and
+sub-agents enforce the Phase 1 / Phase 2 / review context split
+architecturally instead of by instruction (§13a, §13c). One runtime where the
 protocol actually holds is worth more than three where it is a suggestion.
 
-"Scenario Agent" and "Codegen Agent" are therefore **two processes with
-separate contexts**, not two roles of one session.
+"Scenario Agent", "Codegen Agent" and "Review Agent" are therefore **three
+processes with separate contexts**, started by a fourth — the main session,
+which dispatches them and chooses their models (§13d) — not roles of one
+session.
 
 What the plugin supplies:
 
@@ -1342,18 +1455,20 @@ What the plugin supplies:
    plus in-budget decision entries in an agent-consumable form
 3. **Hooks** — the commands fire on the right events rather than on the agent's
    memory (§13)
-4. **Planning sub-agent** — isolates Phase 1's context (§13a)
-5. **Protocol delivery** — the sub-agent's system prompt, the `SessionStart`
+4. **Sub-agents** — the planner, the coder and the reviewer, each isolating
+   one phase's context (§13a, §13c)
+5. **Protocol delivery** — the sub-agents' system prompts, the `SessionStart`
    hook and the protocol skill carry what hooks cannot: when to stop and ask,
    what may be written in each phase, why the gate exists (§5c)
 
 **The cost, still stated plainly:** the agent is not controlled, only guided.
-Hooks improve *when* things run and the sub-agent improves *what a phase can
+Hooks improve *when* things run and the sub-agents improve *what a phase can
 see*, but neither is an enforcement layer. Every boundary that matters is
 enforced by state on disk (§3, §4) — approved Plan, `Status: confirmed`,
 checksums — and **no boundary may be moved out of the on-disk checks into a
 hook or a sub-agent boundary.** That rule is what keeps the CI run in §10 a
-real proof rather than a formality.
+real proof rather than a formality, and it is what makes the model choice in
+§13d safe.
 
 ## 12. Plan lifecycle — `.invar/plans/`
 
@@ -1434,7 +1549,7 @@ things, and none of them is optional in MVP:
 |---|---|
 | `invar` CLI | All the logic. The only component that renders a verdict. |
 | Hooks (§13, below) | Fire the commands at the right events |
-| Planning sub-agent (§13a) | Isolates Phase 1's context |
+| Sub-agents — planner (§13a), coder and reviewer (§13c) | Isolate each phase's context |
 | Protocol skill | Longer protocol explanations, loaded on demand (§5c) |
 
 Claude Code does not load a `CLAUDE.md` from the plugin root; plugins
@@ -1462,7 +1577,7 @@ put it: on disk.
 | Planning sub-agent stops (`SubagentStop`) | `invar plan validate` | No — result returned to the sub-agent |
 | Before planning (Phase 1) | `invar context sync` | No |
 | After a code edit (Phase 2) | `invar lint check` | No |
-| During Phase 2 iteration | `invar generate <n> --tests-path <current>` | No |
+| During Phase 2 iteration | `invar generate <n> --tests-path <current>` | No — and not while coders run in parallel (§13d) |
 | End of Phase 2 | `invar generate <n>` (full suite) | Yes — fails loudly, writes the decision entry |
 | — | `plan approve`, `scenario confirm` | **Never hooked** — and a `Bash` guard denies the agent running them |
 
@@ -1532,7 +1647,7 @@ Two reasons, in order of importance:
    session for the rest of the cycle.
 
 **This is a boundary of default access, not a hard one — and the previous
-wording overstated it.** The Phase 2 session has the repository on disk and its
+wording overstated it.** The Phase 2 coder has the repository on disk and its
 own search tools; nothing stops a grep from reaching `.invar/decisions/`. Two
 things keep that acceptable:
 
@@ -1556,7 +1671,8 @@ the approval gate.
 This works only if the Plan is genuinely self-sufficient (§4a) — which is
 what `## Implementation context` exists for (§5c). If Phase 2 has
 to re-read the context sources, the isolation is nominal and the budget is
-spent twice. That is a test of the Plan format, not a new design.
+spent twice. That is a test of the Plan format, not a new design — and since
+v3.1 the coder sub-agent runs it on every cycle (§13c).
 
 ### 13b. The plugin is a shell; the CLI is the system
 
@@ -1580,9 +1696,140 @@ Three reasons this matters even though Claude Code is the only target:
   is then a packaging job over the same CLI and the same on-disk formats
   (§14.3), not a second implementation.
 
+The model choice and the number of coders (§13d) are not exceptions to this
+rule. They are made by the main session, an agent, and steer only how the
+work is done; what counts as done is still decided by the CLI. The
+parallelism the main session may use is itself on disk, in the approved Plan.
+
 So: one supported runtime, deliberately. Portability is retained as a property
 of the CLI, not advertised as a feature, and not tested against other runtimes
 in MVP.
+
+### 13c. The coder and review sub-agents
+
+**Phase 2 runs in its own sub-agent, as Phase 1 does.** The main session
+starts it after the gate with the ticket id — and, when the Plan declares work
+units, the unit (§13d) — and nothing else: not its own reading of the ticket,
+not what it discussed with the developer before the gate. Three reasons:
+
+1. **Its instructions always apply.** A sub-agent's system prompt is part of
+   every call; the protocol skill is read when the main session judges it
+   relevant (§5c). Phase 2's rules — begin with `invar plan check`, never edit
+   an approved Plan or a confirmed `.feature` file, stop rather than repair an
+   impossible specification — are exactly the ones that must hold every time.
+2. **A fresh context.** The coder starts from the Plan and the code. What it
+   knows is what a human approved, not the conversation that preceded it.
+3. **The Plan is tested on every cycle.** A coder that has to research what
+   the Plan should have said is direct evidence that the Plan is not
+   self-sufficient (§13a). In the main session that research was mixed into
+   everything else; in a sub-agent it is a transcript of its own.
+
+**What the coder reads.** The approved Plan (incl. Implementation context),
+the confirmed scenarios, `invar.yaml`, the code it modifies, and
+`AI_CONTEXT.md` through `invar context show --conventions`. Not
+`BUSINESS_CONTEXT.md` — the Invariants the ticket touches arrive in the Plan
+(§5c) — and not the decision log. `AI_CONTEXT.md` stays because it describes
+how code is written and the coder is the one writing it; once lint enforces
+it on disk (§5a, M4), it could move into the Plan as well.
+
+**The coder cannot ask the developer.** A sub-agent runs to its end and
+returns one answer, so its answer has a fixed shape, as the planner's does:
+
+- `DONE` and a summary of at most eight lines: what changed, which tests were
+  written, and what `invar lint check` and the current-scenario run said (or
+  that the tests were not run, for a parallel coder, §13d)
+- `BLOCKED <reason>` — the Plan or a scenario is impossible,
+  self-contradictory, or silent on something the code cannot proceed without.
+  The main session puts the reason to the developer and records
+  `invar decision record --type failed` (§4c); the cycle returns to Phase 1.
+
+That a coder cannot negotiate is the point. In the main session a
+specification could be "clarified" in conversation halfway through Phase 2,
+with nobody re-approving the result; a sub-agent can only finish or stop.
+
+**The review sub-agent** (`/invar:review`, `invar review-input`) is unchanged
+in what it sees — the Plan's criteria, the committed diff, `AI_CONTEXT.md` and
+`BUSINESS_CONTEXT.md`, never the decision log and never the main session's or
+the coder's justifications. Its standing grows: since the coder no longer
+reads `BUSINESS_CONTEXT.md`, the reviewer is the one agent that checks the
+branch against **every** Invariant, including one the planner did not carry
+into the Plan, and it reports such an Invariant under its own heading. It
+remains advisory — no hook runs it and `done` does not wait for it — but the
+protocol offers it by default after the last commit and before `done`.
+
+**The main session is the dispatcher.** It talks to the developer, starts the
+planner and relays its questions, waits at the gate, starts the coder or
+coders, offers the review, and runs nothing that renders a verdict. It keeps
+the `SessionStart` push of the binding context (§5c), because it is still
+where the trivial changes the protocol skill skips the cycle for are written.
+
+**None of this is a boundary** (§11). A coder that ignored its prompt, read
+`BUSINESS_CONTEXT.md` itself or edited the Plan would be caught where it
+always was: by `plan check`, `generate` and the checksums on disk.
+
+### 13d. Models and parallel coders
+
+**Every sub-agent runs on the model the main session chooses.** Each agent
+definition sets a default `model`; the main session may override it for a
+call — a cheaper, faster model for a coder on a small, well-specified Plan, a
+stronger one for a planner on a ticket that touches an Invariant. The choice
+belongs to the main session, not to the CLI: picking a model is a judgment,
+and the CLI renders verdicts, not judgments.
+
+**This is safe for one reason, and it is the design's: no verdict depends on
+which model ran.** Approval integrity, lint and the behavioral tests are the
+same checks whatever produced the code. A cheaper coder that gets it wrong
+costs an iteration or a `failed` entry; it cannot pass `generate` with code
+that does not satisfy the confirmed scenarios.
+
+The defaults are not equal, because the agents do not carry equal risk:
+
+| Agent | Default | Why |
+|---|---|---|
+| Planner | strong | Its output is what the developer approves. A weak Plan weakens the gate itself, and a criterion that would not catch an Invariant violation is a reasoning failure no check downstream can see |
+| Coder | cheaper allowed | It follows an approved Plan, and everything it produces is checked on disk |
+| Reviewer | strong | Since v3.1 it is the safety net for an Invariant the planner missed (§13c) |
+
+**Lowering the planner's model is said aloud.** It is the one choice whose
+cost lands on the gate: the developer is about to approve that model's work,
+so the main session tells the developer before the gate which model wrote the
+Plan when it is not the default.
+
+**Parallel coders, along units the Plan declares.** A Plan may split its work
+into work units (§4a), each with the paths it may change and the units it
+waits for. The main session may start one coder per unit and run units that
+do not depend on each other at the same time. **How many** coders run is the
+main session's decision. **What** may run in parallel is not: it is in the
+Plan, validated mechanically and approved at the gate, so parallelism is
+something the developer saw rather than something an agent invented.
+
+- **No work units means one unit.** One coder, sequentially, exactly as
+  before (§14.3).
+- **Overlap is refused at validation, never discovered at merge.**
+  `plan validate` rejects two units claiming one path, an unknown unit in
+  `after:`, and a dependency cycle (§4a).
+- **Parallel coders share one working tree and do not run the behavioral
+  tests.** The tests need a real database (§9), and two runs against one
+  database are not evidence of anything. A parallel coder gets lint feedback
+  only, and its `DONE` says the tests were not run. When the last unit has
+  returned, the main session runs the tests once; a failure goes back to a
+  coder for the unit whose paths it touches. Sequential coders keep the
+  in-flight run (§13).
+- **A unit's paths are declared, not enforced in-flight.** Nothing stops a
+  coder from writing outside its unit. A unit's paths are part of the Plan's
+  Scope, and the review reports changes outside Scope. An enforcing guard is
+  possible later (§9).
+- **One `BLOCKED` stops the cycle.** A unit that cannot be implemented means
+  the approved Plan was wrong as a whole. The main session lets running
+  coders finish, starts no new ones, and records `failed` for the ticket; the
+  Plan and its scenarios return to `draft` (§4c). Work already on disk stays,
+  de-approved, not reverted.
+- **One cycle, one close.** Units close nothing on their own. The full-suite
+  `generate` and the decision entry happen once, for the ticket (§7).
+
+The pilot runs sequentially. Work units are worth adding once the walkthrough
+has shown that Plans are self-sufficient for a single coder; parallelism on a
+Plan that is not would multiply the research §13a exists to remove.
 
 ## 14. Design constraints
 
@@ -1715,11 +1962,12 @@ recorded, not as a side effect of an implementation edit.
 
 New keys may be added at any time under one rule: **an absent key means the
 previous behavior.** That is what makes the additions of v2 — `language`,
-`context`, `Confirmed-checksum`, `## Scenarios to delete` — and of v3 —
-`Lockfile-checksum` — non-breaking, and what keeps the next ones
-non-breaking too. `## Implementation context` is a new *required* section,
-which is safe for a different reason: Plans are consumable and do not outlive
-their cycle (§12), so no existing Plan is ever read under the new rule.
+`context`, `Confirmed-checksum`, `## Scenarios to delete` — of v3 —
+`Lockfile-checksum` — and of v3.1 — the optional `## Work units` — non-breaking,
+and what keeps the next ones non-breaking too. `## Implementation context` is
+a new *required* section, which is safe for a different reason: Plans are
+consumable and do not outlive their cycle (§12), so no existing Plan is ever
+read under the new rule.
 
 ## 15. Repository layout
 
@@ -1775,9 +2023,10 @@ milestone is demonstrable on its own and most of them teach one of those.
 | **M0 — Foundations** | Rust basics; a minimal plugin with one hook; first draft of `contracts/` | A toy plugin logs every edited file; a toy Rust CLI prints the §4d digest of a file |
 | **M1 — Core gate** | Canonicalization and checksums; `plan validate/approve`; `scenario validate/confirm` incl. `--plan`; `Lockfile-checksum` | Every gate refusal in §10 is covered by a test |
 | **M2 — Python adapter** | Adapter protocol; dependency and test discovery; pytest execution; `generate` without lint | `generate` passes and fails correctly on the e2e sample project |
-| **M3 — Cycle closure** | Decision log; `failed` reset (§4c); `clean-spec`; `context show` incl. `--binding`, local sources only | The full loop runs in CI with no agent (§10) |
+| **M3 — Cycle closure** | Decision log; `failed` reset (§4c); `clean-spec`; `context show` incl. `--binding` and `--conventions`, local sources only | The full loop runs in CI with no agent (§10) |
 | **M4 — Lint** | Base rules; one inter-module rule on the runtime import graph (§6) | Extended rules activate from a marked `AI_CONTEXT.md` |
-| **M5 — Plugin** | Planning sub-agent; hooks; protocol skill; context delivery (§5c) | A ticket goes from pasted text to a closed cycle inside Claude Code with no manual wiring |
+| **M5 — Plugin** | Planning, coder and review sub-agents; hooks; protocol skill; context delivery (§5c); model defaults (§13d) | A ticket goes from pasted text to a closed cycle inside Claude Code with no manual wiring, Phase 2 running in the coder sub-agent |
+| **M5b — Work units** | `## Work units` in the Plan contract; its checks in `plan validate`; parallel coders in the protocol (§13d) | A Plan with two independent units closes in one cycle with two coders, and an overlapping Plan is refused at validation |
 | **M6 — Registry + MCP** | FastAPI registry (§14.1); `context sync` against it; MCP server | Package context arrives labelled `exact` / `compatible` / `stale` and reaches a Plan's Implementation context |
 
 Until M6, `context sync` reads local sources only — the local override that
@@ -1793,3 +2042,16 @@ source behind it.
   and SQLAlchemy while no package author has published any? Before M6.
 - Is the MCP server a subcommand of the core binary or a separate executable?
   Before M6.
+- **Does `SessionStart` context reach a sub-agent?** If it does, the coder
+  receives `BUSINESS_CONTEXT.md` anyway and §5c's split is nominal for it —
+  the old behavior, not a broken one. Then either the main session's push
+  moves to a hook that does not reach sub-agents, or the split is dropped.
+  Before M5.
+- **Can the main session override a sub-agent's model per call, and which
+  `model` values does `claude plugin validate` accept in an agent's
+  frontmatter?** If there is no per-call override, §13d's choice reduces to
+  the defaults, and a cheaper coder for small Plans becomes a second coder
+  definition. Before M5.
+- **What counts as "touches" when a test failure is routed back to a unit**
+  (§13d)? A failing scenario's test file, the files in its traceback, or the
+  developer's call. Before M5b.

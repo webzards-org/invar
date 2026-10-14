@@ -17,6 +17,7 @@ Section references (§13, §5c, …) point into [`../docs/DESIGN.md`](../docs/DE
 | **CLI binary** | A bundled executable, invoked by path or via `bin/` | `bin/invar` (§6, §13) | No |
 | **Hooks** | `hooks/hooks.json` | `hooks/hooks.json` | **Yes** — `PostToolUse` |
 | **Planning sub-agent** (§13a) | An agent definition | `agents/<name>.md` | No |
+| **Coder and review sub-agents** (§13c, since DESIGN v3.1) | Agent definitions | `agents/coder.md`, `agents/reviewer.md` | No — see §17 |
 | **Protocol skill** (§5c) | A skill | `skills/<name>/SKILL.md` | No |
 
 Plus the delivery channel §5c depends on but §13 does not list as a component:
@@ -615,9 +616,10 @@ and prints a warning.
 `invar init` adds `Read(/.invar/decisions/**)` to `permissions.deny` in the
 project's `.claude/settings.json` (§13a). The planner gets the decision log
 through `invar context show`, which is a command and reads files itself, so
-denying the Read *tool* costs the planner nothing; the point is that the main
-session, which writes the code, does not stumble into the log and start
-"improving" the Plan instead of implementing it (§7).
+denying the Read *tool* costs the planner nothing; the point is that the agent
+which writes the code — the coder sub-agent since DESIGN v3.1 (§13c), the main
+session before it — does not stumble into the log and start "improving" the
+Plan instead of implementing it (§7).
 
 Nothing below was exercised against Claude Code. It is what the rule is
 assumed to do, from the permissions documentation:
@@ -829,6 +831,7 @@ record for each.
 | 3 | An ordinary real ticket | A valid Plan with no invariant in play |
 | 4 | A trivial change (a copy fix) | The skill skips the cycle, and says so |
 | 5 | Phase 2 on a Plan that is still a draft | `invar plan check` refuses and no code is written |
+| 6 | Phase 2 on an approved Plan whose criterion cannot be met (seed one: two criteria that contradict each other) | The coder answers `BLOCKED <reason>` instead of softening a criterion; the main session records `failed` and the Plan is back in `draft` (§17) |
 
 Tickets 1–3 together are the first acceptance criterion: a Plan that passes
 `plan validate` on at least three real tickets, one touching an invariant. Take
@@ -845,9 +848,17 @@ main session's transcript for the log: any `invar context show` without
 `--binding`, any `invar decision log`, any text that is plainly a log entry. One is a
 failure of the third acceptance criterion.
 
+Once Phase 2 runs in the coder sub-agent (§17), record for it too: the model it ran
+on; `DONE` or `BLOCKED`, and whether `BLOCKED` was justified; and every file it read
+that the Plan did not name and that it did not modify. Those files are the research
+the Plan should have saved it, and the most direct measure of whether the Plan is
+self-sufficient (DESIGN §13a). Read its transcript for `BUSINESS_CONTEXT.md`: the
+coder should see Invariants only as the Plan states them.
+
 **Exit criteria**, from the task: three tickets valid, one with an invariant; the
 regional question asked; the main session never receives the log; the skill skips
-and says so; Phase 2 refuses a draft; and the iterations recorded below.
+and says so; Phase 2 refuses a draft; and the iterations recorded below. With the
+coder sub-agent: ticket 6 ends in `BLOCKED`, not in a changed criterion.
 
 ### The iteration log
 
@@ -875,7 +886,9 @@ wrong. Each names the first thing to change.
 3. **The planner's model.** `planner.md` sets none, so a subagent runs on whatever
    the default is. Criteria that would catch the incident are a reasoning task, and
    this is the cheapest lever: `model: opus`. Not set in v1 because the `claude
-   plugin validate` of an agent's `model` value was not checked.
+   plugin validate` of an agent's `model` value was not checked. DESIGN v3.1 (§13d)
+   now makes a strong model the planner's *default*, so setting it is the plan,
+   not only a lever; what remains to check is the accepted values (§17).
 4. **The skill is not loaded.** It is loaded when its description matches, which is
    a judgement. If the main session starts coding without a Plan, the fix is not a
    longer description: §5c puts the critical rules in the `SessionStart` hook, where
@@ -1026,3 +1039,69 @@ correct its verdicts.
 - [ ] Both seeded branches, as in the table above
 - [ ] With `review.offer: true`, the main session offers `/invar:review` once,
       before `done`, and does not start the reviewer itself
+
+**Changed by DESIGN v3.1.** The coder no longer reads `BUSINESS_CONTEXT.md`, so the
+reviewer is the only agent that checks the branch against every Invariant
+(DESIGN §13c). Two consequences here: the review is offered **by default**, so
+`review.offer` should default to `true`; and the report needs a heading for an
+Invariant the Plan did not name at all, separate from one the Plan named and the
+code broke. A third seeded branch covers it — see §17.
+
+## 17. The coder sub-agent, models and work units — DESIGN v3.1, **not built**
+
+DESIGN v3.1 moves Phase 2 out of the main session (§13c) and lets the main session
+choose each sub-agent's model and run coders in parallel along the Plan's work units
+(§13d). Nothing of it exists yet. This section is what M5 has to build and what it
+has to find out first, in the order a run would hit it.
+
+### What to build
+
+| Part | What it is |
+|---|---|
+| `agents/coder.md` | Phase 2: begins with `invar plan check`, reads the Plan and `invar context show --conventions`, never `BUSINESS_CONTEXT.md` or the log; answers `DONE` + at most eight lines, or `BLOCKED <reason>` |
+| `invar context show --conventions` | Core: `AI_CONTEXT.md` only. Same 10,000-character check as `--binding` (§5) |
+| `skills/invar/SKILL.md` | The main session as dispatcher: after the gate it starts the coder with the ticket line only, as `/invar:review` does for the reviewer; on `BLOCKED` it puts the reason to the developer and records `failed`; it offers the review before `done` |
+| `agents/planner.md`, `agents/reviewer.md` | `model` set to a strong model, once the accepted values are known |
+| `core/tests/plugin_prompts.rs` | The coder's prompt names only commands that exist, never points at the log or `BUSINESS_CONTEXT.md`, and has both answer shapes |
+
+Work units (DESIGN §4a, §13d) are M5b and come after the walkthrough has run with
+one coder.
+
+### Find out before building
+
+- [ ] **Does `SessionStart` context reach a sub-agent?** Start a sub-agent in a
+      session whose `SessionStart` hook prints a marker, and ask it whether it sees
+      the marker. If it does, the coder receives `BUSINESS_CONTEXT.md` anyway and
+      DESIGN §5c's split is nominal (DESIGN §16 says what then)
+- [ ] **Can the main session pass a model per sub-agent call?** And which `model`
+      values does `claude plugin validate --strict` accept in an agent's
+      frontmatter (`opus`, `sonnet`, `haiku`, a full model id, `inherit`)?
+- [ ] **Do `PreToolUse` hooks fire for a sub-agent's tool calls?** The guard must
+      keep the coder off an approved Plan exactly as it keeps the main session
+      off it. If it does not fire, nothing breaks — `plan check` and `done`
+      still refuse a changed Plan (§11) — but the coder wastes an iteration
+- [ ] **Does the `Read` deny rule on `.invar/decisions/**` hold inside a
+      sub-agent?** Already open in §12 and §16; the coder makes it matter more
+- [ ] **Is `SubagentStop` worth hooking for the coder?** A non-blocking
+      `plan check` when it stops would tell it, once, that it changed the Plan.
+      Not designed yet; decide after the first run
+
+### Not exercised
+
+- [ ] The coder, started after the gate, receives only the ticket line (check
+      its first message in the transcript)
+- [ ] Its first command is `invar plan check`; on a draft it stops with `BLOCKED`
+      and writes no code
+- [ ] Walkthrough ticket 6 (§14): `BLOCKED`, the Plan back in `draft`, no criterion
+      softened
+- [ ] The coder's transcript has no `BUSINESS_CONTEXT.md` text except what the
+      Plan quotes
+- [ ] A third seeded review branch, `seed-unnamed-invariant`: the Plan names no
+      Invariant, the code breaks one in `BUSINESS_CONTEXT.md`; the review reports
+      it under its own heading
+
+### Iteration log
+
+| v | Date | Observed | Changed | Effect |
+|---|---|---|---|---|
+| — | — | Not built. | — | — |
