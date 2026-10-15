@@ -611,7 +611,15 @@ claude -p "Use the Edit tool to change 403 to 409 in .invar/plans/<dir>/spec.md;
 `< /dev/null` matters: without it `claude -p` waits three seconds for stdin
 and prints a warning.
 
-## 12. The deny rule `invar init` writes — **not yet verified** (M1-15)
+## 12. The deny rule `invar init` writes — verified in M1-22, with limits (M1-15)
+
+**Verified 2026-10-15, Claude Code 2.1.300 (§17, question 3).** The rule holds
+for `Read`, `Grep` and `Glob`, and for `cat`/`head` through `Bash`, in the main
+session and in sub-agents. It does not stop `python3 -c "open(…)"` or `grep -r`
+through `Bash`. **It exists only when Claude Code is started at the project root**:
+started in a subdirectory, the project's `.claude/settings.json` is not loaded.
+The assumptions below are kept as written, for the record; where they differ from
+the run, the run is right.
 
 `invar init` adds `Read(/.invar/decisions/**)` to `permissions.deny` in the
 project's `.claude/settings.json` (§13a). The planner gets the decision log
@@ -754,16 +762,19 @@ run, and each item that holds is ticked here.
 - [ ] `claude plugin validate ./plugin --strict` passes (CI runs it), and the same
       for the marketplace tree `release.yml` assembles
 - [ ] `/hooks` lists the three hooks, with the plugin as their source
-- [ ] Exec form with a `command` that is itself a path (`${CLAUDE_PLUGIN_ROOT}/bin/invar`)
-      and `args`. The spike verified `python3` plus `args` only
+- [x] Exec form with a `command` that is itself a path (`${CLAUDE_PLUGIN_ROOT}/bin/invar`)
+      and `args`. The spike verified `python3` plus `args` only. *Ran in M1-22 (§17)
+      with a script path as `command`; 2.1.300.*
 - [ ] The `SubagentStop` matcher `.*planner` selects the planner. M1-18 names the
       agent, and a plugin's agents may be namespaced (`invar:planner`); the pattern
       matches either way if matchers are searched, not anchored
 - [ ] A `SubagentStop` block — exit 2 with stderr, and `{"decision": "block"}` — makes
       the planner carry on and shows it the reason; the second stop arrives with
       `stop_hook_active: true`
-- [ ] A `Bash` payload carries `tool_input.command` (taken from §8 and the docs)
-- [ ] Plain stdout of the `SessionStart` hook reaches the session (§7 says it does)
+- [x] A `Bash` payload carries `tool_input.command` (taken from §8 and the docs).
+      *Seen in M1-22 (§17).*
+- [x] Plain stdout of the `SessionStart` hook reaches the session (§7 says it does).
+      *Seen in M1-22 (§17): main session only, never a sub-agent.*
 - [ ] Removing a binary makes a hook error and not a blocked session
 - [ ] Adding the `dist` branch as a marketplace and installing the plugin from it
 
@@ -1035,7 +1046,9 @@ correct its verdicts.
       (check the subagent's first message in the transcript)
 - [ ] The reviewer's Bash call `invar review-input` is not denied by the
       `PreToolUse` guard
-- [ ] The `Read` deny rule on `.invar/decisions/**` holds inside a subagent
+- [x] The `Read` deny rule on `.invar/decisions/**` holds inside a subagent —
+      for the tools and `cat`, not for `python3` or `grep -r`; only when started at
+      the project root (§17, question 3)
 - [ ] Both seeded branches, as in the table above
 - [ ] With `review.offer: true`, the main session offers `/invar:review` once,
       before `done`, and does not start the reviewer itself
@@ -1067,24 +1080,144 @@ has to find out first, in the order a run would hit it.
 Work units (DESIGN §4a, §13d) are M5b and come after the walkthrough has run with
 one coder.
 
-### Find out before building
+### Found out before building — the M1-22 spike, 2026-10-15
 
-- [ ] **Does `SessionStart` context reach a sub-agent?** Start a sub-agent in a
-      session whose `SessionStart` hook prints a marker, and ask it whether it sees
-      the marker. If it does, the coder receives `BUSINESS_CONTEXT.md` anyway and
-      DESIGN §5c's split is nominal (DESIGN §16 says what then)
-- [ ] **Can the main session pass a model per sub-agent call?** And which `model`
-      values does `claude plugin validate --strict` accept in an agent's
-      frontmatter (`opus`, `sonnet`, `haiku`, a full model id, `inherit`)?
-- [ ] **Do `PreToolUse` hooks fire for a sub-agent's tool calls?** The guard must
-      keep the coder off an approved Plan exactly as it keeps the main session
-      off it. If it does not fire, nothing breaks — `plan check` and `done`
-      still refuse a changed Plan (§11) — but the coder wastes an iteration
-- [ ] **Does the `Read` deny rule on `.invar/decisions/**` hold inside a
-      sub-agent?** Already open in §12 and §16; the coder makes it matter more
-- [ ] **Is `SubagentStop` worth hooking for the coder?** A non-blocking
-      `plan check` when it stops would tell it, once, that it changed the Plan.
-      Not designed yet; decide after the first run
+**Setup.** Claude Code **2.1.300**, headless (`claude -p … --output-format json`),
+in a cloud Linux container, not on a developer machine. A throwaway git project
+with `.claude/settings.json` denying `Read(/.invar/decisions/**)` and one decision
+file holding `LOG-SECRET-4412`; a probe plugin loaded with `--plugin-dir`, whose
+hooks (exec form: `command` + `args`) log their stdin payload and whose
+`SessionStart` hook prints `SPIKE-CONTEXT: … AUBERGINE-7731`; a `PreToolUse` hook
+that exits 2 for any call naming `protected.txt`; a `probe` agent with `Read, Write,
+Bash, Grep, Glob`. Sub-agents were started by the main session with a fixed message
+that mentions no marker. Every answer below is checked against the sub-agent's own
+transcript (`~/.claude/projects/<project>/<session>/subagents/agent-*.jsonl`) and
+the hook log, not only against what the agent said. None of the spike's files are
+in the repository; how to rebuild it is at the end of this section.
+
+**1. `SessionStart` context does not reach a sub-agent.** The main session quoted
+`SPIKE-CONTEXT: the secret word for this session is AUBERGINE-7731.`; the `probe`
+agent and a built-in `general-purpose` agent both answered `NONE`, and
+`AUBERGINE` appears in neither sub-agent transcript nor in its `.prefix.json`. The
+`SessionStart` hook ran once per session, never per sub-agent. **But a
+`SubagentStart` hook's `additionalContext` does reach it**: printing
+`{"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":"SUBSTART-CONTEXT: … ZUCCHINI-55"}}`
+put that line into the sub-agent's context (`SubagentStart hook additional context:
+SUBSTART-CONTEXT: the agent word is ZUCCHINI-55.`), and only there. The
+`SubagentStart` payload names the agent: `"agent_id":"ae7dd4f1748b155c3",
+"agent_type":"spike:probe"`.
+
+**2. `PreToolUse` fires for a sub-agent's tool calls, and its exit 2 blocks them.**
+The hook log has one `PreToolUse` per `Bash` and `Write` call of both sub-agents,
+and the payload says whose call it is — `"agent_id":"ae7dd4f1748b155c3",
+"agent_type":"spike:probe"` (absent for the main session's own calls). The
+`Write` to `protected.txt` came back to the sub-agent as `PreToolUse:Write hook
+error: […/log.sh PreToolUse]: spike: protected.txt is guarded` and the file was not
+created. A `Bash` payload carries `tool_input.command`
+(`"tool_input":{"command":"cat .invar/decisions/…"`). A call refused by a deny
+rule never reaches the hook.
+
+**3. The `Read` deny rule holds inside a sub-agent — for the tools, not for a
+shell.** In both sub-agents and in the main session:
+
+| Attempt | Result |
+|---|---|
+| `Read` on the entry | `File is in a directory that is denied by your permission settings.` |
+| `Grep` for `LOG-SECRET` in `.invar` | `No matches found` |
+| `Glob` `.invar/decisions/*.md` | `No files found` |
+| `Bash` `cat …` / `head -1 …` | `Permission to use Bash with command cat … has been denied.` |
+| `Bash` `cd .invar && cat decisions/*.md` | `cat from '…/.invar/decisions' was blocked by a deny rule.` |
+| `Bash` `python3 -c "print(open('.invar/decisions/…').read())"` | **printed the entry** |
+| `Bash` `grep -r LOG-SECRET .invar` | **printed the entry** |
+
+Claude Code extends a `Read` deny to the common file readers in `Bash` (more than
+§12 assumed) but not to an interpreter or `grep -r`. **And the rule only exists
+when the session starts at the project root**: started in `app/Http/`, the
+project's `.claude/settings.json` is not loaded at all — the `Read` and `Grep` of
+the entry succeeded, and a probe deny rule `Bash(echo SETTINGS-PROBE*)` did not
+fire either. Started at the root and then `cd`-ing into `app/Http` keeps it.
+
+**4. Models.** `claude plugin validate --strict` accepts **any** `model` value in an
+agent's frontmatter: `opus`, `sonnet`, `haiku`, `fable`, `inherit`,
+`claude-opus-5-5`, `claude-opus-5-5[1m]`, `opus-5-5`, `Opus` and `banana` all
+validated clean, exit 0. At runtime, read from the sub-agent transcripts'
+`"model"`:
+
+| Agent `model` | `Agent` call `model` | Ran as |
+|---|---|---|
+| none (main on sonnet) | none | `claude-sonnet-5-5` |
+| `inherit` (main on haiku) | none | `claude-haiku-5-5` |
+| `haiku` | none | `claude-haiku-5-5` |
+| `sonnet` | none | `claude-sonnet-5-5` |
+| `claude-opus-5-5` | none | `claude-opus-5-5` |
+| none | `haiku` | `claude-haiku-5-5` |
+| `haiku` | `opus` | `claude-opus-5-5` |
+| `banana` | none | **failed**: `Agent terminated early due to an API error: There's an issue with the selected model (banana). It may not exist or you may not have access to it. (error type model_not_found, HTTP 404 …)` |
+
+The main session **can** choose a model per call: the `Agent` tool has an optional
+`model` parameter, its schema accepts `"sonnet"`, `"opus"`, `"haiku"`, `"fable"`, and
+it overrides the agent's own `model`. A model the account cannot use is a hard
+failure of that call, not a fallback.
+
+**Also settled on the way** (§13): exec form — `"command":
+"${CLAUDE_PLUGIN_ROOT}/…"` plus `"args"` — runs, and `validate --strict` prefers
+it (shell form with an unquoted `${CLAUDE_PLUGIN_ROOT}` is a warning, so an error
+under `--strict`); plain stdout of a `SessionStart` hook reaches the main session.
+
+### Decisions from the spike
+
+**D-17.1 — The §5c split is real, and stays as designed.** The coder does not
+receive the main session's binding context, so it meets `BUSINESS_CONTEXT.md` only
+through the Plan. Nothing in DESIGN §5c or M1-23 changes. The `SubagentStart`
+channel is a *deterministic* way to give the coder `AI_CONTEXT.md` instead of a
+prompt instruction to run `context show --conventions`; M1-24 records which it
+uses. Recommended: the hook, for the coder only, because §5c's own rule is that
+what must always hold does not travel by an instruction the agent may skip.
+
+**D-17.2 — `plan guard` protects the Plan from the coder as it does from the main
+session.** No change to the guard. The payload's `agent_type` would let it tell
+the two apart; nothing needs that now.
+
+**D-17.3 — The deny rule is a speed bump, not a wall, and it needs the session to
+start at the root.** That was always the standing of the log's protection
+(DESIGN §5c, "None of this is a boundary"): the prompts forbid reading it, the
+rule catches the ordinary tools, and the check that counts is the coder's
+transcript (M1-24's acceptance). Two consequences: `invar init`'s output and the
+protocol skill tell the developer to start Claude Code at the project root, and the
+doc comment on `DENY_RULE` says what holds and what does not.
+
+**D-17.4 — Models are set as aliases, and a test checks them.** `validate` checks
+nothing, so `core/tests/plugin_prompts.rs` asserts that every agent's `model` is
+one of the values the `Agent` tool accepts per call — `opus`, `sonnet`, `haiku`,
+`fable` — or `inherit`. Aliases, not full ids: they follow the current model, they
+are what a per-call override can name, and a full id is the likeliest to become a
+404. Defaults per DESIGN §13d: planner `opus`, reviewer `opus`, coder `sonnet`.
+§13d holds as written — the per-call choice exists — with one addition: a model
+the account cannot use fails the call, so the dispatcher (M1-25) puts that error to
+the developer and offers to rerun the agent with `model: sonnet`; it never retries
+silently on another model, because a weaker planner is the one change §13d says
+must be said aloud.
+
+**Left open: is `SubagentStop` worth hooking for the coder?** Not part of the four
+questions; decide after the coder's first run (M1-24).
+
+### Rebuilding the spike
+
+Nothing is committed; rebuild in a temporary directory when Claude Code changes:
+
+1. `git init` a project with `.claude/settings.json`
+   `{"permissions":{"deny":["Read(/.invar/decisions/**)"]}}` and one file in
+   `.invar/decisions/` holding a marker.
+2. A plugin with `hooks/hooks.json` hooking `SessionStart`, `PreToolUse` (matcher
+   `Read|Write|Edit|Bash`), `SubagentStart` and `SubagentStop`, each in exec form to
+   one script that appends `<event>\t<stdin>` to a log; for `SessionStart` it prints
+   a marker line, for `SubagentStart` the `additionalContext` JSON above, for
+   `PreToolUse` it exits 2 when the payload names `protected.txt`. Agents
+   `probe.md` and copies with `model:` set.
+3. From the project root: `claude -p --plugin-dir <plugin> --allowedTools Read Bash
+   Write Agent Grep Glob --output-format json "<start agent X with exactly this
+   message: …>" < /dev/null`, then read `result`, the hook log, and the sub-agent
+   transcripts for the markers and `"model"`.
 
 ### Not exercised
 
