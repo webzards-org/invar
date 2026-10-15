@@ -10,7 +10,7 @@ use std::fs;
 use tempfile::TempDir;
 
 use super::{
-    Binding, ContextError, Decisions, MARKER, MAX_CHARS, MAX_ENTRIES, State, classify,
+    Binding, ContextError, Decisions, Kind, MARKER, MAX_CHARS, MAX_ENTRIES, State, classify,
     load_binding, load_decisions, planner_output,
 };
 use crate::format::decision::{Entry, FileName, Type};
@@ -255,7 +255,10 @@ fn an_empty_marked_file_is_indistinguishable_from_an_absent_one() {
     assert_eq!(a.render(), e.render());
     assert_eq!(a.unrecognized(), e.unrecognized());
     assert!(a.unrecognized().is_empty(), "nothing to report for either");
-    assert_eq!(a.render_within(0).unwrap(), e.render_within(0).unwrap());
+    assert_eq!(
+        a.render_as_within(Kind::Binding, 0).unwrap(),
+        e.render_as_within(Kind::Binding, 0).unwrap()
+    );
     assert_eq!(
         planner_output(&a, &decisions(&absent)),
         planner_output(&e, &decisions(&empty))
@@ -302,8 +305,11 @@ fn the_limit_is_on_the_whole_output_exactly() {
     let found = binding(&root);
     let total = found.render().chars().count();
 
-    assert_eq!(found.render_within(total).unwrap(), found.render());
-    match found.render_within(total - 1) {
+    assert_eq!(
+        found.render_as_within(Kind::Binding, total).unwrap(),
+        found.render()
+    );
+    match found.render_as_within(Kind::Binding, total - 1) {
         Err(ContextError::OverLimit(over)) => {
             assert_eq!((over.total, over.limit), (total, total - 1));
         }
@@ -317,7 +323,9 @@ fn an_output_over_the_limit_names_both_files_their_sizes_and_the_limit() {
     write(&root, "AI_CONTEXT.md", &marked(&"a".repeat(37)));
     write(&root, "BUSINESS_CONTEXT.md", &marked(&"b".repeat(53)));
 
-    let err = binding(&root).render_within(100).unwrap_err();
+    let err = binding(&root)
+        .render_as_within(Kind::Binding, 100)
+        .unwrap_err();
 
     let ContextError::OverLimit(over) = &err else {
         panic!("expected OverLimit, got {err:?}");
@@ -359,7 +367,9 @@ fn a_file_that_is_not_in_the_output_is_still_named_with_why() {
     write(&root, "AI_CONTEXT.md", &marked(&"a".repeat(200)));
     // No BUSINESS_CONTEXT.md at all.
 
-    let err = binding(&root).render_within(50).unwrap_err();
+    let err = binding(&root)
+        .render_as_within(Kind::Binding, 50)
+        .unwrap_err();
 
     let ContextError::OverLimit(over) = &err else {
         panic!("expected OverLimit, got {err:?}");
@@ -384,13 +394,16 @@ fn the_limit_counts_characters_not_bytes() {
         found.render().chars().count() <= 5000,
         "within 5000 characters"
     );
-    assert!(found.render_within(5000).is_ok());
+    assert!(found.render_as_within(Kind::Binding, 5000).is_ok());
 }
 
 #[test]
 fn nothing_loaded_is_never_over_any_limit() {
     let (_dir, root) = project();
-    assert_eq!(binding(&root).render_within(0).unwrap(), "");
+    assert_eq!(
+        binding(&root).render_as_within(Kind::Binding, 0).unwrap(),
+        ""
+    );
 }
 
 // --- the decision log ---------------------------------------------------------------------
@@ -569,4 +582,145 @@ fn the_planner_output_is_whichever_part_there_is() {
     add_entry(&other, "global", 10, "global-a");
     let only_log = planner_output(&binding(&other), &decisions(&other));
     assert_eq!(only_log, decisions(&other).render());
+}
+
+// --- the conventions (M1-23) ------------------------------------------------------------------
+
+#[test]
+fn the_conventions_are_ai_context_alone_with_its_origin() {
+    let (_dir, root) = project();
+    write(
+        &root,
+        "AI_CONTEXT.md",
+        &marked("Convention: thin controllers.\n"),
+    );
+    write(
+        &root,
+        "BUSINESS_CONTEXT.md",
+        &marked("BUSINESS-ONLY-TEXT: scope by account.\n"),
+    );
+    add_entry(&root, "global", 10, "LOG-ONLY-TEXT");
+
+    let out = binding(&root).render_as(Kind::Conventions);
+
+    assert!(out.starts_with("=== invar: conventions ===\n"), "{out}");
+    assert!(
+        in_order(
+            &out,
+            &[
+                "=== AI_CONTEXT.md — this project's own conventions; binding ===",
+                "Convention: thin controllers.",
+                "=== end of AI_CONTEXT.md ===",
+            ]
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("BUSINESS-ONLY-TEXT"), "{out}");
+    assert!(!out.contains("BUSINESS_CONTEXT.md"), "{out}");
+    assert!(!out.contains("LOG-ONLY-TEXT"), "{out}");
+    assert!(!out.contains("invar-context"), "the marker is not content");
+    assert!(out.ends_with("=== end of AI_CONTEXT.md ===\n"), "{out}");
+}
+
+#[test]
+fn the_binding_output_is_unchanged_by_the_second_kind() {
+    let (_dir, root) = project();
+    write(&root, "AI_CONTEXT.md", &marked("Convention.\n"));
+    write(&root, "BUSINESS_CONTEXT.md", &marked("Invariant.\n"));
+    let found = binding(&root);
+
+    assert_eq!(found.render(), found.render_as(Kind::Binding));
+    assert!(
+        found
+            .render()
+            .starts_with("=== invar: binding context ===\n")
+    );
+}
+
+#[test]
+fn conventions_without_a_loaded_ai_context_print_nothing_whatever_the_business_file_holds() {
+    let (_absent_dir, absent) = project();
+    let (_empty_dir, empty) = project();
+    let (_unmarked_dir, unmarked) = project();
+    write(
+        &empty,
+        "AI_CONTEXT.md",
+        &marked("# AI_CONTEXT.md\n\n## Layers\n"),
+    );
+    write(&unmarked, "AI_CONTEXT.md", "Unmarked convention.\n");
+    for root in [&absent, &empty, &unmarked] {
+        write(root, "BUSINESS_CONTEXT.md", &marked("Invariant.\n"));
+    }
+
+    for root in [&absent, &empty, &unmarked] {
+        assert_eq!(binding(root).render_as(Kind::Conventions), "");
+        assert_eq!(
+            binding(root)
+                .render_as_within(Kind::Conventions, 0)
+                .unwrap(),
+            ""
+        );
+    }
+    // Absent and empty are indistinguishable; unmarked is reported.
+    assert!(
+        binding(&absent)
+            .unrecognized_in(Kind::Conventions)
+            .is_empty()
+    );
+    assert!(
+        binding(&empty)
+            .unrecognized_in(Kind::Conventions)
+            .is_empty()
+    );
+    assert_eq!(
+        binding(&unmarked).unrecognized_in(Kind::Conventions),
+        ["AI_CONTEXT.md"]
+    );
+}
+
+#[test]
+fn an_unmarked_business_file_is_not_the_conventions_business() {
+    let (_dir, root) = project();
+    write(&root, "AI_CONTEXT.md", &marked("Convention.\n"));
+    write(&root, "BUSINESS_CONTEXT.md", "No marker.\n");
+    let found = binding(&root);
+
+    assert!(found.unrecognized_in(Kind::Conventions).is_empty());
+    assert_eq!(
+        found.unrecognized_in(Kind::Binding),
+        ["BUSINESS_CONTEXT.md"]
+    );
+}
+
+#[test]
+fn the_conventions_limit_is_on_exactly_what_is_printed_and_names_only_ai_context() {
+    let (_dir, root) = project();
+    write(&root, "AI_CONTEXT.md", &marked(&"a".repeat(300)));
+    // A large business file must not count against the coder's output.
+    write(&root, "BUSINESS_CONTEXT.md", &marked(&"b".repeat(5_000)));
+    let found = binding(&root);
+    let total = found.render_as(Kind::Conventions).chars().count();
+
+    assert!(found.render_as_within(Kind::Conventions, total).is_ok());
+    let err = found
+        .render_as_within(Kind::Conventions, total - 1)
+        .unwrap_err();
+    let ContextError::OverLimit(over) = &err else {
+        panic!("expected OverLimit, got {err:?}");
+    };
+    assert_eq!((over.total, over.limit), (total, total - 1));
+    assert_eq!(over.files.len(), 1);
+    assert_eq!(
+        (over.files[0].name, over.files[0].chars),
+        ("AI_CONTEXT.md", 300)
+    );
+    let message = err.to_string();
+    assert!(
+        message.contains(&format!(
+            "the conventions output is {total} characters, over the limit of {}",
+            total - 1
+        )),
+        "{message}"
+    );
+    assert!(!message.contains("BUSINESS_CONTEXT.md"), "{message}");
 }
