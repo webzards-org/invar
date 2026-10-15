@@ -1,6 +1,6 @@
 # Invar — M1 Light gate
 
-Twenty-one issues. Goal of the milestone: **a team can run the whole cycle —
+Twenty-six issues. Goal of the milestone: **a team can run the whole cycle —
 plan, approve, implement, review, close — inside Claude Code on a Laravel + Vue
 project, and the approved Plan cannot be moved without it being visible.**
 
@@ -19,6 +19,11 @@ thrown away when they do.
 > `docs/DESIGN.md` (v3) does not describe light mode yet. Until revision v4
 > lands, the decisions recorded under **Light-mode decisions** below are
 > authoritative where they differ from the design document.
+>
+> **Added after DESIGN v3.1:** M1-22 to M1-26 move Phase 2 into a coder
+> sub-agent and make the main session a dispatcher (DESIGN §13c, §13d). They
+> follow v3.1 in everything light mode does not override; parallel coders and
+> work units stay out of M1.
 
 **Branch naming.** `<type>/<task-id>-<slug>`, e.g. `feat/m1-1-canonicalization`.
 The task id must appear as a substring (§12, `clean-spec --merged`).
@@ -964,6 +969,210 @@ Plus:
 
 ---
 
+## M1-22 — Spike: sub-agent mechanics
+
+**Branch:** `spike/m1-22-subagent-mechanics`
+**Labels:** `milestone:M1`, `area:plugin`, `type:learning`, `type:decision`
+**Design:** §5c, §13c, §13d, §16 (open questions); `plugin/NOTES.md` §17
+**Depends on:** M1-17
+
+### Description
+
+The coder design rests on four things nobody has run against Claude Code.
+Find them out before M1-24 writes a prompt that depends on them, in a
+throwaway project, the way M1-10 verified the `PreToolUse` deny.
+
+1. **Does `SessionStart` context reach a sub-agent?** If it does, the coder
+   receives `BUSINESS_CONTEXT.md` anyway and the split of §5c is nominal. That
+   is the old behavior, not a broken one, but it changes M1-24 and M1-25.
+2. **Do `PreToolUse` hooks fire for a sub-agent's tool calls?** If not,
+   `plan guard` does not protect the Plan from the coder. Nothing breaks —
+   `plan check` and `done` still refuse a changed Plan — but it has to be
+   known.
+3. **Does the `Read` deny rule on `.invar/decisions/**` hold inside a
+   sub-agent?** Already open in `NOTES.md` §12 and §16.
+4. **Models.** Which `model` values `claude plugin validate --strict` accepts
+   in an agent's frontmatter, and whether the main session can choose a model
+   per sub-agent call. If it cannot, §13d's choice reduces to the defaults.
+
+### Acceptance criteria
+
+- [ ] Each of the four questions answered by a run, not by the docs, with the
+      Claude Code version and the observed output recorded in
+      `plugin/NOTES.md` §17
+- [ ] Where an answer contradicts DESIGN §5c or §13d, the consequence is
+      written down as a decision, and M1-24 and M1-25 are updated before they
+      start
+- [ ] The spike's files are not committed
+
+---
+
+## M1-23 — `invar context show --conventions`
+
+**Branch:** `feat/m1-23-context-conventions`
+**Labels:** `milestone:M1`, `area:core`, `good-first-rust`
+**Design:** §5c, §8, §13c
+**Depends on:** M1-14
+
+### Description
+
+A third output from the same sources: **`AI_CONTEXT.md` only**, labelled with
+its origin. It is what the coder reads (M1-24). It never contains
+`BUSINESS_CONTEXT.md` and never a decision entry: the coder meets business
+rules only as the approved Plan states them (§5c).
+
+Same rules as `--binding`: an unmarked file is reported as unrecognized, an
+empty-but-marked one behaves like an absent one, and exceeding
+`context.binding_limit` is a hard error.
+
+### Acceptance criteria
+
+- [ ] `--conventions` prints `AI_CONTEXT.md` with its origin label and nothing
+      else
+- [ ] A test with both context files and a decision entry present asserts that
+      neither the business file's text nor the entry's text appears in the
+      output
+- [ ] `--conventions` and `--binding` together is a usage error
+- [ ] Above the limit: non-zero exit, message with the size and the limit
+- [ ] Unmarked, empty-but-marked and absent behave as for `--binding`
+- [ ] Added to the gate-refusal suite (M1-21): *the coder's context never
+      contains a business rule or a decision entry*
+
+---
+
+## M1-24 — Coder sub-agent
+
+**Branch:** `feat/m1-24-coder-agent`
+**Labels:** `milestone:M1`, `area:plugin`
+**Design:** §3, §4c, §13c, §13d; L-3
+**Depends on:** M1-18, M1-22, M1-23
+
+### Description
+
+`agents/coder.md` runs Phase 2 in its own context. The main session starts it
+after the gate with the ticket line only — not its own reading of the ticket,
+not the conversation before the gate.
+
+The coder:
+
+1. runs `invar plan check <ticket>` first, and stops if it refuses
+2. reads the approved Plan, `invar context show --conventions` and the code
+   the Plan's Scope names
+3. implements the Plan, and runs the project's own checks the way the team
+   runs them (L-3)
+4. never edits the Plan, never reads `BUSINESS_CONTEXT.md` or
+   `.invar/decisions/`, never runs `plan approve` or `done`
+
+It answers in one of two shapes, as the planner does:
+
+- `DONE` and at most eight lines: what changed, which checks ran and what
+  they said
+- `BLOCKED <reason>` — the Plan is a draft, changed, impossible,
+  self-contradictory, or silent on something the code cannot proceed without.
+  It never softens a criterion to get past one.
+
+Model: a cheaper one is allowed (§13d); set the default per the M1-22 finding.
+
+### Acceptance criteria
+
+- [ ] `agents/coder.md` exists; `claude plugin validate --strict` passes
+- [ ] `core/tests/plugin_prompts.rs` asserts: every `invar` command and flag the
+      prompt names exists; the prompt never points at `.invar/decisions/`,
+      `BUSINESS_CONTEXT.md` or `context show` without `--conventions`; both
+      answer shapes are present
+- [ ] On a draft Plan the coder answers `BLOCKED` and writes no code
+      (walkthrough ticket 5, `NOTES.md` §14)
+- [ ] On an approved Plan with two contradicting criteria it answers `BLOCKED`
+      and changes no criterion (walkthrough ticket 6)
+- [ ] On walkthrough tickets 1–3 it answers `DONE`; the files it read outside
+      the Plan's Scope are recorded per run in `NOTES.md` §14
+- [ ] Its transcript contains no `BUSINESS_CONTEXT.md` text beyond what the
+      Plan quotes
+
+---
+
+## M1-25 — Protocol skill: the main session as dispatcher
+
+**Branch:** `feat/m1-25-dispatcher`
+**Labels:** `milestone:M1`, `area:plugin`, `area:contracts`, `type:decision`
+**Design:** §5c, §13c, §13d; L-7, L-9
+**Contract:** `contracts/formats/invar-yaml.md` (`review.offer` default)
+**Depends on:** M1-20, M1-24
+
+### Description
+
+`skills/invar/SKILL.md` changes from "how the main session implements a Plan"
+to "how the main session runs the cycle":
+
+- after `/invar:approve`, start the coder with the ticket line only
+- on `DONE`, offer `/invar:review` once, before `done`
+- on `BLOCKED`, put the reason to the developer, run
+  `invar decision record --type failed`, and return to the planner
+- write code itself only for the trivial work the skill skips the cycle for
+  (L-9), and say so
+- choose each sub-agent's model, and tell the developer before the gate when
+  the planner ran on anything other than its default (§13d)
+
+**`review.offer` defaults to `true`.** Since the coder no longer reads
+`BUSINESS_CONTEXT.md`, the review is the safety net for an invariant the
+planner missed (§13c). This is a contract change to `invar-yaml.md`: bump the
+version and record the reason. The review stays advisory (L-7).
+
+The planner keeps a strong model by default (`NOTES.md` §14, lever 3); set its
+`model` per the M1-22 finding.
+
+### Acceptance criteria
+
+- [ ] The skill describes the dispatcher cycle above; `plugin_prompts.rs`
+      asserts it names the coder and never tells the main session to implement
+      an approved Plan itself
+- [ ] `invar-yaml.md` bumped, `review.offer` default `true`, reason recorded;
+      the reader in `core/` follows it
+- [ ] `agents/planner.md` sets a `model`
+- [ ] Manual walkthrough: ticket in → planner → `/invar:approve` → coder
+      `DONE` → review offered → `done`, recorded in `NOTES.md` §14
+- [ ] Manual walkthrough of `BLOCKED`: the Plan is back in `draft` and a
+      `failed` entry exists
+
+---
+
+## M1-26 — Reviewer: every invariant
+
+**Branch:** `feat/m1-26-review-all-invariants`
+**Labels:** `milestone:M1`, `area:plugin`
+**Design:** §5, §13c; L-7
+**Depends on:** M1-20
+
+### Description
+
+M1-20's reviewer reports "invariants from Implementation context that the diff
+appears to break". With the coder blind to `BUSINESS_CONTEXT.md`, an invariant
+the planner never named would go unnoticed by both. The reviewer now checks the
+branch against **every** invariant in `BUSINESS_CONTEXT.md`, which
+`review-input` already carries, and reports separately:
+
+- an invariant the Plan names and the diff breaks
+- an invariant the Plan does **not** name and the diff breaks — a planner
+  miss, worth its own heading because the fix is in Phase 1, not in the code
+
+The output shape otherwise stays fixed: criteria, invariants, changes outside
+Scope, nothing else. Set the reviewer's `model` to a strong one per the M1-22
+finding.
+
+### Acceptance criteria
+
+- [ ] `agents/reviewer.md` checks every invariant and has the separate heading;
+      `plugin_prompts.rs` asserts the heading exists
+- [ ] A third seeded branch in `eval/review-seeds.sh`,
+      `seed-unnamed-invariant`: the Plan names no invariant, the code breaks
+      one in `BUSINESS_CONTEXT.md`, and the review reports it under the new
+      heading
+- [ ] `seed-invariant` and `seed-scope` still produce the reports in
+      `NOTES.md` §16
+- [ ] `agents/reviewer.md` sets a `model`
+
+---
+
 ## Suggested order
 
 ID order is build order. Where work can proceed in parallel:
@@ -980,6 +1189,11 @@ M1-11 → M1-14
 M1-8 + M1-10 + M1-14 → M1-17 → M1-18 → M1-19
 M1-18 → M1-20
 M1-12 + M1-13 + M1-15 → M1-21
+M1-17 → M1-22
+M1-14 → M1-23
+M1-18 + M1-22 + M1-23 → M1-24
+M1-20 + M1-24 → M1-25
+M1-20 → M1-26
 ```
 
 **Pilot checkpoint after M1-10, M1-15, M1-17, M1-18 and M1-19.** That set is
@@ -987,6 +1201,11 @@ already usable: context in every session, a planner, a Plan the developer
 approves, and an approved Plan the coder cannot quietly move. Start the pilot
 there and measure; `done`, `clean-spec`, the PR description and review follow
 with real feedback.
+
+M1-22 to M1-24 can join the pilot as soon as they land: until then the main
+session implements the Plan itself, as M1-18 describes, and every gate still
+holds. Do M1-22 first — it is short, and its answers decide how much of §5c
+the coder actually gets.
 
 ## Decisions M1 must close
 
@@ -998,6 +1217,8 @@ with real feedback.
 | `done` with uncommitted changes: warn or refuse | `--help` + this file | M1-12 |
 | Shipping the binary in the plugin | `plugin/NOTES.md` §6 | M1-17 |
 | Disabling model invocation for `/invar:approve` | `plugin/NOTES.md` | M1-19 |
+| What reaches a sub-agent (`SessionStart`, `PreToolUse`, deny rule) and how models are set | `plugin/NOTES.md` §17 | M1-22 |
+| `review.offer` default `true` | `invar-yaml.md` | M1-25 |
 
 Contract decisions close by editing the contract, bumping its version and
 recording the reason (§14.3) — in the same PR. `DESIGN.md` v4 records the
@@ -1015,6 +1236,9 @@ Named so nobody adds them mid-milestone:
   execution, lint (L-3).
 - **`invar generate` / `verify`** (L-4).
 - **`Lockfile-checksum`** (L-5).
+- **Work units and parallel coders** (DESIGN §4a, §13d, M5b). M1 runs one
+  coder per ticket; the `## Work units` section is not in the light-mode Plan
+  contract.
 - **`context sync`, framework and package context, the registry and MCP.**
 - **Ticket templates and the content of `AI_CONTEXT.md` /
   `BUSINESS_CONTEXT.md`** for any specific project. Those belong to the team
