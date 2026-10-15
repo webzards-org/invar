@@ -369,6 +369,116 @@ fn a_file_that_cannot_be_read_is_an_error_not_a_quiet_absence() {
         .stderr(contains("AI_CONTEXT.md"));
 }
 
+// --- --conventions (M1-23) ---------------------------------------------------------------------
+
+#[test]
+fn conventions_print_ai_context_alone_with_its_origin_and_nothing_else() {
+    let project = Project::new("");
+    project.context("AI_CONTEXT.md", "Convention: thin controllers.\n");
+    project.context(
+        "BUSINESS_CONTEXT.md",
+        "BUSINESS-ONLY-TEXT: scope by account.\n",
+    );
+    project.entry("global", 10, "LOG-ONLY-TEXT");
+
+    let out = stdout_of(&project.show(&["--conventions"]).success().stderr(""));
+
+    assert!(out.starts_with("=== invar: conventions ===\n"), "{out}");
+    assert!(
+        out.contains("=== AI_CONTEXT.md — this project's own conventions; binding ==="),
+        "{out}"
+    );
+    assert!(out.contains("Convention: thin controllers."), "{out}");
+    for absent in [
+        "BUSINESS-ONLY-TEXT",
+        "BUSINESS_CONTEXT.md",
+        "LOG-ONLY-TEXT",
+        "decision log",
+        "invar-context",
+    ] {
+        assert!(!out.contains(absent), "{absent:?} in:\n{out}");
+    }
+}
+
+#[test]
+fn conventions_and_binding_together_are_a_usage_error() {
+    let project = Project::new("");
+
+    project
+        .show(&["--conventions", "--binding"])
+        .failure()
+        .code(1)
+        .stdout("")
+        .stderr(contains("cannot be used with"));
+}
+
+#[test]
+fn conventions_above_the_limit_fail_with_the_size_and_the_limit() {
+    // The business file is far larger; only what the coder would read counts.
+    let project = Project::new("context:\n  binding_limit: 300\n");
+    project.context("AI_CONTEXT.md", &"a".repeat(411));
+    project.context("BUSINESS_CONTEXT.md", &"b".repeat(5_000));
+
+    project
+        .show(&["--conventions"])
+        .failure()
+        .code(1)
+        .stdout("")
+        .stderr(contains("the conventions output is"))
+        .stderr(contains("over the limit of 300"))
+        .stderr(contains("`context.binding_limit` in invar.yaml"))
+        .stderr(contains("411 characters"))
+        .stderr(contains("BUSINESS_CONTEXT.md").not());
+}
+
+#[test]
+fn conventions_report_an_unmarked_ai_context_and_say_nothing_of_the_business_file() {
+    let unmarked_ai = Project::new("");
+    fs::write(
+        unmarked_ai.root().join("AI_CONTEXT.md"),
+        "SECRET-RULE: never loaded.\n",
+    )
+    .unwrap();
+    unmarked_ai
+        .show(&["--conventions"])
+        .success()
+        .stdout("")
+        .stderr(contains(
+            "warning: AI_CONTEXT.md exists but is not recognized, so it is not loaded",
+        ));
+
+    let unmarked_business = Project::new("");
+    unmarked_business.context("AI_CONTEXT.md", "Convention.\n");
+    fs::write(
+        unmarked_business.root().join("BUSINESS_CONTEXT.md"),
+        "No marker.\n",
+    )
+    .unwrap();
+    unmarked_business
+        .show(&["--conventions"])
+        .success()
+        .stdout(contains("Convention."))
+        .stderr("");
+}
+
+#[test]
+fn conventions_from_an_empty_marked_file_and_an_absent_one_are_identical() {
+    let absent = Project::new("");
+    let empty = Project::new("");
+    empty.context("AI_CONTEXT.md", "# AI_CONTEXT.md\n\n## Layers\n");
+    for project in [&absent, &empty] {
+        project.context("BUSINESS_CONTEXT.md", "Invariant.\n");
+    }
+
+    let (a, e) = (
+        absent.show(&["--conventions"]).success(),
+        empty.show(&["--conventions"]).success(),
+    );
+    assert_eq!(a.get_output().stdout, b"");
+    assert_eq!(a.get_output().stdout, e.get_output().stdout);
+    assert_eq!(a.get_output().stderr, e.get_output().stderr);
+}
+
 // --- arguments ---------------------------------------------------------------------------------
 
 #[test]
@@ -403,6 +513,7 @@ fn the_help_describes_both_outputs() {
         .assert()
         .success()
         .stdout(contains("--binding"))
+        .stdout(contains("--conventions"))
         .stdout(contains("--module").not())
         .stdout(contains("binding_limit"));
 
