@@ -1,14 +1,24 @@
 //! `invar context show` (M1-14): the context the agents read (§5, §5a, §5c,
 //! §7).
 //!
-//! Two outputs from the same sources:
+//! Three outputs from the same sources:
 //!
 //! - **Binding context** — `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`, each
-//!   labelled with its origin. Pushed into every session by a `SessionStart`
-//!   hook (M1-17), so both agents receive it without deciding to.
+//!   labelled with its origin. Pushed into the main session by a
+//!   `SessionStart` hook (M1-17), which does not reach a sub-agent
+//!   (`plugin/NOTES.md` §17).
+//! - **Conventions** (M1-23) — `AI_CONTEXT.md` alone, labelled the same way.
+//!   What the coder reads (§5c, §13c): it describes how code is written, and
+//!   the coder is the one writing it. Never `BUSINESS_CONTEXT.md` and never a
+//!   decision entry — the coder meets business rules only as the approved Plan
+//!   states them.
 //! - **Planning context** — the binding context plus the decision log's
 //!   entries, newest first, within a budget. Only the planner receives it
 //!   (§13a): the coder must not see the log (§7).
+//!
+//! The first two are the same rendering of a selection of the files
+//! ([`Kind`]), so the marker, the empty-file rule and the limit below apply to
+//! both identically, and neither can drift from the other.
 //!
 //! # The limit exists so that a failure is loud
 //!
@@ -120,6 +130,55 @@ pub struct File {
     pub state: State,
 }
 
+/// Which of the two outputs built from the context files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// Both files: `context show --binding`, what every session is pushed.
+    Binding,
+    /// `AI_CONTEXT.md` alone: `context show --conventions`, what the coder
+    /// reads (M1-23).
+    Conventions,
+}
+
+impl Kind {
+    /// Whether the file called `name` belongs in this output. A selection by
+    /// name, so a third context file added to [`FILES`] reaches the coder only
+    /// if this says so.
+    fn includes(self, name: &str) -> bool {
+        match self {
+            Self::Binding => true,
+            Self::Conventions => name == "AI_CONTEXT.md",
+        }
+    }
+
+    /// What the output is called in a message: "binding context is 9,412
+    /// characters".
+    pub fn noun(self) -> &'static str {
+        match self {
+            Self::Binding => "binding context",
+            Self::Conventions => "the conventions output",
+        }
+    }
+
+    /// The first lines of the output. The first line must not look like JSON:
+    /// Claude Code examines the first line of hook output to decide how to read
+    /// the rest (`plugin/NOTES.md` §9).
+    fn header(self) -> &'static str {
+        match self {
+            Self::Binding => {
+                "=== invar: binding context ===\n\
+                 The team's own decisions for this project, delivered at the start of every \
+                 session. Follow them: a Plan or a change that contradicts them is wrong.\n"
+            }
+            Self::Conventions => {
+                "=== invar: conventions ===\n\
+                 How code is written in this project. Follow it in everything you write. \
+                 The rules of the business reach you through the approved Plan, not here.\n"
+            }
+        }
+    }
+}
+
 /// Both context files, as found.
 #[derive(Debug)]
 pub struct Binding {
@@ -209,11 +268,22 @@ impl Binding {
     /// The names of the files that exist but are not recognized, so the caller
     /// can say so (stderr, never stdout: stdout is what the agent reads).
     pub fn unrecognized(&self) -> Vec<&'static str> {
-        self.files
-            .iter()
+        self.unrecognized_in(Kind::Binding)
+    }
+
+    /// [`unrecognized`](Self::unrecognized), among the files `kind` carries:
+    /// `--conventions` has nothing to say about `BUSINESS_CONTEXT.md`.
+    pub fn unrecognized_in(&self, kind: Kind) -> Vec<&'static str> {
+        self.files_in(kind)
             .filter(|file| file.state == State::Unrecognized)
             .map(|file| file.name)
             .collect()
+    }
+
+    fn files_in(&self, kind: Kind) -> impl Iterator<Item = &File> {
+        self.files
+            .iter()
+            .filter(move |file| kind.includes(file.name))
     }
 
     /// The binding output: one block per loaded file, each labelled with where
@@ -221,9 +291,14 @@ impl Binding {
     /// empty files all print nothing, so the first and the third cannot be told
     /// apart (§5).
     pub fn render(&self) -> String {
+        self.render_as(Kind::Binding)
+    }
+
+    /// [`render`](Self::render) of the files `kind` carries, under its own
+    /// header. Empty when none of them is loaded.
+    pub fn render_as(&self, kind: Kind) -> String {
         let loaded: Vec<(&File, &str)> = self
-            .files
-            .iter()
+            .files_in(kind)
             .filter_map(|file| match &file.state {
                 State::Loaded(text) => Some((file, text.as_str())),
                 _ => None,
@@ -233,14 +308,7 @@ impl Binding {
             return String::new();
         }
 
-        // The first line must not look like JSON: Claude Code examines the
-        // first line of hook output to decide how to read the rest
-        // (`plugin/NOTES.md` §9).
-        let mut out = String::from(
-            "=== invar: binding context ===\n\
-             The team's own decisions for this project, delivered at the start of every \
-             session. Follow them: a Plan or a change that contradicts them is wrong.\n",
-        );
+        let mut out = String::from(kind.header());
         for (file, text) in loaded {
             out.push_str(&format!(
                 "\n=== {} — {} ===\n\n{text}\n\n=== end of {} ===\n",
@@ -250,19 +318,19 @@ impl Binding {
         out
     }
 
-    /// [`render`](Self::render), refused when it is longer than `limit`
-    /// characters. The ceiling is on what is printed, labels included, because
-    /// that is what the hook's 10,000-character cap counts.
-    pub fn render_within(&self, limit: usize) -> Result<String, ContextError> {
-        let text = self.render();
+    /// [`render_as`](Self::render_as), refused when it is longer than `limit`
+    /// characters, with the sizes of the files `kind` carries. The ceiling is
+    /// on what is printed, labels included, because that is what the hook's
+    /// 10,000-character cap counts.
+    pub fn render_as_within(&self, kind: Kind, limit: usize) -> Result<String, ContextError> {
+        let text = self.render_as(kind);
         let total = text.chars().count();
         if total <= limit {
             return Ok(text);
         }
 
         let files: Vec<FileSize> = self
-            .files
-            .iter()
+            .files_in(kind)
             .map(|file| {
                 let (chars, note) = match &file.state {
                     State::Loaded(text) => (text.chars().count(), ""),
@@ -279,6 +347,7 @@ impl Binding {
             .collect();
         let in_files: usize = files.iter().map(|file| file.chars).sum();
         Err(ContextError::OverLimit(OverLimit {
+            what: kind.noun(),
             total,
             limit,
             framing: total - in_files,
@@ -297,6 +366,8 @@ pub struct FileSize {
 
 #[derive(Debug)]
 pub struct OverLimit {
+    /// Which output: [`Kind::noun`].
+    pub what: &'static str,
     pub total: usize,
     pub limit: usize,
     /// The labels and framing the output adds around the files.
@@ -424,7 +495,8 @@ pub enum ContextError {
     },
     /// The decision log could not be listed.
     Log(RecordError),
-    /// The binding output is longer than `context.binding_limit`.
+    /// The binding or conventions output is longer than
+    /// `context.binding_limit`.
     OverLimit(OverLimit),
 }
 
@@ -442,9 +514,9 @@ impl fmt::Display for ContextError {
             Self::OverLimit(over) => {
                 write!(
                     f,
-                    "binding context is {} characters, over the limit of {} \
+                    "{} is {} characters, over the limit of {} \
                      (`context.binding_limit` in invar.yaml):",
-                    over.total, over.limit
+                    over.what, over.total, over.limit
                 )?;
                 for file in &over.files {
                     write!(
