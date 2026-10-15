@@ -2046,12 +2046,15 @@ source behind it.
   receives `BUSINESS_CONTEXT.md` anyway and §5c's split is nominal for it —
   the old behavior, not a broken one. Then either the main session's push
   moves to a hook that does not reach sub-agents, or the split is dropped.
-  Before M5.
+  Before M5. *Answered by M1-22 (Claude Code 2.1.300, `plugin/NOTES.md` §17):
+  it does not; a `SubagentStart` hook's `additionalContext` does. §5c stands.*
 - **Can the main session override a sub-agent's model per call, and which
   `model` values does `claude plugin validate` accept in an agent's
   frontmatter?** If there is no per-call override, §13d's choice reduces to
   the defaults, and a cheaper coder for small Plans becomes a second coder
-  definition. Before M5.
+  definition. Before M5. *Answered by M1-22: it can (`sonnet`, `opus`, `haiku`,
+  `fable`), and `validate` accepts any string — a bad one fails at runtime.
+  §13d stands; models are set as aliases and checked by a test (NOTES D-17.4).*
 - **What counts as "touches" when a test failure is routed back to a unit**
   (§13d)? A failing scenario's test file, the files in its traceback, or the
   developer's call. Before M5b.
