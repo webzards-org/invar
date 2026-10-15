@@ -997,13 +997,23 @@ throwaway project, the way M1-10 verified the `PreToolUse` deny.
 
 ### Acceptance criteria
 
-- [ ] Each of the four questions answered by a run, not by the docs, with the
+- [x] Each of the four questions answered by a run, not by the docs, with the
       Claude Code version and the observed output recorded in
       `plugin/NOTES.md` §17
-- [ ] Where an answer contradicts DESIGN §5c or §13d, the consequence is
+- [x] Where an answer contradicts DESIGN §5c or §13d, the consequence is
       written down as a decision, and M1-24 and M1-25 are updated before they
       start
-- [ ] The spike's files are not committed
+- [x] The spike's files are not committed
+
+**Answered 2026-10-15, Claude Code 2.1.300** (`plugin/NOTES.md` §17, D-17.1 to
+D-17.4): `SessionStart` context does not reach a sub-agent, but a `SubagentStart`
+hook's `additionalContext` does; `PreToolUse` fires for a sub-agent's calls and
+its exit 2 blocks them; the `Read` deny holds in sub-agents for the tools and
+`cat`, not for `python3`/`grep -r`, and only when Claude Code starts at the project
+root; `validate --strict` accepts any `model` string, a bad one fails at runtime
+with a 404, and the `Agent` tool takes a per-call `model` (`sonnet`, `opus`,
+`haiku`, `fable`) that overrides the agent's. Nothing in DESIGN §5c or §13d is
+contradicted; the additions are in M1-24, M1-25 and M1-26 below.
 
 ---
 
@@ -1071,7 +1081,18 @@ It answers in one of two shapes, as the planner does:
   self-contradictory, or silent on something the code cannot proceed without.
   It never softens a criterion to get past one.
 
-Model: a cheaper one is allowed (§13d); set the default per the M1-22 finding.
+Model: a cheaper one is allowed (§13d). **Per M1-22 (D-17.4): `model: sonnet`**,
+an alias, never a full id.
+
+**How `AI_CONTEXT.md` reaches it (M1-22, D-17.1).** `SessionStart` output does not
+reach a sub-agent, so the coder has no binding context unless it is given one. A
+`SubagentStart` hook's `additionalContext` does reach it, and its payload carries
+`agent_type`. Recommended: a fourth hook, `SubagentStart` matched to the coder,
+running `invar context show --conventions --hook` and printing it as
+`additionalContext` — deterministic, where a prompt instruction is not (§5c).
+The prompt still names `--conventions` as the fallback. Whichever is chosen, the
+choice and its reason go in `plugin/NOTES.md` §17, and `tests/plugin.rs` (three
+hooks today) is updated with it.
 
 ### Acceptance criteria
 
@@ -1088,6 +1109,13 @@ Model: a cheaper one is allowed (§13d); set the default per the M1-22 finding.
       the Plan's Scope are recorded per run in `NOTES.md` §14
 - [ ] Its transcript contains no `BUSINESS_CONTEXT.md` text beyond what the
       Plan quotes
+- [ ] Its transcript contains no decision-log text: the deny rule does not stop
+      `python3` or `grep -r` through `Bash` (M1-22, D-17.3), so this is the check
+      that counts
+- [ ] `plugin_prompts.rs` asserts every agent's `model` is `opus`, `sonnet`,
+      `haiku`, `fable` or `inherit`: `validate --strict` accepts any string
+      (M1-22, D-17.4)
+- [ ] Its `AI_CONTEXT.md` delivery (hook or prompt) is decided and recorded
 
 ---
 
@@ -1111,15 +1139,23 @@ to "how the main session runs the cycle":
 - write code itself only for the trivial work the skill skips the cycle for
   (L-9), and say so
 - choose each sub-agent's model, and tell the developer before the gate when
-  the planner ran on anything other than its default (§13d)
+  the planner ran on anything other than its default (§13d). The `Agent` tool's
+  `model` parameter takes `sonnet`, `opus`, `haiku`, `fable` and overrides the
+  agent's own (M1-22)
+- when a sub-agent fails because its model is unavailable (`model_not_found`,
+  HTTP 404 — there is no fallback, M1-22), put the error to the developer and
+  offer to rerun it with `model: sonnet`; never switch models silently
+- tell the developer to start Claude Code at the project root: started in a
+  subdirectory, `.claude/settings.json` and its deny rule are not loaded
+  (M1-22, D-17.3)
 
 **`review.offer` defaults to `true`.** Since the coder no longer reads
 `BUSINESS_CONTEXT.md`, the review is the safety net for an invariant the
 planner missed (§13c). This is a contract change to `invar-yaml.md`: bump the
 version and record the reason. The review stays advisory (L-7).
 
-The planner keeps a strong model by default (`NOTES.md` §14, lever 3); set its
-`model` per the M1-22 finding.
+The planner keeps a strong model by default (`NOTES.md` §14, lever 3): **`model:
+opus`** per M1-22 (D-17.4).
 
 ### Acceptance criteria
 
@@ -1128,7 +1164,9 @@ The planner keeps a strong model by default (`NOTES.md` §14, lever 3); set its
       an approved Plan itself
 - [ ] `invar-yaml.md` bumped, `review.offer` default `true`, reason recorded;
       the reader in `core/` follows it
-- [ ] `agents/planner.md` sets a `model`
+- [ ] `agents/planner.md` sets `model: opus`
+- [ ] The skill handles a `model_not_found` sub-agent failure as above, and says
+      to start Claude Code at the project root
 - [ ] Manual walkthrough: ticket in → planner → `/invar:approve` → coder
       `DONE` → review offered → `done`, recorded in `NOTES.md` §14
 - [ ] Manual walkthrough of `BLOCKED`: the Plan is back in `draft` and a
@@ -1156,8 +1194,8 @@ branch against **every** invariant in `BUSINESS_CONTEXT.md`, which
   miss, worth its own heading because the fix is in Phase 1, not in the code
 
 The output shape otherwise stays fixed: criteria, invariants, changes outside
-Scope, nothing else. Set the reviewer's `model` to a strong one per the M1-22
-finding.
+Scope, nothing else. Set the reviewer's `model` to a strong one: **`model: opus`**
+per M1-22 (D-17.4).
 
 ### Acceptance criteria
 
@@ -1169,7 +1207,7 @@ finding.
       heading
 - [ ] `seed-invariant` and `seed-scope` still produce the reports in
       `NOTES.md` §16
-- [ ] `agents/reviewer.md` sets a `model`
+- [ ] `agents/reviewer.md` sets `model: opus`
 
 ---
 

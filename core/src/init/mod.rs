@@ -58,9 +58,13 @@ mod tests;
 
 /// The rule written to `.claude/settings.json` (§13a).
 ///
-/// `/` anchors a Read rule at the project root, so it holds whatever
-/// directory Claude Code is working in. **Not yet verified against Claude Code
-/// itself** — see `plugin/NOTES.md` §12 for how to check it.
+/// `/` anchors a Read rule at the project root. Verified against Claude Code
+/// 2.1.300 (`plugin/NOTES.md` §12, §17): it denies `Read`, `Grep`, `Glob` and
+/// `cat`/`head` through `Bash`, in the main session and in sub-agents, and keeps
+/// holding after a `cd` into a subdirectory. It does **not** stop an interpreter
+/// or `grep -r` through `Bash`, and it exists only when Claude Code is *started*
+/// at the project root: started in a subdirectory, this settings file is not
+/// loaded. A speed bump for the log, not a wall (NOTES D-17.3).
 pub const DENY_RULE: &str = "Read(/.invar/decisions/**)";
 
 const PLANS_DIR: &str = ".invar/plans";
