@@ -959,6 +959,9 @@ One test for each:
 - [ ] `clean-spec` refuses a Plan with no decision entry
 - [ ] Ambiguous Plan lookup fails, listing the matches
 - [ ] `context show --binding` fails above the limit
+- [x] The coder's context (`context show --conventions`) never contains a
+      business rule or a decision entry — added by M1-23; the suite lives in
+      `core/tests/gate_refusals.rs`
 
 Plus:
 
@@ -1037,15 +1040,15 @@ empty-but-marked one behaves like an absent one, and exceeding
 
 ### Acceptance criteria
 
-- [ ] `--conventions` prints `AI_CONTEXT.md` with its origin label and nothing
+- [x] `--conventions` prints `AI_CONTEXT.md` with its origin label and nothing
       else
-- [ ] A test with both context files and a decision entry present asserts that
+- [x] A test with both context files and a decision entry present asserts that
       neither the business file's text nor the entry's text appears in the
       output
-- [ ] `--conventions` and `--binding` together is a usage error
-- [ ] Above the limit: non-zero exit, message with the size and the limit
-- [ ] Unmarked, empty-but-marked and absent behave as for `--binding`
-- [ ] Added to the gate-refusal suite (M1-21): *the coder's context never
+- [x] `--conventions` and `--binding` together is a usage error
+- [x] Above the limit: non-zero exit, message with the size and the limit
+- [x] Unmarked, empty-but-marked and absent behave as for `--binding`
+- [x] Added to the gate-refusal suite (M1-21): *the coder's context never
       contains a business rule or a decision entry*
 
 ---
