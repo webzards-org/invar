@@ -902,6 +902,9 @@ wrong. Each names the first thing to change.
    plugin validate` of an agent's `model` value was not checked. DESIGN v3.1 (§13d)
    now makes a strong model the planner's *default*, so setting it is the plan,
    not only a lever; what remains to check is the accepted values (§17).
+   **Set in M1-25: `model: opus`.** `validate` accepts any value (§17, D-17.4), so
+   `plugin_prompts.rs` checks it; the dispatcher may still lower it for a call,
+   and then says so before the gate.
 4. **The skill is not loaded.** It is loaded when its description matches, which is
    a judgement. If the main session starts coding without a Plan, the fix is not a
    longer description: §5c puts the critical rules in the `SessionStart` hook, where
@@ -1075,8 +1078,8 @@ has to find out first, in the order a run would hit it.
 |---|---|
 | `agents/coder.md` | **Built in M1-24.** Phase 2: begins with `invar plan check`, reads the Plan and the conventions, never `BUSINESS_CONTEXT.md` or the log; answers `DONE` + at most eight lines, or `BLOCKED <reason>`. `model: sonnet` |
 | `invar context show --conventions` | **Built in M1-23.** Core: `AI_CONTEXT.md` only. Same 10,000-character check as `--binding` (§5). `--hook` (M1-24) prints it as `SubagentStart` JSON |
-| `skills/invar/SKILL.md` | The main session as dispatcher: after the gate it starts the coder with the ticket line only, as `/invar:review` does for the reviewer; on `BLOCKED` it puts the reason to the developer and records `failed`; it offers the review before `done` |
-| `agents/planner.md`, `agents/reviewer.md` | `model` set to a strong model, once the accepted values are known |
+| `skills/invar/SKILL.md` | **Built in M1-25.** The main session as dispatcher: after the gate it starts the coder with the ticket line only, as `/invar:review` does for the reviewer; on `BLOCKED` it puts the reason to the developer and, with their agreement, records `failed`; it offers the review before `done` (on by default since `invar-yaml.md` 2.0.0); it chooses models aloud and reports an unavailable one; it tells the developer to start at the project root |
+| `agents/planner.md`, `agents/reviewer.md` | `model: opus` — the planner since M1-25; the reviewer in M1-26 |
 | `core/tests/plugin_prompts.rs` | The coder's prompt names only commands that exist, never points at the log or `BUSINESS_CONTEXT.md`, and has both answer shapes |
 
 Work units (DESIGN §4a, §13d) are M5b and come after the walkthrough has run with
@@ -1245,10 +1248,8 @@ Nothing is committed; rebuild in a temporary directory when Claude Code changes:
 
 ### Not exercised
 
-**Running the coder before M1-25.** The protocol skill does not start the coder yet;
-until it does, start it by hand after `/invar:approve`: *"Start the `invar:coder`
-agent with exactly `Ticket: SHOP-214` and nothing else, and show me its answer."*
-Then read its transcript
+**Running the coder.** Since M1-25 the protocol skill starts it after the gate. To
+check a run, read its transcript
 (`~/.claude/projects/<project>/<session>/subagents/agent-*.jsonl`): the first
 message, the `=== invar: conventions ===` block, the files it read, and any
 `BUSINESS_CONTEXT.md` or decision-log text.
@@ -1261,6 +1262,16 @@ message, the `=== invar: conventions ===` block, the files it read, and any
       and writes no code
 - [ ] Walkthrough ticket 6 (§14): `BLOCKED`, the Plan back in `draft`, no criterion
       softened
+- [ ] The dispatcher cycle end to end (M1-25): ticket in → planner →
+      `/invar:approve` → `invar plan check` → coder `DONE` → review offered once →
+      `invar done`; recorded in §14
+- [ ] `BLOCKED` end to end (M1-25): the reason put to the developer, the `failed`
+      entry recorded only after they agree, the Plan back in `draft`, the planner
+      called again
+- [ ] The main session writes no code in either run (its own transcript: no
+      `Write` or `Edit` outside a skipped trivial change)
+- [ ] Started in a subdirectory, the main session says to start at the project root
+- [ ] A planner started with `model: sonnet` is reported before the gate
 - [ ] The coder's transcript has no `BUSINESS_CONTEXT.md` text except what the
       Plan quotes
 - [ ] A third seeded review branch, `seed-unnamed-invariant`: the Plan names no
