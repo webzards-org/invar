@@ -88,7 +88,7 @@ scenarios: false
 # Uncomment to change a default.
 #
 # review:
-#   offer: true             # offer /invar:review at the end of Phase 2
+#   offer: false            # default true: offer /invar:review before `invar done`
 #
 # git:
 #   base_branch: develop    # default: the branch origin/HEAD points to, else main
