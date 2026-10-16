@@ -666,15 +666,17 @@ and the limitation (a subdirectory) goes in this section.
 `plugin/` is now the real plugin; the spike (`spike-m0-6/`) is gone. Sections 1–11
 record what the spike established and stay as they are.
 
-### The three hooks
+### The hooks
 
 Each is one invocation of `${CLAUDE_PLUGIN_ROOT}/bin/invar` in exec form (§7),
 with a timeout, and none runs `plan approve` or `done`. There is no lint hook
-and no test hook (L-3).
+and no test hook (L-3). Three since M1-17; the fourth, `SubagentStart`, since
+M1-24 (§17).
 
 | Event | Matcher | Command | Effect |
 |---|---|---|---|
-| `SessionStart` | — | `context show --binding` | Binding context in every session |
+| `SessionStart` | — | `context show --binding` | Binding context in the main session (it never reaches a sub-agent, §17) |
+| `SubagentStart` | `.*coder` | `context show --conventions --hook` | `AI_CONTEXT.md`, and only it, in the coder's context |
 | `SubagentStop` | `.*planner` | `plan validate --all-drafts --hook` | The planner is told once what to fix |
 | `PreToolUse` | `Write\|Edit\|Bash` | `plan guard` | Approved Plans cannot be edited; `plan approve` is not the agent's to run (§11) |
 
@@ -1071,8 +1073,8 @@ has to find out first, in the order a run would hit it.
 
 | Part | What it is |
 |---|---|
-| `agents/coder.md` | Phase 2: begins with `invar plan check`, reads the Plan and `invar context show --conventions`, never `BUSINESS_CONTEXT.md` or the log; answers `DONE` + at most eight lines, or `BLOCKED <reason>` |
-| `invar context show --conventions` | Core: `AI_CONTEXT.md` only. Same 10,000-character check as `--binding` (§5) |
+| `agents/coder.md` | **Built in M1-24.** Phase 2: begins with `invar plan check`, reads the Plan and the conventions, never `BUSINESS_CONTEXT.md` or the log; answers `DONE` + at most eight lines, or `BLOCKED <reason>`. `model: sonnet` |
+| `invar context show --conventions` | **Built in M1-23.** Core: `AI_CONTEXT.md` only. Same 10,000-character check as `--binding` (§5). `--hook` (M1-24) prints it as `SubagentStart` JSON |
 | `skills/invar/SKILL.md` | The main session as dispatcher: after the gate it starts the coder with the ticket line only, as `/invar:review` does for the reviewer; on `BLOCKED` it puts the reason to the developer and records `failed`; it offers the review before `done` |
 | `agents/planner.md`, `agents/reviewer.md` | `model` set to a strong model, once the accepted values are known |
 | `core/tests/plugin_prompts.rs` | The coder's prompt names only commands that exist, never points at the log or `BUSINESS_CONTEXT.md`, and has both answer shapes |
@@ -1201,6 +1203,28 @@ must be said aloud.
 **Left open: is `SubagentStop` worth hooking for the coder?** Not part of the four
 questions; decide after the coder's first run (M1-24).
 
+### How `AI_CONTEXT.md` reaches the coder — decided in M1-24
+
+**A `SubagentStart` hook, matched to the coder, pushes it; the prompt names
+`invar context show --conventions` as the fallback.** DESIGN §5c's own rule is that
+what must always hold does not travel by an instruction the agent may skip, and
+this is the one channel that reaches a sub-agent deterministically (question 1).
+The hook runs `invar context show --conventions --hook`, which prints
+`{"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":"…"}}`
+— the form the spike saw arrive — or nothing when there are no conventions.
+
+**The matcher was run, not assumed.** Second spike run, 2026-10-16, Claude Code
+2.1.300: `SubagentStart` with `"matcher": ".*coder"` and a script printing the JSON
+above with `CODER-ONLY-CONTEXT: KIWI-31`. The agent `spike:coder` quoted the line;
+`spike:probe` answered `NONE`; `KIWI` appears 3 times in the coder's transcript and
+0 times in the probe's. So the matcher selects by the namespaced agent type, and the
+planner and the reviewer — which read their own context — receive nothing from it.
+
+**Limits.** The 10,000-character check applies to what the coder is pushed,
+exactly as for `--binding`. Outside an invar project the hook fails like
+`SessionStart` does (§13, open item); it fires only when the coder is started,
+which only the invar protocol does.
+
 ### Rebuilding the spike
 
 Nothing is committed; rebuild in a temporary directory when Claude Code changes:
@@ -1221,8 +1245,18 @@ Nothing is committed; rebuild in a temporary directory when Claude Code changes:
 
 ### Not exercised
 
+**Running the coder before M1-25.** The protocol skill does not start the coder yet;
+until it does, start it by hand after `/invar:approve`: *"Start the `invar:coder`
+agent with exactly `Ticket: SHOP-214` and nothing else, and show me its answer."*
+Then read its transcript
+(`~/.claude/projects/<project>/<session>/subagents/agent-*.jsonl`): the first
+message, the `=== invar: conventions ===` block, the files it read, and any
+`BUSINESS_CONTEXT.md` or decision-log text.
+
 - [ ] The coder, started after the gate, receives only the ticket line (check
       its first message in the transcript)
+- [ ] Its context holds the `=== invar: conventions ===` block from the
+      `SubagentStart` hook, and it did not run `invar context show` itself
 - [ ] Its first command is `invar plan check`; on a draft it stops with `BLOCKED`
       and writes no code
 - [ ] Walkthrough ticket 6 (§14): `BLOCKED`, the Plan back in `draft`, no criterion
