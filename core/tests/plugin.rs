@@ -4,7 +4,7 @@
 //! back, and everything that decides anything is in the CLI. That is a property
 //! these tests can check by reading `plugin/`, not an intention:
 //!
-//! - **three hooks, each one CLI call** in exec form — no script, no pipe, no
+//! - **four hooks, each one CLI call** in exec form — no script, no pipe, no
 //!   `&&`;
 //! - **no hook ever runs what is the developer's** — `plan approve`, `done`;
 //! - **no logic in the plugin** beyond the launcher that picks a binary;
@@ -87,16 +87,26 @@ fn hook_for(event: &str) -> Hook {
 }
 
 #[test]
-fn there_are_exactly_three_hooks_on_exactly_these_events() {
+fn there_are_exactly_four_hooks_on_exactly_these_events() {
     let events: Vec<String> = hooks().into_iter().map(|hook| hook.event).collect();
 
     // No lint hook and no test hook (L-3): nothing on `PostToolUse` or `Stop`.
+    // `SubagentStart` is the coder's conventions (M1-24): `SessionStart` output
+    // does not reach a sub-agent (plugin/NOTES.md §17).
     assert_eq!(
         events.iter().cloned().collect::<BTreeSet<_>>(),
-        BTreeSet::from(["PreToolUse", "SessionStart", "SubagentStop"].map(String::from)),
+        BTreeSet::from(
+            [
+                "PreToolUse",
+                "SessionStart",
+                "SubagentStart",
+                "SubagentStop"
+            ]
+            .map(String::from)
+        ),
         "{events:?}"
     );
-    assert_eq!(events.len(), 3, "one hook for each: {events:?}");
+    assert_eq!(events.len(), 4, "one hook for each: {events:?}");
 }
 
 #[test]
@@ -122,8 +132,12 @@ fn each_hook_is_one_invocation_of_the_launcher_in_exec_form() {
 
 #[test]
 fn the_hooks_are_the_commands_the_design_names() {
-    let expected: [(&str, &[&str]); 3] = [
+    let expected: [(&str, &[&str]); 4] = [
         ("SessionStart", &["context", "show", "--binding"]),
+        (
+            "SubagentStart",
+            &["context", "show", "--conventions", "--hook"],
+        ),
         (
             "SubagentStop",
             &["plan", "validate", "--all-drafts", "--hook"],
@@ -149,6 +163,13 @@ fn the_matchers_select_what_each_hook_is_for() {
         .matcher
         .expect("a matcher for the planner");
     assert!(planner.contains("planner"), "{planner}");
+    // Only the coder gets the conventions pushed: the planner and the reviewer
+    // read their own context. M1-22 verified that `.*coder` selects the
+    // plugin's agent by its namespaced type and no other agent.
+    let coder = hook_for("SubagentStart")
+        .matcher
+        .expect("a matcher for the coder");
+    assert_eq!(coder, ".*coder");
 }
 
 #[test]
@@ -295,6 +316,12 @@ fn stdin_for(event: &str, root: &Path) -> String {
         "SessionStart" => json!({
             "hook_event_name": "SessionStart",
             "source": "startup",
+            "cwd": root,
+        }),
+        "SubagentStart" => json!({
+            "hook_event_name": "SubagentStart",
+            "agent_id": "a1",
+            "agent_type": "invar:coder",
             "cwd": root,
         }),
         "SubagentStop" => json!({

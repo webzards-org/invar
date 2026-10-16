@@ -387,7 +387,12 @@ fn command_and_flags(span: &str) -> (Vec<String>, Vec<String>) {
 
 #[test]
 fn every_invar_command_and_flag_the_prompts_name_exists() {
-    let mut texts = vec![frontmatter("agents/planner.md").1, skill().1];
+    let mut texts = vec![
+        frontmatter("agents/planner.md").1,
+        frontmatter("agents/coder.md").1,
+        frontmatter("agents/reviewer.md").1,
+        skill().1,
+    ];
     texts
         .iter_mut()
         .for_each(|text| *text = text.replace("\\\"", "\""));
@@ -448,6 +453,143 @@ fn the_commands_the_two_prompts_split_between_them_are_the_ones_each_is_allowed(
     // `plan validate` and the full `context show` are the planner's.
     assert!(planner_commands.contains(&vec!["plan".to_owned(), "validate".to_owned()]));
     assert!(planner_commands.contains(&vec!["context".to_owned(), "show".to_owned()]));
+}
+
+// --- every agent ------------------------------------------------------------------------------
+
+/// Every agent definition under `plugin/agents/`.
+fn agents() -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(plugin_dir().join("agents"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".md"))
+        .map(|name| format!("agents/{name}"))
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn every_agents_model_is_one_the_agent_tool_can_also_name() {
+    // `claude plugin validate --strict` accepts any string here, even
+    // `banana`, and a model the account cannot use fails the agent with a 404
+    // at runtime (plugin/NOTES.md §17, D-17.4). Aliases only: they are what
+    // the main session can pass per call, and they follow the current model.
+    const ALLOWED: [&str; 5] = ["opus", "sonnet", "haiku", "fable", "inherit"];
+    let all = agents();
+    assert!(all.len() >= 3, "{all:?}");
+    for file in all {
+        let (meta, _) = frontmatter(&file);
+        if let Some(model) = meta.get("model") {
+            assert!(
+                ALLOWED.contains(&model.as_str()),
+                "{file}: `model: {model}` is not one of {ALLOWED:?}"
+            );
+        }
+    }
+}
+
+// --- the coder (M1-24) ----------------------------------------------------------------------
+
+#[test]
+fn the_coder_writes_code_and_starts_no_one_on_a_cheaper_model() {
+    let (meta, _) = frontmatter("agents/coder.md");
+    let tools: BTreeSet<&str> = meta["tools"].split(',').map(str::trim).collect();
+
+    assert_eq!(meta["name"], "coder");
+    for needed in ["Read", "Grep", "Glob", "Bash", "Write", "Edit"] {
+        assert!(tools.contains(needed), "the coder lacks {needed}");
+    }
+    for forbidden in ["Agent", "Task"] {
+        assert!(!tools.contains(forbidden), "the coder has {forbidden}");
+    }
+    // DESIGN §13d: a cheaper model is allowed for the agent whose every output
+    // is checked on disk.
+    assert_eq!(meta["model"], "sonnet");
+    for (key, value) in &meta {
+        assert!(!value.contains(": "), "`{key}` contains `: `");
+        assert!(!value.contains(" #"), "`{key}` contains ` #`");
+    }
+}
+
+#[test]
+fn the_coder_answers_in_one_of_two_shapes() {
+    let (meta, body) = frontmatter("agents/coder.md");
+
+    assert!(meta["description"].contains("ticket line and nothing else"));
+    assert!(
+        body.contains("```\nDONE\n<at most 8 lines"),
+        "the DONE shape"
+    );
+    assert!(
+        body.contains("```\nBLOCKED <the reason, in one line>\n"),
+        "the BLOCKED shape"
+    );
+}
+
+#[test]
+fn the_coder_begins_and_ends_with_plan_check_and_stops_on_a_refusal() {
+    let flat = frontmatter("agents/coder.md").1.replace('\n', " ");
+
+    assert!(flat.contains("Run `invar plan check <TICKET>` **before anything else**."));
+    assert!(flat.contains("answer `BLOCKED <what it said>` and stop. Write no code"));
+    assert!(flat.contains("Run `invar plan check <TICKET>` once more"));
+    // Never past a criterion by changing it.
+    assert!(flat.contains("**Soften a criterion to get past it**"));
+    assert!(flat.contains("Do not pick one of two contradicting criteria"));
+    assert!(flat.contains("**Edit the Plan**"));
+    // Outside Scope is a question for the developer, not a quiet widening.
+    assert!(flat.contains("**outside Scope**, stop and answer `BLOCKED`, naming"));
+}
+
+#[test]
+fn the_coder_is_never_pointed_at_business_rules_or_the_log() {
+    // DESIGN §5c: the coder meets business rules only as the Plan states them,
+    // and never the log. Every line that names a way to either is a
+    // prohibition; `context show` appears only with `--conventions`.
+    let (_, body) = frontmatter("agents/coder.md");
+    let mut prohibitions = 0;
+    for line in body.lines() {
+        let points_at_them = line.contains("BUSINESS_CONTEXT")
+            || line.contains(".invar/decisions")
+            || line.contains("invar decision log")
+            || (line.contains("invar context show") && !line.contains("--conventions"));
+        if points_at_them {
+            prohibitions += 1;
+            assert!(
+                line.contains("never") || line.contains("Never"),
+                "the coder is pointed at business rules or the log: {line}"
+            );
+        }
+    }
+    assert!(
+        prohibitions >= 2,
+        "the prohibitions themselves went missing"
+    );
+    // Its conventions are the `--conventions` output, which the hook pushes.
+    assert!(body.contains("=== invar: conventions ==="));
+    assert!(body.contains("`invar context show --conventions`"));
+}
+
+#[test]
+fn the_conventions_block_the_coder_looks_for_is_the_one_the_cli_prints() {
+    // The prompt tells the coder to look for a heading; if the CLI's heading
+    // changed, the coder would run the command again on every start.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("invar.yaml"), "").unwrap();
+    fs::write(
+        dir.path().join("AI_CONTEXT.md"),
+        "<!-- invar-context: v1 -->\nConvention.\n",
+    )
+    .unwrap();
+    let assert = Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["context", "show", "--conventions"])
+        .assert()
+        .success();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(out.starts_with("=== invar: conventions ===\n"), "{out}");
 }
 
 // --- the reviewer and /invar:review (M1-20) ------------------------------------------------
