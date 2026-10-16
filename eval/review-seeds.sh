@@ -15,9 +15,14 @@
 #                    (criterion 2 is not met).
 #   seed-scope       implements the Plan, and also changes InvoiceController,
 #                    which the Plan's Scope does not cover.
+#   seed-unnamed-invariant  (M1-26) implements SHOP-215, a second approved
+#                    Plan whose Implementation context names no invariant;
+#                    its export loads orders with withoutGlobalScopes(), so it
+#                    breaks the BelongsToTeam invariant the Plan never named.
 #
 # Then, in that directory: `git checkout <branch>`, open Claude Code, run
-# `/invar:review SHOP-214`, and compare the report with the expectations in §16.
+# `/invar:review SHOP-214` (`SHOP-215` on seed-unnamed-invariant), and compare
+# the report with the expectations in §16.
 # Uses `invar` from PATH, or the binary named by $INVAR.
 
 set -eu
@@ -163,6 +168,48 @@ awk '/^### 9.1 /{found=1} found && /^```markdown$/{inside=1; next} inside && /^`
   "$contract" > .invar/plans/SHOP-214-cancel-unpaid-order/spec.md
 "$INVAR" plan approve SHOP-214 >/dev/null
 
+# SHOP-215: a Plan whose Implementation context names no invariant — the planner
+# missed the team scope. Valid, and approved, like any other.
+w .invar/plans/SHOP-215-export-cancelled-orders/spec.md <<'EOF'
+---
+Ticket: SHOP-215
+Module: orders
+Status: draft
+Approved-by:
+Approved-at:
+Approved-checksum:
+---
+
+## Ticket
+SHOP-215 — As a support agent I want to download the cancelled orders as a CSV
+file, so I can follow up with the customers.
+
+## Intent
+A CSV export of cancelled orders, one row per order.
+
+## Scope
+Backend: `App\Actions\Orders\ExportCancelledOrders`, its controller
+`CancelledOrdersExportController`, and the route `GET /orders/cancelled/export` in
+`routes/web.php`. Out of scope: other statuses, scheduling, e-mail.
+
+## Open questions / answers
+None were needed.
+
+## Rejected alternatives
+None considered.
+
+## Acceptance criteria
+- Given three cancelled orders and one pending order, when I export, then the CSV
+  has three rows with the order number, status and date, and the pending order is
+  not in it.
+- Given no cancelled orders, when I export, then the CSV has only its header row.
+
+## Implementation context
+- AI_CONTEXT: the logic lives in `App\Actions\Orders\ExportCancelledOrders`; the
+  controller only calls the action and streams the result.
+EOF
+"$INVAR" plan approve SHOP-215 >/dev/null
+
 # --- seed-invariant ---------------------------------------------------------------
 git checkout --quiet -b seed-invariant
 w app/Actions/Orders/CancelOrder.php <<'EOF'
@@ -297,5 +344,51 @@ printf "Route::post('/orders/{order}/cancel', [\\\\App\\\\Http\\\\Controllers\\\
 add
 git -c user.name=seed -c user.email=seed@example.com commit --quiet -m "SHOP-214: cancel an order, and invoice paging"
 
+# --- seed-unnamed-invariant (M1-26) ------------------------------------------------
 git checkout --quiet main
-echo "review-seeds: ready in $target — branches seed-invariant and seed-scope"
+git checkout --quiet -b seed-unnamed-invariant
+w app/Actions/Orders/ExportCancelledOrders.php <<'EOF'
+<?php
+
+namespace App\Actions\Orders;
+
+use App\Models\Order;
+
+class ExportCancelledOrders
+{
+    public function handle(): string
+    {
+        $rows = ["number,status,date"];
+        $orders = Order::withoutGlobalScopes()
+            ->where('status', 'cancelled')
+            ->orderBy('created_at')
+            ->get();
+        foreach ($orders as $order) {
+            $rows[] = "{$order->number},{$order->status},{$order->created_at->toDateString()}";
+        }
+
+        return implode("\n", $rows)."\n";
+    }
+}
+EOF
+w app/Http/Controllers/CancelledOrdersExportController.php <<'EOF'
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Actions\Orders\ExportCancelledOrders;
+
+class CancelledOrdersExportController extends Controller
+{
+    public function __invoke(ExportCancelledOrders $export)
+    {
+        return response($export->handle(), 200, ['Content-Type' => 'text/csv']);
+    }
+}
+EOF
+printf "Route::get('/orders/cancelled/export', \\\\App\\\\Http\\\\Controllers\\\\CancelledOrdersExportController::class);\n" >> routes/web.php
+add
+git -c user.name=seed -c user.email=seed@example.com commit --quiet -m "SHOP-215: export cancelled orders"
+
+git checkout --quiet main
+echo "review-seeds: ready in $target — branches seed-invariant, seed-scope and seed-unnamed-invariant"
