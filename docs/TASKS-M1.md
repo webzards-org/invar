@@ -1118,7 +1118,9 @@ hooks today) is updated with it.
 - [ ] `plugin_prompts.rs` asserts every agent's `model` is `opus`, `sonnet`,
       `haiku`, `fable` or `inherit`: `validate --strict` accepts any string
       (M1-22, D-17.4)
-- [ ] Its `AI_CONTEXT.md` delivery (hook or prompt) is decided and recorded
+- [x] Its `AI_CONTEXT.md` delivery (hook or prompt) is decided and recorded —
+      a `SubagentStart` hook matched to `.*coder`, the matcher verified by a run
+      (`plugin/NOTES.md` §17)
 
 ---
 

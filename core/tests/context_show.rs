@@ -479,6 +479,63 @@ fn conventions_from_an_empty_marked_file_and_an_absent_one_are_identical() {
     assert_eq!(a.get_output().stderr, e.get_output().stderr);
 }
 
+#[test]
+fn conventions_as_a_hook_are_the_same_text_as_subagent_start_additional_context() {
+    let project = Project::new("");
+    project.context("AI_CONTEXT.md", "Convention: thin controllers.\n");
+    project.context("BUSINESS_CONTEXT.md", "BUSINESS-ONLY-TEXT.\n");
+    let plain = stdout_of(&project.show(&["--conventions"]).success());
+
+    let hooked = stdout_of(
+        &project
+            .show(&["--conventions", "--hook"])
+            .success()
+            .stderr(""),
+    );
+
+    assert_eq!(hooked.lines().count(), 1, "one JSON line: {hooked}");
+    let json: serde_json::Value = serde_json::from_str(&hooked).unwrap();
+    assert_eq!(json["hookSpecificOutput"]["hookEventName"], "SubagentStart");
+    assert_eq!(
+        json["hookSpecificOutput"]["additionalContext"].as_str(),
+        Some(plain.as_str())
+    );
+    assert!(!hooked.contains("BUSINESS-ONLY-TEXT"), "{hooked}");
+}
+
+#[test]
+fn conventions_as_a_hook_print_nothing_when_there_are_none() {
+    let project = Project::new("");
+    project.context("AI_CONTEXT.md", "# AI_CONTEXT.md\n\n## Layers\n");
+    project.context("BUSINESS_CONTEXT.md", "Invariant.\n");
+
+    project
+        .show(&["--conventions", "--hook"])
+        .success()
+        .stdout("")
+        .stderr("");
+}
+
+#[test]
+fn hook_without_conventions_is_a_usage_error() {
+    let project = Project::new("");
+
+    // Alone it is missing `--conventions`; with `--binding` it is refused as a
+    // conflict. Either way clap names `--hook`, and nothing is printed.
+    for args in [&["--hook"][..], &["--binding", "--hook"]] {
+        project
+            .show(args)
+            .failure()
+            .code(1)
+            .stdout("")
+            .stderr(contains("--hook"));
+    }
+    project
+        .show(&["--hook"])
+        .failure()
+        .stderr(contains("--conventions"));
+}
+
 // --- arguments ---------------------------------------------------------------------------------
 
 #[test]

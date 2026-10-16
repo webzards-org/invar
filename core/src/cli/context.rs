@@ -25,7 +25,9 @@ pub enum Command {
     ///
     /// `--conventions` prints `AI_CONTEXT.md` and nothing else: what the coder
     /// reads. Never `BUSINESS_CONTEXT.md` and never the log — the coder meets
-    /// business rules only as the approved Plan states them (§5c).
+    /// business rules only as the approved Plan states them (§5c). With
+    /// `--hook` it is printed as the JSON a `SubagentStart` hook returns, which
+    /// is how the plugin hands it to the coder.
     ///
     /// Both are refused above `context.binding_limit` in `invar.yaml`, because
     /// Claude Code silently moves hook output above 10,000 characters into a
@@ -49,6 +51,36 @@ pub struct ShowArgs {
     /// `BUSINESS_CONTEXT.md` or the decision log. What the coder reads.
     #[arg(long, conflicts_with = "binding")]
     pub conventions: bool,
+
+    /// With `--conventions`: print them as a `SubagentStart` hook's
+    /// `additionalContext`, the one channel that reaches a sub-agent
+    /// (`plugin/NOTES.md` §17). Prints nothing when there are none.
+    //
+    // Both rules are spelled out: clap does not check `requires` once the
+    // argument it requires is excluded by a conflict, so `--binding --hook`
+    // passed as plain `--binding` with `requires` alone.
+    #[arg(long, requires = "conventions", conflicts_with = "binding")]
+    pub hook: bool,
+}
+
+/// `text` as a `SubagentStart` hook's output: one JSON line carrying it as
+/// `additionalContext`, or nothing at all when there is nothing to deliver —
+/// so that absent and empty conventions stay indistinguishable (§5).
+///
+/// The JSON form is the one the M1-22 spike saw reach a sub-agent; the hook's
+/// payload on stdin is not read, because the plugin's matcher already chose
+/// the agent.
+pub fn subagent_start(text: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    let output = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "SubagentStart",
+            "additionalContext": text,
+        }
+    });
+    format!("{output}\n")
 }
 
 pub fn run(command: Command) -> Result<()> {
@@ -79,10 +111,12 @@ fn show(args: ShowArgs) -> Result<()> {
     }
 
     if let Some(kind) = kind {
-        print!(
-            "{}",
-            binding.render_as_within(kind, config.context.binding_limit)?
-        );
+        let text = binding.render_as_within(kind, config.context.binding_limit)?;
+        if args.hook {
+            print!("{}", subagent_start(&text));
+        } else {
+            print!("{text}");
+        }
         return Ok(());
     }
 
