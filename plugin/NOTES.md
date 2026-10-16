@@ -1027,14 +1027,20 @@ before `done` — which removes the Plan the review needs.
 ### Seeded branches
 
 `eval/review-seeds.sh <empty-dir>` (outside `plugin/`, which holds no scripts)
-builds a small Laravel-shaped repository with example 9.1's Plan approved and two
-branches. In it: `git checkout <branch>`, start Claude Code, run
-`/invar:review SHOP-214`.
+builds a small Laravel-shaped repository with two approved Plans — example 9.1's
+`SHOP-214`, and `SHOP-215`, whose Implementation context names no invariant —
+and three branches. In it: `git checkout <branch>`, start Claude Code, run
+`/invar:review <ticket>`.
 
-| Branch | The review must report |
-|---|---|
-| `seed-invariant` | criterion 2 (a paid order is refused with 403) `not met`, with the `file:line` of `CancelOrder::handle`; criterion 3 (another team's order is a 404) `not met`; under **Invariants**, the `BelongsToTeam` scope broken by `withoutGlobalScopes()` at `app/Actions/Orders/CancelOrder.php`; nothing outside Scope |
-| `seed-scope` | criteria 1–4 `met` or `unclear` (no tests are seeded, so `unclear` is honest for some); no invariant; under **Changes outside Scope**, `app/Http/Controllers/InvoiceController.php` |
+Since M1-26 the report has two invariant headings: **named** ("Invariants the Plan
+names that the change appears to break") and **unnamed** ("Invariants the Plan does
+not name that the change appears to break").
+
+| Branch | Ticket | The review must report |
+|---|---|---|
+| `seed-invariant` | `SHOP-214` | criterion 2 (a paid order is refused with 403) `not met`, with the `file:line` of `CancelOrder::handle`; criterion 3 (another team's order is a 404) `not met`; under **named**, the `BelongsToTeam` scope broken by `withoutGlobalScopes()` at `app/Actions/Orders/CancelOrder.php`; **unnamed** `None found.`; nothing outside Scope |
+| `seed-scope` | `SHOP-214` | criteria 1–4 `met` or `unclear` (no tests are seeded, so `unclear` is honest for some); both invariant sections `None found.`; under **Changes outside Scope**, `app/Http/Controllers/InvoiceController.php` |
+| `seed-unnamed-invariant` (M1-26) | `SHOP-215` | criteria 1–2 `met` or `unclear`; **named** `None found.` — the Plan names no invariant; under **unnamed**, the `BelongsToTeam` scope broken by `withoutGlobalScopes()` at `app/Actions/Orders/ExportCancelledOrders.php`; nothing outside Scope |
 
 A report that adds style remarks, a summary or suggestions fails the shape, however
 correct its verdicts.
