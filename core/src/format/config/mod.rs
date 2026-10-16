@@ -1,6 +1,6 @@
 //! `invar.yaml` — the project config (§6).
 //!
-//! Implements `contracts/formats/invar-yaml.md` v1.0.0. The contract is the
+//! Implements `contracts/formats/invar-yaml.md` v2.0.0. The contract is the
 //! authority; section numbers below (`§3.4`, `D-2`) point into it.
 //!
 //! Light mode reads four keys: `scenarios`, `review.offer`,
@@ -68,10 +68,17 @@ pub struct Config {
 }
 
 /// The `review` section (§3.2).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Review {
     /// `review.offer` — whether the protocol skill offers `/invar:review`.
+    /// `true` unless the project says otherwise, since 2.0.0 (D-8).
     pub offer: bool,
+}
+
+impl Default for Review {
+    fn default() -> Self {
+        Self { offer: true }
+    }
 }
 
 /// The `git` section (§3.3).
@@ -316,7 +323,7 @@ pub fn parse(text: &str, path: &Path) -> Result<Loaded, ConfigError> {
         config: Config {
             scenarios: raw.scenarios.unwrap_or(false),
             review: Review {
-                offer: review.offer.unwrap_or(false),
+                offer: review.offer.unwrap_or(Review::default().offer),
             },
             git: Git {
                 base_branch: git.base_branch,
