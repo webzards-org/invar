@@ -254,12 +254,14 @@ fn the_skill_has_every_part_of_the_cycle() {
     let (_, body) = skill();
 
     for heading in [
+        "## Where the session runs",
         "## Is this a job for the cycle?",
         "## Phase 1 — plan",
         "## The developer approves",
-        "## Phase 2 — implement",
-        "## When the Plan cannot be implemented",
+        "## Phase 2 — the coder implements",
+        "## When the coder answers BLOCKED",
         "## Closing",
+        "## Models",
         "## The decision log is not yours",
         "## Never",
     ] {
@@ -281,22 +283,69 @@ fn the_skill_tells_the_agent_to_skip_the_cycle_for_trivial_work_and_to_say_so() 
 }
 
 #[test]
-fn the_skill_states_the_rules_of_phase_two() {
+fn the_skill_runs_the_cycle_as_a_dispatcher() {
     let flat = skill().1.replace('\n', " ");
 
-    // Phase 2 begins with the check, and a refusal means no code.
+    // The main session dispatches; the coder implements (M1-25).
+    assert!(flat.contains("in the cycle you are the **dispatcher**"));
+    assert!(flat.contains("**You do not implement an approved Plan yourself**"));
+    // The gate, then the coder with the ticket line only.
     assert!(flat.contains("**Phase 2 begins with `invar plan check <TICKET>`.**"));
-    assert!(flat.contains("do not write code"));
-    // An approved Plan is never edited.
-    assert!(flat.contains("**Never edit the approved Plan**"));
-    // An impossible Plan goes back, with a `failed` entry — not "fixed".
+    assert!(flat.contains("**start the coder** (`coder`; `invar:coder` if namespaced)"));
+    assert!(flat.contains("with the ticket line and nothing else"));
+    assert!(flat.contains("`Ticket: SHOP-214`"));
+    // Both answers are handled.
+    assert!(flat.contains("**`DONE`**"));
+    assert!(flat.contains("**`BLOCKED <reason>`**"));
+    // An impossible Plan goes back, with a `failed` entry — not "fixed" — and
+    // the entry is the developer's call (decision-entry.md D-6).
     assert!(flat.contains("--type failed"));
     assert!(flat.contains("returns the Plan to `draft`"));
-    assert!(flat.contains("Do not weaken a criterion"));
+    assert!(flat.contains("when the developer agrees, record it"));
+    assert!(flat.contains("do not weaken a criterion"));
+    assert!(flat.contains("**Never edit the approved Plan**"));
     // The cycle closes with `done`.
     assert!(flat.contains("`invar done <TICKET> -m"));
     // The developer's step is theirs.
     assert!(flat.contains("**Stop and wait.** Never run `invar plan approve` yourself"));
+    // Code of its own only when the cycle is skipped.
+    assert!(flat.contains("Then you write the change yourself."));
+}
+
+#[test]
+fn the_skill_never_tells_the_main_session_to_implement_an_approved_plan() {
+    // What the M1-18 skill said, and the dispatcher must not.
+    let flat = skill().1.replace('\n', " ");
+    for gone in [
+        "Implement what the Plan says",
+        "write the tests that check each one",
+        "you carry Phase 2",
+        "your job in Phase 2 is to implement it",
+    ] {
+        assert!(!flat.contains(gone), "the skill still says: {gone:?}");
+    }
+}
+
+#[test]
+fn the_skill_chooses_models_aloud_and_handles_an_unavailable_one() {
+    let flat = skill().1.replace('\n', " ");
+
+    // The values the `Agent` tool accepts per call (M1-22).
+    assert!(flat.contains("`sonnet`, `opus`, `haiku` or `fable`"));
+    assert!(flat.contains("**A planner on anything but its default is said aloud**"));
+    // No fallback exists, so none is invented.
+    assert!(flat.contains("`model_not_found`"));
+    assert!(flat.contains("offer to run the agent again with `model: sonnet`"));
+    assert!(flat.contains("switch models silently."));
+}
+
+#[test]
+fn the_skill_says_to_start_at_the_project_root() {
+    // Started in a subdirectory, `.claude/settings.json` and its deny rule are
+    // not loaded (plugin/NOTES.md §17, D-17.3).
+    let flat = skill().1.replace('\n', " ");
+    assert!(flat.contains("Claude Code must be started **at the project root**"));
+    assert!(flat.contains("does not load the project's `.claude/settings.json`"));
 }
 
 #[test]
@@ -487,6 +536,14 @@ fn every_agents_model_is_one_the_agent_tool_can_also_name() {
             );
         }
     }
+}
+
+#[test]
+fn the_planner_runs_on_a_strong_model_by_default() {
+    // DESIGN §13d: the developer approves the planner's work, so a weak Plan
+    // weakens the gate itself (M1-25; NOTES §14, lever 3).
+    let (meta, _) = frontmatter("agents/planner.md");
+    assert_eq!(meta["model"], "opus");
 }
 
 // --- the coder (M1-24) ----------------------------------------------------------------------
@@ -709,7 +766,8 @@ fn review_is_the_developers_and_passes_the_ticket_alone() {
 fn the_protocol_skill_offers_the_review_before_done_and_never_runs_it() {
     let flat = skill().1.replace('\n', " ");
 
-    assert!(flat.contains("`review.offer: true`"));
+    // On by default since invar-yaml.md 2.0.0 (D-8); off only when said.
+    assert!(flat.contains("unless `invar.yaml` sets `review.offer: false`"));
     assert!(flat.contains("Run `/invar:review` before closing?"));
     assert!(flat.contains("do not start the reviewer yourself"));
     // Offered before `done`, which removes the Plan the review needs.

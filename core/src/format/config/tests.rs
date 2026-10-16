@@ -122,7 +122,9 @@ fn defaults_are_the_documented_values() {
     // defaults has to change this test and the contract together.
     let config = read("").config;
     assert!(!config.scenarios);
-    assert!(!config.review.offer);
+    // Offered by default since 2.0.0 (D-8): the review is the safety net for
+    // an invariant the planner missed, now that the coder does not read them.
+    assert!(config.review.offer);
     assert_eq!(config.git.base_branch, None);
     assert_eq!(config.context.binding_limit, 9000);
     assert_eq!(DEFAULT_BINDING_LIMIT, 9000);
@@ -152,6 +154,8 @@ fn an_empty_value_means_absent() {
 fn each_key_is_read_on_its_own() {
     assert!(read("scenarios: true\n").config.scenarios);
     assert!(read("review:\n  offer: true\n").config.review.offer);
+    // The one way to turn the offer off.
+    assert!(!read("review:\n  offer: false\n").config.review.offer);
     assert_eq!(
         read("git:\n  base_branch: origin/main\n")
             .config

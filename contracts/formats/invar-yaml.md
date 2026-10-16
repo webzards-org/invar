@@ -1,6 +1,6 @@
 # Contract: `invar.yaml`
 
-**Version:** 1.0.0
+**Version:** 2.0.0 — `review.offer` defaults to `true`; see §11 for what changed and why
 **Status:** stable
 **Implements:** §6 (Config file), §12 (`--merged` base branch), §14.3; light
 mode L-2 and L-7 (`docs/TASKS-M1.md`)
@@ -27,7 +27,7 @@ round trip.
 
 §6 of the design document describes the full key set the finished system will
 read. Version 1.0.0 of this contract covers **light mode** (M1), which reads
-four keys. The rest of §6 is listed in §5 below so that a config written for a
+four keys (unchanged in 2.0.0). The rest of §6 is listed in §5 below so that a config written for a
 later milestone is read by this one without failing and without noise.
 
 ## 2. Encoding and document shape
@@ -41,12 +41,12 @@ later milestone is read by this one without failing and without noise.
 - Comments (`# …`) are permitted anywhere YAML permits them.
 - A key appearing twice in the same mapping is an error.
 
-## 3. Keys read in version 1.0.0
+## 3. Keys read in light mode
 
 | Key | Type | Default | Meaning in M1 |
 |---|---|---|---|
 | `scenarios` | bool | `false` | Plan shape (L-2). `false` is light mode. `true` is reserved for the milestone that introduces `.feature` files; see §3.1 |
-| `review.offer` | bool | `false` | Whether the protocol skill offers `/invar:review` at the end of Phase 2 (L-7) |
+| `review.offer` | bool | `true` (since 2.0.0; `false` before) | Whether the protocol skill offers `/invar:review` before `invar done` (L-7, D-8) |
 | `git.base_branch` | string | detected, see §3.3 | Base branch for the review diff and for `clean-spec --merged` |
 | `context.binding_limit` | integer | `9000` | Character ceiling for `invar context show --binding` (M1-14) |
 
@@ -76,10 +76,11 @@ scenarios existed — the compatibility rule of §14.3 applied forward.
 
 ### 3.2 `review.offer`
 
-Read by the protocol skill, not by a CLI command. `true` makes the skill offer
-`/invar:review` once Phase 2 is done; `false` makes it stay silent about the
-review. The review itself is advisory and never blocks `invar done` (L-7), so
-this key changes what the developer is offered, never what is enforced.
+Read by the protocol skill, not by a CLI command. `true` — the default — makes
+the skill offer `/invar:review` once, after the coder answers `DONE` and before
+`invar done`; `false` makes it stay silent about the review. The review itself
+is advisory and never blocks `invar done` (L-7), so this key changes what the
+developer is offered, never what is enforced. Why the default is `true` is D-8.
 
 ### 3.3 `git.base_branch`
 
@@ -245,6 +246,20 @@ libraries let the expected Rust type decide, so an unquoted `1.10` stays
 `"1.10"`; others, including Python's, produce the number `1.1`. Requiring
 quotes is what makes the value mean the same thing to every reader.
 
+**D-8 — `review.offer` defaults to `true`** (2.0.0). Since DESIGN v3.1 the coder
+reads `AI_CONTEXT.md` and nothing of `BUSINESS_CONTEXT.md`: business rules reach
+it only as the approved Plan states them (§5c). An invariant the planner did
+not carry into the Plan is then invisible to the coder, and the review — which
+checks the branch against the business rules — is the one place that can catch
+it before the PR (§13c). A safety net that has to be switched on is one most
+teams never switch on. The review stays advisory: the default changes what is
+*offered*, never what *blocks* (L-7), and a team that does not want the offer
+writes `offer: false`.
+
+This is the one place the contract's own compatibility rule — *an absent key
+means the previous behavior* — is broken on purpose, which is why the version is
+a major one (§11).
+
 ## 9. Open questions
 
 **OQ-1 — JSON Schema.** `contracts/README.md` lists a JSON Schema for
@@ -285,8 +300,8 @@ and binding context may be at most 8,000 characters. No warnings.
 # Nothing set yet: every key takes its default.
 ```
 
-Reads as: `scenarios: false`, `review.offer: false`, base branch detected,
-`binding_limit: 9000`.
+Reads as: `scenarios: false`, `review.offer: true` (D-8), base branch
+detected, `binding_limit: 9000`.
 
 ### 10.3 Valid — written for a later milestone
 
@@ -331,7 +346,7 @@ review:
   ofer: true
 ```
 
-Reads as the defaults — light mode, no review offered — with **two warnings**,
+Reads as the defaults — light mode, the review offered — with **two warnings**,
 for `senarios` and `review.ofer`. This is why unknown keys warn: the file reads
 without error, and without the warnings the team would believe it had switched
 modes.
@@ -359,3 +374,22 @@ context:
 of the agent's context (§3.4, D-5). A team that raised the limit to fit a
 growing `BUSINESS_CONTEXT.md` would stop delivering its invariants and not
 notice. The fix is to trim or split the context files, not to raise the limit.
+
+## 11. Version history
+
+**2.0.0 — `review.offer` defaults to `true` (M1-25).**
+
+- §3: the default of `review.offer` is `true`; §3.2 and examples 10.2 and 10.4
+  say so. New D-8.
+
+**Why:** the coder no longer reads `BUSINESS_CONTEXT.md` (DESIGN §5c, M1-24), so
+the review is the safety net for an invariant the planner missed (§13c), and a
+net that is off by default is not one.
+
+**Compatibility:** no file that was valid becomes invalid, and no command's
+behavior changes. A project that never set `review.offer` is now offered the
+review before `invar done`, where it was not before; one that wants the old
+behavior writes `offer: false`. That change in what an absent key means is why
+this is a major version.
+
+**1.0.0** — initial version (M1-3).

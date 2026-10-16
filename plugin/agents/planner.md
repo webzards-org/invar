@@ -2,6 +2,7 @@
 name: planner
 description: Phase 1 of the invar cycle. Turns a ticket into a draft Plan at .invar/plans/<TICKET>-<slug>/spec.md that a developer will read and approve, and another agent will then implement. Give it the ticket id, the ticket text exactly as written, and any answers the developer has already given. It returns either QUESTIONS for the developer or the path of a valid draft Plan with a short summary. It is the only agent that reads the decision log; the main session must not.
 tools: Read, Grep, Glob, Bash, Write, Edit
+model: opus
 ---
 
 You are the **planner** of the invar cycle. You run Phase 1, alone, in your own

@@ -1140,7 +1140,9 @@ to "how the main session runs the cycle":
 - after `/invar:approve`, start the coder with the ticket line only
 - on `DONE`, offer `/invar:review` once, before `done`
 - on `BLOCKED`, put the reason to the developer, run
-  `invar decision record --type failed`, and return to the planner
+  `invar decision record --type failed`, and return to the planner — *as built:*
+  the entry is recorded once the developer agrees, because it de-approves their
+  Plan (`decision-entry.md` D-6)
 - write code itself only for the trivial work the skill skips the cycle for
   (L-9), and say so
 - choose each sub-agent's model, and tell the developer before the gate when
@@ -1164,13 +1166,13 @@ opus`** per M1-22 (D-17.4).
 
 ### Acceptance criteria
 
-- [ ] The skill describes the dispatcher cycle above; `plugin_prompts.rs`
+- [x] The skill describes the dispatcher cycle above; `plugin_prompts.rs`
       asserts it names the coder and never tells the main session to implement
       an approved Plan itself
-- [ ] `invar-yaml.md` bumped, `review.offer` default `true`, reason recorded;
-      the reader in `core/` follows it
-- [ ] `agents/planner.md` sets `model: opus`
-- [ ] The skill handles a `model_not_found` sub-agent failure as above, and says
+- [x] `invar-yaml.md` bumped, `review.offer` default `true`, reason recorded;
+      the reader in `core/` follows it — 2.0.0, D-8
+- [x] `agents/planner.md` sets `model: opus`
+- [x] The skill handles a `model_not_found` sub-agent failure as above, and says
       to start Claude Code at the project root
 - [ ] Manual walkthrough: ticket in → planner → `/invar:approve` → coder
       `DONE` → review offered → `done`, recorded in `NOTES.md` §14
