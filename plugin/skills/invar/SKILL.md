@@ -1,18 +1,30 @@
 ---
 name: invar
-description: The invar cycle for changing code in a project that has an invar.yaml. A ticket is planned by the planner agent, the developer approves the Plan, the code is implemented against the approved Plan, and the cycle closes with invar done. Use it when a ticket or request touches business logic, behavior users can observe, permissions, money or data, or when the developer mentions a ticket, a Plan, acceptance criteria or invar. For trivial work such as a typo or a copy change, skip it and say so.
+description: The invar cycle for changing code in a project that has an invar.yaml. A ticket is planned by the planner agent, the developer approves the Plan, the coder agent implements it, and the cycle closes with invar done. Use it when a ticket or request touches business logic, behavior users can observe, permissions, money or data, or when the developer mentions a ticket, a Plan, acceptance criteria or invar. For trivial work such as a typo or a copy change, skip it and say so.
 ---
 
 # The invar cycle
 
 The project holds the specification fixed while code is written against it. A
 **Plan** — written by the planner, read and approved by the developer — is the
-one fixed point: your job in Phase 2 is to implement it, not to improve it. After
-approval a checksum makes any change to the Plan visible, so the only way to a
-different Plan is back through the developer.
+one fixed point. After approval a checksum makes any change to it visible, so the
+only way to a different Plan is back through the developer.
 
-You are the **main session**. The planner does Phase 1 in its own context; you
-carry Phase 2.
+You are the **main session**, and in the cycle you are the **dispatcher**. You talk
+to the developer, start the planner and relay its questions, wait at the gate,
+start the coder, offer the review, and close the cycle. **You do not implement an
+approved Plan yourself**: the coder does, in its own context, starting from the
+Plan and nothing you said. The only code you write is the trivial work this skill
+skips the cycle for.
+
+## Where the session runs
+
+Claude Code must be started **at the project root** — the directory that holds
+`invar.yaml`. Started in a subdirectory, it does not load the project's
+`.claude/settings.json`, and with it the rule that keeps agents out of the decision
+log. If `invar.yaml` is not in the directory the session started in, tell the
+developer once, before the first cycle: *"Start Claude Code in the directory with
+invar.yaml; from here the project's settings are not loaded."*
 
 ## Is this a job for the cycle?
 
@@ -32,8 +44,9 @@ ask in one line — *"Plan this, or just do it?"* — and do what the developer 
 
 **When you skip, say so, before you start**, in one line:
 *"Skipping the invar cycle: this is a copy change with no behavior."* The
-developer must be able to tell a decision from an oversight. Skipping does not
-suspend the binding context in your session: its rules still bind.
+developer must be able to tell a decision from an oversight. Then you write the
+change yourself. Skipping does not suspend the binding context in your session:
+its rules still bind.
 
 ## Phase 1 — plan
 
@@ -52,91 +65,113 @@ suspend the binding context in your session: its rules still bind.
 4. Tell the developer the Plan's path and the planner's summary, and ask them to
    read the Plan, **the acceptance criteria above all**: they are what the code
    will be held to. If the summary says `NOT VALID YET`, or names an assumption to
-   check, say so plainly.
+   check, say so plainly. If the planner ran on a model other than its default,
+   say which, here, before the gate (see Models).
 5. If the developer wants changes, call the planner again with the ticket and the
    changes they ask for; it revises the draft. **You do not edit the Plan.**
 
 ## The developer approves
 
 Approval is the developer's one manual step, and it is theirs alone: they run
-`invar plan approve <TICKET>` in their own terminal (or `/invar:approve`, where the
-plugin provides it). It records who read the Plan and when.
+`/invar:approve` (or `invar plan approve <TICKET>` in their own terminal). It
+records who read the Plan and when.
 
 **Stop and wait.** Never run `invar plan approve` yourself: a hook denies it, and you
 must not look for another way to record an approval. When the developer tells you
-the Plan is approved, go on — and verify it, as the next section says.
+the Plan is approved, go on.
 
-## Phase 2 — implement
+## Phase 2 — the coder implements
 
-**Phase 2 begins with `invar plan check <TICKET>`.** It passes only a Plan that is
-approved and unchanged since. If it refuses — the Plan is still a draft, or changed
-after it was approved, or no one recorded the approval — **do not write code.** Tell
-the developer what it said, in its words, and wait. Do not work around it.
+**Phase 2 begins with `invar plan check <TICKET>`.** Run it before you start the
+coder: it passes only a Plan that is approved and unchanged since. If it refuses,
+start nothing; tell the developer what it said, in its words, and wait.
 
-Once it passes:
+Once it passes, **start the coder** (`coder`; `invar:coder` if namespaced) with the
+ticket line and nothing else:
 
-1. **Read the Plan** (`.invar/plans/<TICKET>-<slug>/spec.md`): Intent, Scope,
-   Acceptance criteria, Implementation context. Implementation context is the
-   distillate of the rules that apply to this change; the binding context is already
-   in your session.
-2. **Implement what the Plan says, inside its Scope.** The acceptance criteria are
-   the definition of done: write the tests that check each one, in the way the
-   project's context says it writes tests, and run the project's own tooling the way
-   the team runs it. `invar` runs none of it.
-3. **If a rule in the Plan contradicts a binding invariant, stop** and tell the
-   developer. Do not pick one.
-4. **If the work needs something outside Scope, stop and ask.** Do not widen the
-   change quietly; a different change is a different cycle.
+`Ticket: SHOP-214`
+
+Not your reading of the ticket, not what the developer said before the gate, not
+hints about the code. The coder works from the approved Plan; anything you add is a
+second specification nobody approved. It runs the check again itself, reads the
+Plan and the project's conventions, implements inside the Scope, and runs the
+project's own checks.
+
+It answers with one of two things.
+
+- **`DONE`** and a short summary — tell the developer what it says, as it says it,
+  and go to Closing.
+- **`BLOCKED <reason>`** — see the next section.
+
+If the developer wants something changed in the coder's work, start the coder again
+with the ticket line and the developer's request, verbatim. You still do not edit
+the code yourself.
+
+## When the coder answers BLOCKED
+
+`BLOCKED` means the approved Plan cannot be implemented as approved: it is a draft or
+changed, it contradicts itself or an invariant, it depends on something that does
+not exist, or it is silent on something the code cannot proceed without. **Do not
+work around it**: do not implement it yourself, do not weaken a criterion, do not
+edit the Plan, and do not start the coder again with your own interpretation.
+
+1. Put the coder's reason to the developer, as it gave it.
+2. Propose the decision entry, and when the developer agrees, record it:
+
+   `invar decision record --ticket <TICKET> --type failed -m "Plan required X; impossible because Y"`
+
+   That entry returns the Plan to `draft` and clears its approval, with the text
+   untouched. It is the developer's call because it de-approves their Plan.
+3. Go back to **Phase 1**: call the planner with the ticket and the failure. It
+   revises the draft; the developer approves it again.
+
+"Plan required X; impossible because Y" is one of the most useful entries the log
+will hold, so write it precisely. If the developer would rather change the approved
+Plan themselves, they edit it and approve it again with `--reapprove`.
 
 **Never edit the approved Plan** — with any tool, however small the edit. A hook
 refuses edits made through `Write` and `Edit`; an edit made through a shell is caught
-later by `invar plan check` and `invar done`, and is no more allowed. If you think
-the Plan is wrong, that is not yours to fix; see the next section.
-
-## When the Plan cannot be implemented
-
-Distinguish two situations.
-
-- **The code fails** a criterion or a test: that is ordinary work. Fix the code.
-- **The Plan itself cannot be satisfied**: it contradicts itself or an invariant, it
-  depends on something that does not exist, a premise in it is false. This is not
-  yours to repair.
-
-For the second: **stop.** Do not weaken a criterion, drop one, or reinterpret it so
-the code passes, and do not edit the Plan. Record what happened and send it back:
-
-`invar decision record --ticket <TICKET> --type failed -m "Plan required X; impossible because Y"`
-
-That entry returns the Plan to `draft` and clears its approval, with the text
-untouched. Tell the developer, and go back to **Phase 1**: call the planner with the
-ticket and the failure. It revises the draft; the developer approves it again. "Plan
-required X; impossible because Y" is one of the most useful entries the log will
-hold, so write it precisely.
-
-If the **developer** wants the approved Plan changed, they edit it themselves and
-approve it again with `invar plan approve <TICKET> --reapprove`, or ask you to send
-it back to Phase 1 as above.
+by `invar plan check` and `invar done`, and is no more allowed.
 
 ## Closing
 
-When every acceptance criterion is met and the project's own checks pass:
+After `DONE`:
 
-**Offer the review, if the project asks for it.** If `invar.yaml` sets
-`review.offer: true`, ask the developer once, before closing: *"Run `/invar:review`
-before closing? It checks the branch against the approved Plan."* The review needs
-the Plan, and `done` removes it, so it comes first. It reads only what is committed
-on the branch: the change has to be committed before it runs, the way this project
+**Offer the review**, unless `invar.yaml` sets `review.offer: false` (it is on by
+default). Ask the developer once: *"Run `/invar:review` before closing? It checks
+the branch against the approved Plan and every business rule."* The review needs the
+Plan, and `done` removes it, so it comes first. It reads only what is committed on
+the branch, so the change has to be committed before it runs, the way this project
 commits. The developer runs it, not you: do not start the reviewer yourself. It is
 advisory; if the developer declines, go on.
 
-Then:
+Then, when the developer is ready to close:
 
 `invar done <TICKET> -m "<what was actually built, including any deviation from the Plan>"`
 
-Say honestly what came out; the message becomes the permanent decision entry. `done`
-checks the Plan once more, renders the PR description to `.invar/out/<TICKET>-pr.md`,
-records the entry and removes the Plan. Tell the developer the path of the PR
-description, and to commit everything into the same PR.
+Say honestly what came out, from the coder's summary and the review; the message
+becomes the permanent decision entry. `done` checks the Plan once more, renders the
+PR description to `.invar/out/<TICKET>-pr.md`, records the entry and removes the
+Plan. Tell the developer the path of the PR description, and to commit everything
+into the same PR.
+
+## Models
+
+Each agent has a default model: the planner a strong one (`opus`) — the developer
+approves its work, so a weak Plan weakens the gate itself — the coder a cheaper one
+(`sonnet`), because everything it produces is checked on disk. You may choose
+another for one call with the `Agent` tool's `model` parameter: `sonnet`, `opus`,
+`haiku` or `fable`. It overrides the agent's own.
+
+- A stronger coder for a Plan that is large or touches money, permissions or
+  tenancy is a reasonable choice; say so when you make it.
+- **A planner on anything but its default is said aloud**, before the gate: *"The
+  Plan was written by sonnet, not by the planner's default."* The developer is about
+  to approve that model's work.
+- **If an agent fails because its model is unavailable** — an error naming
+  `model_not_found`, or HTTP 404 for the model — there is no fallback. Put the error
+  to the developer and offer to run the agent again with `model: sonnet`. Never
+  switch models silently.
 
 ## The decision log is not yours
 
@@ -149,10 +184,12 @@ implementing it.
 
 ## Never
 
+- implement an approved Plan yourself, or tell the coder more than the ticket line;
 - run `invar plan approve`;
-- edit an approved Plan, or work from a draft;
-- write code before `invar plan check` passes;
+- edit an approved Plan, or start the coder on a draft;
 - answer the planner's questions for the developer;
+- record a `failed` entry without the developer's agreement;
+- switch an agent's model without saying so;
 - read the decision log;
 - skip the cycle without saying so.
 
@@ -160,10 +197,10 @@ implementing it.
 
 | | |
 |---|---|
-| `invar plan check <TICKET>` | Phase 2 begins here; refuses draft, changed and unrecorded approvals |
+| `invar plan check <TICKET>` | before you start the coder; refuses draft, changed and unrecorded approvals |
 | `invar plan validate <TICKET>` | form of a draft Plan (the planner runs it) |
-| `invar plan approve <TICKET>` | the developer's, from their own terminal |
-| `invar decision record --ticket <TICKET> --type failed -m "..."` | the Plan cannot be implemented |
+| `/invar:approve` | the developer's; `invar plan approve <TICKET>` from their own terminal |
+| `invar decision record --ticket <TICKET> --type failed -m "..."` | after `BLOCKED`, with the developer's agreement |
+| `/invar:review` | the developer's, before `done`, unless `review.offer: false` |
 | `invar done <TICKET> -m "..."` | close the cycle |
-| `/invar:review` | the developer's, before `done`, when `review.offer: true` |
 | `invar context show --binding` | the binding context, which you already have |
