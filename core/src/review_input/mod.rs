@@ -15,7 +15,9 @@
 //!    how the Plan came about, and a reviewer reading them starts to weigh the
 //!    planner's reasons instead of the result;
 //! 2. the **binding context**, `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`, as
-//!    `context show --binding` prints it — the invariants a change can break;
+//!    `context show --binding` prints it — the invariants a change can break,
+//!    all of them: the reviewer checks every one, including those the Plan
+//!    does not name (M1-26);
 //! 3. the **diff** of the branch against the base branch (`git::branch_diff`).
 //!    Above [`DIFF_BUDGET`] characters the patch is left out and the changed
 //!    files are listed with their line counts instead; the reviewer reads what
@@ -130,9 +132,10 @@ pub fn render(plan: &Plan, binding: &Binding, base: &str, diff: &Diff) -> String
     let _ = writeln!(
         out,
         "The Plan below was approved by {} on {} and has not changed since. Judge the \
-         branch against it and nothing else: each acceptance criterion `met`, `not met` or \
-         `unclear`, with file:line evidence; the invariants of Implementation context the \
-         change appears to break; changes outside Scope.",
+         branch against it and the binding context, and nothing else: each acceptance \
+         criterion `met`, `not met` or `unclear`, with file:line \
+         evidence; every invariant of BUSINESS_CONTEXT.md the \
+         change appears to break, whether the Plan names it or not; changes outside Scope.",
         header.approved_by.as_deref().unwrap_or("(not approved)"),
         header.approved_at.as_deref().unwrap_or("(not approved)"),
     );

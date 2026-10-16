@@ -695,7 +695,9 @@ fn the_reviewers_output_has_the_fixed_shape() {
         "2. not met —",
         "3. unclear —",
         "Why:",
-        "## Invariants the change appears to break",
+        "## Invariants the Plan names that the change appears to break",
+        // M1-26: a planner miss, reported apart because its fix is in Phase 1.
+        "## Invariants the Plan does not name that the change appears to break",
         "## Changes outside Scope",
     ];
     let positions: Vec<usize> = order
@@ -717,6 +719,24 @@ fn the_reviewers_output_has_the_fixed_shape() {
     ] {
         assert!(flat.contains(rule), "the reviewer prompt lost: {rule:?}");
     }
+}
+
+#[test]
+fn the_reviewer_checks_every_invariant_on_a_strong_model() {
+    // M1-26: the coder never reads BUSINESS_CONTEXT.md, so the reviewer is
+    // the one agent that checks the branch against every invariant in it.
+    let (meta, body) = frontmatter("agents/reviewer.md");
+    let flat = body.replace('\n', " ");
+
+    assert_eq!(meta["model"], "opus");
+    assert!(flat.contains("checks the branch against **every** invariant"));
+    assert!(flat.contains("List every invariant in the `BUSINESS_CONTEXT.md` block"));
+    assert!(flat.contains("for **each one**, named or not"));
+    assert!(flat.contains("**not named by the Plan** — the planner missed it"));
+    // The old instruction, which checked only what the Plan named and what the
+    // change "touches", is gone.
+    assert!(!flat.contains("each rule of `BUSINESS_CONTEXT.md` the change touches"));
+    assert!(!flat.contains("## Invariants the change appears to break"));
 }
 
 #[test]

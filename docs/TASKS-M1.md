@@ -1206,7 +1206,7 @@ per M1-22 (D-17.4).
 
 ### Acceptance criteria
 
-- [ ] `agents/reviewer.md` checks every invariant and has the separate heading;
+- [x] `agents/reviewer.md` checks every invariant and has the separate heading;
       `plugin_prompts.rs` asserts the heading exists
 - [ ] A third seeded branch in `eval/review-seeds.sh`,
       `seed-unnamed-invariant`: the Plan names no invariant, the code breaks
@@ -1214,7 +1214,7 @@ per M1-22 (D-17.4).
       heading
 - [ ] `seed-invariant` and `seed-scope` still produce the reports in
       `NOTES.md` §16
-- [ ] `agents/reviewer.md` sets `model: opus`
+- [x] `agents/reviewer.md` sets `model: opus`
 
 ---
 
