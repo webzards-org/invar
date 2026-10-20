@@ -1,7 +1,8 @@
 //! The decision log, `.invar/decisions/` (§7): writing one entry, and reading
 //! them all.
 //!
-//! Implements `contracts/formats/decision-entry.md` v1.0.0.
+//! Implements `contracts/formats/decision-entry.md` v1.2.0; the draft of
+//! §8.1 is checked in [`draft`].
 //!
 //! **Insert-only** (§6). An entry is created with an exclusive create, so an
 //! existing file can never be replaced; a name that is taken gets the next
@@ -30,6 +31,8 @@ use crate::format::values::{is_module, is_ticket};
 use crate::fs::ProjectRoot;
 use crate::fs::plans::{self, LookupError};
 use crate::git::Instant;
+
+pub mod draft;
 
 #[cfg(test)]
 mod tests;
