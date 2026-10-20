@@ -1289,3 +1289,55 @@ message, the `=== invar: conventions ===` block, the files it read, and any
 | v | Date | Observed | Changed | Effect |
 |---|---|---|---|---|
 | — | — | Not built. | — | — |
+
+## 18. `/invar:log` — the agent drafts a decision entry
+
+`plugin/skills/log/SKILL.md`, invoked as `/invar:log [ticket]`; the draft's
+format is `contracts/formats/decision-entry.md` §8.1, checked by
+`invar decision validate`.
+
+**Why a draft, and why there.** At the end of a cycle the developer had to write
+the entry from memory, through `done -m` or `decision record -m`, and an entry
+that is tedious to write is not written. The main session has the ticket, the
+Plan and what the cycle did in front of it, so it drafts; the developer reads,
+edits or discards. The draft sits in the Plan directory, not in
+`.invar/decisions/`: the log stays insert-only and holds only what a person
+chose to keep, and an unrecorded draft disappears with the Plan.
+
+**Why the model cannot invoke it.** Drafting records nothing, but whether a cycle
+deserves an entry at all is the developer's call (decision-entry.md D-6). The
+protocol skill offers it — at closing, after the review offer, and after
+`BLOCKED`, before the `failed` entry — and the developer runs it.
+`plugin_prompts.rs` holds the frontmatter and both offers.
+
+**What it does not do yet.** It does not record. The developer still records
+through `invar done -m` (a `confirmed` draft) or `invar decision record -m`
+(`failed`, `note`), with the draft's body as the message; recording a draft
+directly, with `id` and `date` assigned then, is the next step. Until then a
+draft the developer did not copy is lost when `done` removes the Plan.
+
+**What CI checks.** The example draft inside the skill passes the real
+`invar decision validate`, so a contract change that outdates it fails in CI.
+The skill's ticket-resolving block behaves like `/invar:review`'s. Every
+`invar` command and flag the skill names exists.
+
+### Not exercised (needs a real Claude Code session)
+
+- [ ] `/invar:log` appears in the `/` menu with its `argument-hint`, and asking
+      the agent to "log the decision" does not run it on its own
+- [ ] The offer at closing comes after the review offer and before `invar done`,
+      once; declined, it is not repeated
+- [ ] After `BLOCKED`, the offer comes before the `failed` entry, and the draft's
+      `type` is `failed`
+- [ ] The draft's body says what was decided and why, not which files changed —
+      judged on walkthrough tickets 1–3 and 6 (§14)
+- [ ] The session runs `invar decision validate` and fixes what it reports
+- [ ] A second `/invar:log` replaces the draft
+- [ ] For a cycle that only changed CI or copy, the offer says it probably needs no
+      more than a one-line message
+
+### Iteration log
+
+| v | Date | Observed | Changed | Effect |
+|---|---|---|---|---|
+| 1 | 2026-10-20 | Nothing yet; first draft. | Skill: resolve the ticket as `/invar:review` does; read the Plan and the cycle's own record (coder's answer, review); pick `confirmed` / `failed` / `note`; a body of two to five sentences on what was decided and why; write `decision.md`, validate, show, stop. Protocol skill: offer it at closing and after `BLOCKED`. | Not run. |
