@@ -475,3 +475,118 @@ fn the_project_is_looked_up_before_stdin_is_read() {
         .unwrap();
     assert!(stderr.contains("invar init"), "{stderr}");
 }
+
+// --- validate: the draft (decision-entry.md §8.1) --------------------------------------
+
+const DRAFT: &str = ".invar/plans/SHOP-214-cancel-unpaid-order/decision.md";
+const VALID_DRAFT: &str = "---\nticket: SHOP-214\nmodule: orders\ntype: confirmed\n---\n\n\
+                           Stock is released inside the cancel transaction, through \
+                           `StockLedger`.\n";
+
+impl Project {
+    fn validate(&self, target: &str) -> assert_cmd::assert::Assert {
+        self.invar(&["decision", "validate", target]).assert()
+    }
+
+    fn draft(&self, text: &str) {
+        fs::write(self.root().join(DRAFT), text).unwrap();
+    }
+}
+
+#[test]
+fn validate_passes_a_valid_draft_by_ticket_and_by_path() {
+    let project = Project::new(Some(&approved_plan()));
+    project.draft(VALID_DRAFT);
+    for target in [
+        "SHOP-214",
+        DRAFT,
+        ".invar/plans/SHOP-214-cancel-unpaid-order",
+    ] {
+        project.validate(target).success().stdout(contains(format!(
+            "ok: {DRAFT} (SHOP-214, confirmed, orders)"
+        )));
+    }
+}
+
+#[test]
+fn validate_reports_every_problem_with_its_line_and_fails() {
+    let project = Project::new(Some(&approved_plan()));
+    project.draft(
+        "---\nid: d-1234\ndate: 2026-10-06T18:37:12+02:00\nticket: SHOP-300\nmodule: orders\n\
+         type: correction\n---\n",
+    );
+    project
+        .validate("SHOP-214")
+        .failure()
+        .stdout(contains(format!("{DRAFT}:2: a draft has no `id`")))
+        .stdout(contains(format!("{DRAFT}:3: a draft has no `date`")))
+        .stdout(contains(format!(
+            "{DRAFT}:6: a draft is not a `correction`"
+        )))
+        .stdout(contains(format!("{DRAFT}: the body is empty")))
+        .stderr(contains("the draft is not valid (4 problems)"))
+        .stderr(contains("invar decision validate SHOP-214"));
+}
+
+#[test]
+fn validate_refuses_a_draft_that_names_another_ticket() {
+    let project = Project::new(Some(&approved_plan()));
+    project.draft(&VALID_DRAFT.replace("SHOP-214", "SHOP-300"));
+    project
+        .validate("SHOP-214")
+        .failure()
+        .stdout(contains("in the Plan directory of SHOP-214"));
+}
+
+#[test]
+fn validate_without_a_draft_says_how_to_write_one() {
+    let project = Project::new(Some(&approved_plan()));
+    project
+        .validate("SHOP-214")
+        .failure()
+        .stdout(contains("there is no `decision.md` yet"))
+        .stdout(contains("/invar:log"));
+}
+
+#[test]
+fn validate_for_a_ticket_with_no_plan_is_a_lookup_error() {
+    let project = Project::new(None);
+    project
+        .validate("SHOP-214")
+        .failure()
+        .stdout(predicate::str::is_empty());
+}
+
+#[test]
+fn validate_writes_nothing_and_records_nothing() {
+    let project = Project::new(Some(&approved_plan()));
+    project.draft(VALID_DRAFT);
+    project.validate("SHOP-214").success();
+    assert_eq!(project.read(DRAFT), VALID_DRAFT);
+    assert_eq!(project.read(SPEC), approved_plan());
+    assert!(project.entries().is_empty());
+}
+
+#[test]
+fn a_draft_does_not_count_as_an_entry() {
+    // A draft is not in the log: `decision log` does not show it, and
+    // `clean-spec` still sees a Plan with no entry.
+    let project = Project::new(Some(&approved_plan()));
+    project.draft(VALID_DRAFT);
+    project
+        .invar(&["decision", "log"])
+        .assert()
+        .success()
+        .stdout(contains("StockLedger").not());
+}
+
+#[test]
+fn the_help_says_what_a_draft_is_and_that_it_records_nothing() {
+    Command::cargo_bin("invar")
+        .unwrap()
+        .args(["decision", "validate", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("no `id` and no `date`"))
+        .stdout(contains("Writes nothing; records nothing"));
+}
