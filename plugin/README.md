@@ -19,6 +19,9 @@ plugin/
 ├── hooks/hooks.json             three hooks, each one `invar` call
 ├── agents/planner.md            Phase 1: a ticket becomes a draft Plan
 ├── skills/invar/SKILL.md        the cycle, as the main session lives it
+├── skills/approve/SKILL.md      /invar:approve — the developer's gate
+├── skills/review/SKILL.md       /invar:review — the advisory review
+├── skills/log/SKILL.md          /invar:log — drafts the decision entry
 ├── bin/invar                    the launcher: picks invar-<os>-<arch> and runs it
 ├── marketplace.json             what the `dist` branch lists (release.yml)
 ├── NOTES.md
