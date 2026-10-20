@@ -116,7 +116,10 @@ work around it**: do not implement it yourself, do not weaken a criterion, do no
 edit the Plan, and do not start the coder again with your own interpretation.
 
 1. Put the coder's reason to the developer, as it gave it.
-2. Propose the decision entry, and when the developer agrees, record it:
+2. Offer to draft the entry, once: *"Draft the `failed` entry? Run `/invar:log`."*
+   It writes the draft next to the Plan for the developer to read; it records
+   nothing. Then, with the text in hand — the draft, or the developer's own —
+   and when the developer agrees, record it:
 
    `invar decision record --ticket <TICKET> --type failed -m "Plan required X; impossible because Y"`
 
@@ -145,12 +148,22 @@ the branch, so the change has to be committed before it runs, the way this proje
 commits. The developer runs it, not you: do not start the reviewer yourself. It is
 advisory; if the developer declines, go on.
 
+**Offer to draft the decision entry**, once: *"Draft the decision entry? Run
+`/invar:log`."* It writes `.invar/plans/<TICKET>-<slug>/decision.md` from the
+ticket, the Plan and what the cycle changed, for the developer to read and edit;
+it records nothing. A cycle that only changed CI, copy, or fixed something
+without leaving a rule the next Plan should know probably needs no more than a
+one-line message — say so in the same line, and leave the choice to the
+developer. Do not draft it yourself without `/invar:log`, and do not offer again
+if they decline.
+
 Then, when the developer is ready to close:
 
 `invar done <TICKET> -m "<what was actually built, including any deviation from the Plan>"`
 
 Say honestly what came out, from the coder's summary and the review; the message
-becomes the permanent decision entry. `done` checks the Plan once more, renders the
+becomes the permanent decision entry. If there is a draft the developer agreed
+with, its body is the message. `done` checks the Plan once more, renders the
 PR description to `.invar/out/<TICKET>-pr.md`, records the entry and removes the
 Plan. Tell the developer the path of the PR description, and to commit everything
 into the same PR.
@@ -202,5 +215,7 @@ implementing it.
 | `/invar:approve` | the developer's; `invar plan approve <TICKET>` from their own terminal |
 | `invar decision record --ticket <TICKET> --type failed -m "..."` | after `BLOCKED`, with the developer's agreement |
 | `/invar:review` | the developer's, before `done`, unless `review.offer: false` |
+| `/invar:log` | the developer's: drafts the decision entry, at the end of Phase 2 or after `BLOCKED` |
+| `invar decision validate <TICKET>` | form of a draft entry (`/invar:log` runs it) |
 | `invar done <TICKET> -m "..."` | close the cycle |
 | `invar context show --binding` | the binding context, which you already have |
