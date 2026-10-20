@@ -441,6 +441,7 @@ fn every_invar_command_and_flag_the_prompts_name_exists() {
         frontmatter("agents/coder.md").1,
         frontmatter("agents/reviewer.md").1,
         skill().1,
+        frontmatter("skills/log/SKILL.md").1,
     ];
     texts
         .iter_mut()
@@ -942,4 +943,158 @@ mod approve_block {
         let dir = tempfile::tempdir().unwrap();
         assert!(run(dir.path(), "").contains("no Plan in .invar/plans/"));
     }
+}
+
+// --- /invar:log ------------------------------------------------------------------------------
+
+#[test]
+fn log_is_the_developers_and_names_its_ticket() {
+    // A draft records nothing, but whether a cycle is worth an entry is the
+    // developer's call (decision-entry.md D-6, D-9): the model does not draft
+    // one on its own.
+    let (meta, _) = frontmatter("skills/log/SKILL.md");
+
+    assert_eq!(meta["name"], "log");
+    assert_eq!(meta["disable-model-invocation"], "true");
+    assert_eq!(meta["argument-hint"], "[ticket]");
+    assert!(meta["description"].contains("records nothing"));
+}
+
+#[test]
+fn log_writes_a_draft_next_to_the_plan_and_records_nothing() {
+    let (_, body) = frontmatter("skills/log/SKILL.md");
+    let flat = body.replace('\n', " ");
+
+    assert!(flat.contains("`.invar/plans/<TICKET>-<slug>/decision.md`"));
+    assert!(flat.contains("If a draft is already there, replace it"));
+    assert!(flat.contains("run `invar decision validate <TICKET>`"));
+    assert!(flat.contains("**No `id` and no `date`**"));
+    assert!(flat.contains("**Do not record it**"));
+    // The three draft types, each with when, and not the fourth.
+    for kind in ["**`confirmed`**", "**`failed`**", "**`note`**"] {
+        assert!(flat.contains(kind), "no {kind}");
+    }
+    assert!(flat.contains("Never `correction`"));
+    // What the body is, and is not.
+    assert!(flat.contains("**What was decided, and why**"));
+    assert!(flat.contains("**Not a summary of the diff**"));
+}
+
+#[test]
+fn log_never_points_at_the_decision_log() {
+    let (_, body) = frontmatter("skills/log/SKILL.md");
+    let mut mentions = 0;
+    for line in body.lines() {
+        if line.contains(".invar/decisions") || line.contains("invar decision log") {
+            mentions += 1;
+            assert!(
+                line.contains("Never") || line.contains("never"),
+                "/invar:log points at the log: {line}"
+            );
+        }
+    }
+    assert!(
+        mentions >= 1,
+        "the skill no longer says the log is not to be read"
+    );
+}
+
+#[test]
+fn the_example_draft_in_log_passes_decision_validate() {
+    // Like the planner's example Plan: a change to the draft contract that
+    // outdates the skill's template fails here, not in a session.
+    let (_, body) = frontmatter("skills/log/SKILL.md");
+    let example = body
+        .split_once("```markdown\n")
+        .expect("the skill shows an example draft")
+        .1
+        .split_once("\n```")
+        .unwrap()
+        .0
+        .to_owned()
+        + "\n";
+    let ticket = example
+        .lines()
+        .find_map(|line| line.strip_prefix("ticket: "))
+        .expect("the example names its ticket")
+        .to_owned();
+
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("invar.yaml"), "").unwrap();
+    let plan = dir
+        .path()
+        .join(".invar/plans")
+        .join(format!("{ticket}-example"));
+    fs::create_dir_all(&plan).unwrap();
+    fs::write(plan.join("spec.md"), "").unwrap();
+    fs::write(plan.join("decision.md"), &example).unwrap();
+
+    Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["decision", "validate", &ticket])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn log_resolves_the_ticket_like_review_does() {
+    let (_, body) = frontmatter("skills/log/SKILL.md");
+    let block = body
+        .split_once("```!\n")
+        .unwrap()
+        .1
+        .split_once("\n```")
+        .unwrap()
+        .0
+        .to_owned();
+    let dir = tempfile::tempdir().unwrap();
+    let run = |arguments: &str| {
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(block.replace("$ARGUMENTS", arguments))
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    };
+
+    assert!(run("").contains("no Plan in .invar/plans/"));
+    let plan = dir.path().join(".invar/plans/SHOP-214-a");
+    fs::create_dir_all(&plan).unwrap();
+    fs::write(plan.join("spec.md"), "").unwrap();
+    assert_eq!(run(""), "Ticket: SHOP-214-a\n");
+    let other = dir.path().join(".invar/plans/SHOP-300-b");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("spec.md"), "").unwrap();
+    assert!(run("").contains("2 Plans exist"));
+    assert_eq!(run("SHOP-300"), "Ticket: SHOP-300\n");
+    assert!(run("x; touch pwned").contains("is not a ticket"));
+    assert!(!dir.path().join("pwned").exists());
+}
+
+#[test]
+fn the_protocol_skill_offers_log_after_blocked_and_before_done() {
+    let flat = skill().1.replace('\n', " ");
+
+    assert_eq!(
+        flat.matches("Run `/invar:log`.").count(),
+        2,
+        "offered once after BLOCKED and once before closing"
+    );
+    // After BLOCKED: before the `failed` entry is recorded.
+    let blocked = flat.find("Draft the `failed` entry?").unwrap();
+    let failed = flat.find("--type failed -m").unwrap();
+    assert!(blocked < failed);
+    // Closing: after the review, before `done`, which removes the Plan.
+    let review = flat.find("Offer the review").unwrap();
+    let draft = flat.find("Offer to draft the decision entry").unwrap();
+    let done = flat.find("`invar done <TICKET> -m").unwrap();
+    assert!(review < draft && draft < done);
+    // When an entry is probably not worth drafting, said once, and the
+    // developer decides.
+    assert!(flat.contains("probably needs no more than a one-line message"));
+    assert!(flat.contains("leave the choice to the developer"));
+    assert!(flat.contains("Do not draft it yourself without `/invar:log`"));
 }

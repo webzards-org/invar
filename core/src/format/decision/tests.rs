@@ -1,5 +1,5 @@
 //! Tests for decision entries (M1-11), against
-//! `contracts/formats/decision-entry.md` v1.0.0. The examples are read out of
+//! `contracts/formats/decision-entry.md` v1.2.0. The examples are read out of
 //! the contract itself, so the two cannot drift apart.
 
 use std::fs;
@@ -303,4 +303,111 @@ fn types_parse_by_their_exact_names() {
     }
     assert_eq!(Type::parse("Failed"), None);
     assert_eq!(Type::parse("fixed"), None);
+}
+
+// --- the draft (§8.1) -------------------------------------------------------------------
+
+/// Draft example `### <number> `: its text. Drafts live in a Plan directory,
+/// so their `File:` line is not under `.invar/decisions/`.
+fn draft_example(number: &str) -> String {
+    let text = contract();
+    let after = text
+        .split_once(&format!("### {number} "))
+        .unwrap_or_else(|| panic!("the contract has no example {number}"))
+        .1;
+    assert!(
+        after
+            .split_once("File: `")
+            .unwrap()
+            .1
+            .starts_with(".invar/plans/"),
+        "example {number} is not a draft"
+    );
+    let body = after.split_once("```markdown\n").unwrap().1;
+    body.split_once("\n```\n").unwrap().0.to_owned() + "\n"
+}
+
+fn draft_problems(text: &str) -> String {
+    match super::parse_draft(text) {
+        Ok(draft) => panic!("expected problems, got {draft:?}"),
+        Err(problems) => problems.to_string(),
+    }
+}
+
+#[test]
+fn the_contracts_valid_draft_parses() {
+    let draft = super::parse_draft(&draft_example("12.4")).unwrap();
+    assert_eq!(draft.ticket, "SHOP-214");
+    assert_eq!(draft.module, "orders");
+    assert_eq!(draft.kind, Type::Confirmed);
+    assert_eq!(draft.scenario, None);
+    assert!(draft.body.starts_with("Cancelling releases reserved stock"));
+    assert!(!draft.body.ends_with('\n'));
+}
+
+#[test]
+fn the_contracts_invalid_draft_reports_the_date_and_the_type() {
+    // The wrong ticket is a problem of the draft's place, not of its text:
+    // `decision::draft` reports that one.
+    let found = draft_problems(&draft_example("12.5"));
+    assert!(found.contains("a draft has no `date`"), "{found}");
+    assert!(found.contains("a draft is not a `correction`"), "{found}");
+}
+
+#[test]
+fn an_id_in_a_draft_is_named_with_its_line() {
+    let text = "---\nid: d-7c41e09a\nticket: SHOP-214\nmodule: orders\ntype: note\n---\n\nx\n";
+    let found = draft_problems(text);
+    assert!(found.contains("line 2: a draft has no `id`"), "{found}");
+}
+
+#[test]
+fn every_draft_type_is_accepted_and_nothing_else() {
+    for kind in super::DRAFT_TYPES {
+        let text = format!("---\nticket: SHOP-214\nmodule: global\ntype: {kind}\n---\n\nWhy.\n");
+        assert_eq!(super::parse_draft(&text).unwrap().kind, kind);
+    }
+    for kind in ["fixed", "Confirmed", ""] {
+        let text = format!("---\nticket: SHOP-214\nmodule: global\ntype: {kind}\n---\n\nWhy.\n");
+        assert!(
+            draft_problems(&text).contains("one of `confirmed`, `failed`, `note`"),
+            "{kind:?}"
+        );
+    }
+}
+
+#[test]
+fn a_draft_needs_its_three_keys_and_a_body() {
+    let found = draft_problems("---\n---\n");
+    for key in ["ticket", "module", "type"] {
+        assert!(
+            found.contains(&format!("the front matter has no `{key}`")),
+            "{found}"
+        );
+    }
+    assert!(found.contains("the body is empty"), "{found}");
+}
+
+#[test]
+fn an_entry_is_not_a_valid_draft_and_a_draft_is_not_a_valid_entry() {
+    // The two shapes must not be confused: a recorded entry copied into the
+    // Plan directory carries an `id` and a `date`, and a draft copied into the
+    // log has neither.
+    let entry = example("12.1").1;
+    assert!(draft_problems(&entry).contains("a draft has no `id`"));
+    let draft = draft_example("12.4");
+    match parse(&draft) {
+        Ok(entry) => panic!("a draft parsed as an entry: {entry:?}"),
+        Err(found) => assert!(found.to_string().contains("no `id`")),
+    }
+}
+
+#[test]
+fn a_draft_with_crlf_and_a_bom_parses_like_one_with_lf() {
+    let lf = draft_example("12.4");
+    let crlf = format!("\u{FEFF}{}", lf.replace('\n', "\r\n"));
+    assert_eq!(
+        super::parse_draft(&crlf).unwrap(),
+        super::parse_draft(&lf).unwrap()
+    );
 }

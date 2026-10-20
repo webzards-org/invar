@@ -1,11 +1,13 @@
 # Contract: Decision entry
 
-**Version:** 1.1.0 — `module` may use capital letters; see §13
+**Version:** 1.2.0 — the draft, `.invar/plans/<TICKET>-<slug>/decision.md`;
+see §8.1 and §13
 **Status:** stable
 **Implements:** §7 (Decision log), §4c (a `failed` entry resets the cycle),
 §12 (the entry survives the Plan); light mode L-1, L-4 (`docs/TASKS-M1.md`)
 **Read by:** the core (`format/decision`), `invar decision log`,
-`invar context show` (M1-14), `invar clean-spec` (M1-13), any later
+`invar decision validate` (the draft), `invar context show` (M1-14),
+`invar clean-spec` (M1-13), the `/invar:log` skill, any later
 reimplementation and the post-MVP decision graph
 
 > Changing this file is a **public-contract change** (§14.3). It is made
@@ -144,6 +146,44 @@ In M1:
 - **No hook ever writes an entry**, and no other command writes one as a side
   effect.
 
+### 8.1 The draft
+
+Before an entry is recorded, the agent may **draft** it, so the developer
+decides on a text instead of writing one (D-9). A draft is not an entry: it
+lives with the Plan, nothing reads it as part of the log, and it becomes an
+entry only when it is recorded.
+
+**Path:** `.invar/plans/<TICKET>-<slug>/decision.md`, next to the ticket's
+`spec.md`. One draft per Plan; writing it again replaces it. It is removed with
+the Plan directory, by `invar done` or `invar clean-spec`, whether or not it was
+recorded.
+
+**Structure:** the same as an entry (§3, §4) — `---`, a flat `Key: value` front
+matter, `---`, a non-empty body — with these fields:
+
+| Field | Required | Allowed values |
+|---|---|---|
+| `ticket` | yes | As in §4.1, and equal to the `<TICKET>` of the Plan directory it is in |
+| `module` | yes | As in §4.1 |
+| `type` | yes | `confirmed`, `failed` or `note` (D-11) |
+| `scenario` | **no** | As in §4.1 |
+| `id`, `date` | **must be absent** | Assigned when the draft is recorded (D-10) |
+
+A key not listed is permitted and ignored, as for an entry.
+
+**The type follows the cycle:** `confirmed` for a cycle that finished,
+`failed` after the coder answered `BLOCKED` or the approved Plan turned out to
+be impossible, `note` otherwise.
+
+**The body** says what was decided and why, in a few sentences. It is not a
+summary of the diff: the diff is in git, and the planner reads the log for the
+reasons it cannot find there.
+
+**Who writes it:** the main session, through `/invar:log`, when the developer
+asks or accepts the protocol's offer. It is checked with
+`invar decision validate`. Drafting writes no entry and resets nothing; the
+rules of §8 for entries are unchanged.
+
 ## 9. Reading
 
 - Order is the filename order. Compare the names **without `.md`**, and
@@ -219,6 +259,26 @@ cannot be written, means the only possible outcomes are both writes or
 neither — and `.invar/decisions/` stays strictly insert-only, because nothing
 there is ever removed to undo a write.
 
+**D-9 — The agent drafts, the developer decides.** D-6 keeps entries a
+person's decision, and that is unchanged. What it cost was the text: at the end
+of a cycle the developer had to write an entry from memory, and an entry that is
+tedious to write is not written. The agent has the ticket, the Plan and what the
+cycle changed in front of it, so it writes the draft and the developer reads,
+edits or discards it. The draft lives in the Plan directory, not in
+`.invar/decisions/`, so the log stays insert-only and holds only what a person
+decided to keep; a draft nobody recorded disappears with the Plan.
+
+**D-10 — No `id` or `date` in a draft.** Both describe the entry, not its
+draft. The `date` of an entry is the moment a person decided to keep it, which
+is when it is recorded, and the `id` is minted then so it is unique in the log
+as it is at that moment (D-4). A draft that carried them would invite copying a
+stale date into the log.
+
+**D-11 — A draft is `confirmed`, `failed` or `note`, never `correction`.** A
+`correction` records something the developer changed by hand outside the cycle;
+the agent did not see it happen and cannot draft it truthfully. The developer
+records a correction directly with `invar decision record`.
+
 ## 11. Open questions
 
 **OQ-1 — Relations between entries.** `supersedes: d-…` and similar fields
@@ -285,7 +345,57 @@ type: note
 **Why:** the filename says `payments`, the front matter says `orders`; and
 the body is empty — an entry that records nothing.
 
+### 12.4 Valid — a draft after a finished cycle
+
+File: `.invar/plans/SHOP-214-cancel-unpaid-order/decision.md`
+
+```markdown
+---
+ticket: SHOP-214
+module: orders
+type: confirmed
+---
+
+Cancelling releases reserved stock inside the cancel transaction, through
+`StockLedger`, rather than in a queued job: a job would leave the stock neither
+reserved nor sellable until it ran. Paid orders are refused with 403 and go
+through refunds.
+```
+
+**Why it is valid:** the three required keys, no `id` or `date`, and `SHOP-214`
+is the ticket of the directory it is in.
+
+### 12.5 Invalid — a draft with a date, a `correction`, and the wrong ticket
+
+File: `.invar/plans/SHOP-214-cancel-unpaid-order/decision.md`
+
+```markdown
+---
+date: 2026-10-06T18:37:12+02:00
+ticket: SHOP-300
+module: orders
+type: correction
+---
+
+Fixed the cancel button.
+```
+
+**Why:** `date` is assigned when the draft is recorded (D-10); `correction` is
+not a draft type (D-11); and the draft names `SHOP-300` in the Plan directory of
+`SHOP-214`.
+
 ## 13. Version history
+
+**1.2.0 — the draft.**
+
+- §8.1: a draft entry at `.invar/plans/<TICKET>-<slug>/decision.md`, its
+  fields, and who writes it. D-9 to D-11; examples 12.4 and 12.5.
+
+**Why:** an entry written from memory at the end of a cycle is an entry that is
+not written. The agent drafts it; the developer still decides (D-6, D-9).
+
+**Compatibility:** nothing about entries changes. A draft is a new file in the
+Plan directory, which no earlier reader looks at.
 
 **1.1.0 — capitalized module names.**
 

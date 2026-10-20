@@ -1147,6 +1147,20 @@ coders ran (§13d): `invar scenario confirm` writes nothing.
 - `invar decision record` manually, when the developer changes something
   outside the pipeline, or when a cycle returns to Phase 1 (§4c)
 
+**The agent drafts; the developer decides.** An entry written from memory at
+the end of a cycle is an entry that is not written. So the main session may
+**draft** one — through `/invar:log`, when the developer runs it, typically on
+the protocol's offer at the end of Phase 2 or after a `BLOCKED` — from the
+ticket, the Plan and what the cycle actually changed. The draft is
+`.invar/plans/<TICKET>-<slug>/decision.md`: an entry's front matter without
+`id` and `date`, which are assigned when it is recorded; `type` is `confirmed`
+for a finished cycle, `failed` after a `BLOCKED` or an impossible Plan, `note`
+otherwise; and a body that says what was decided and why, not what the diff
+shows. `invar decision validate` checks it when it is written. A draft is not
+an entry: it sits with the Plan, nothing reads it as part of the log, and it
+goes when the Plan goes. It becomes an entry only when the developer records
+it (decision-entry.md §8.1, D-9 to D-11).
+
 ### How it is read
 
 At the start of Phase 1, `invar context show` loads files in reverse
@@ -1223,6 +1237,9 @@ invar decision record           # writes a decision entry; called
                                   # manually for out-of-pipeline changes
 invar decision log              # concatenates .invar/decisions/
                                   # newest-first (rendered view)
+invar decision validate <ticket>  # checks the draft entry next to the Plan,
+                                  # .invar/plans/<TICKET>-<slug>/decision.md
+                                  # (§7); records nothing
 invar plan validate <ticket>    # mechanical: path, directory-name shape,
                                   # complete header, required sections, and
                                   # work units when present (§4a).
@@ -1623,6 +1640,19 @@ a hook that fails lets the call through; and an agent that edits the hook
 configuration removes it. What an approval made by the wrong party leaves
 behind is what the checks on disk already look at — `Approved-by`, and a Plan
 the developer never read — not anything in the hook.
+
+### Skills
+
+What a person or the main session invokes by name. A skill the model may not
+invoke (`disable-model-invocation: true`) is one whose step belongs to the
+developer: the main session offers it and waits.
+
+| Skill | What it does | Invoked by |
+|---|---|---|
+| `invar` — the protocol skill | The cycle as the main session lives it: when to use or skip it, dispatching the agents, the gate, closing (§5c, §13c) | The model, when a request matches it |
+| `/invar:approve` | Runs `invar plan approve`: the gate (§3) | The developer only |
+| `/invar:review` | Starts the reviewer on the approved Plan; advisory (§13c) | The developer only, on the protocol's offer before `done` |
+| `/invar:log` | Drafts the decision entry at `.invar/plans/<TICKET>-<slug>/decision.md` and runs `invar decision validate`; records nothing (§7) | The developer only, on the protocol's offer at the end of Phase 2 and after `BLOCKED` |
 
 **The largest gain is the return path, not the enforcement.** Today the
 developer copies command output back to the agent by hand. A hook puts lint and
