@@ -991,7 +991,10 @@ mod approve_block {
         let dir = tempfile::tempdir().unwrap();
         plan(dir.path(), "SHOP-214-a");
         let unknown = run(dir.path(), "SHOP-214 --reapprove");
-        assert!(unknown.contains("the one option is --no-start"), "{unknown}");
+        assert!(
+            unknown.contains("the one option is --no-start"),
+            "{unknown}"
+        );
         assert!(!unknown.contains("approved:"), "{unknown}");
         let two = run(dir.path(), "SHOP-214 SHOP-300");
         assert!(two.contains("give one ticket"), "{two}");

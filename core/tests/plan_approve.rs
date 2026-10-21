@@ -259,14 +259,19 @@ fn only_a_run_that_records_an_approval_prints_the_recorded_line() {
     let recorded = contains("approved PROJ-412 checksum sha256:");
 
     let project = Project::new(Some("rade"));
-    project.approve(&["PROJ-412"]).success().stdout(recorded.clone());
+    project
+        .approve(&["PROJ-412"])
+        .success()
+        .stdout(recorded.clone());
     // Already approved, unchanged: nothing new was recorded.
     project
         .approve(&["PROJ-412"])
         .success()
         .stdout(recorded.clone().not());
     // Changed after approval, without `--reapprove`: refused.
-    let edited = project.read_spec().replace("order is refused", "order waits");
+    let edited = project
+        .read_spec()
+        .replace("order is refused", "order waits");
     project.write_spec(&edited);
     project
         .approve(&["PROJ-412"])
@@ -275,7 +280,10 @@ fn only_a_run_that_records_an_approval_prints_the_recorded_line() {
     // Not valid: refused.
     let project = Project::new(Some("rade"));
     project.write_spec(&plan_text("PROJ-412").replace("## Intent\n", "## Intentions\n"));
-    project.approve(&["PROJ-412"]).failure().stdout(recorded.not());
+    project
+        .approve(&["PROJ-412"])
+        .failure()
+        .stdout(recorded.not());
 }
 
 #[test]
