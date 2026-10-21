@@ -196,7 +196,6 @@ fn no_hook_ever_runs_what_is_the_developers() {
                 "done",
                 "confirm",
                 "decision",
-                "clean-spec",
                 "init",
                 "pr-body",
                 // The review is advisory and the developer's to ask for (M1-20,

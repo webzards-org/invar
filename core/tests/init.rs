@@ -270,11 +270,8 @@ fn the_scaffolded_project_is_one_the_other_commands_accept() {
         .success()
         .stdout(contains("nothing to show"))
         .stderr("");
-    project
-        .invar(&["clean-spec"])
-        .success()
-        .stdout(contains("no Plans in .invar/plans"))
-        .stderr("");
+    // The decision log it created is one `decision log` reads.
+    project.invar(&["decision", "log"]).success().stderr("");
 }
 
 // --- running it again -------------------------------------------------------------------

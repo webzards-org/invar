@@ -1,14 +1,14 @@
 //! Tests for the date and time arithmetic, for what can be decided without
-//! running `git` (a directory that is not there), and for the branch queries
-//! — which run against a real repository built here. The identity and date
+//! running `git` (a directory that is not there), and for the branch and index
+//! queries — which run against a real repository built here. The identity and date
 //! commands run `git` in the CLI tests, which control its configuration
 //! through the environment.
 
 use std::path::Path;
 
 use super::{
-    GitError, Instant, WorkTree, base_branch, branch_name, current_branch, merged_branches,
-    stage_removal, today, user_name, work_tree,
+    GitError, Instant, WorkTree, base_branch, current_branch, stage_removal, today, user_name,
+    work_tree,
 };
 use crate::calendar::civil_from_days;
 
@@ -258,8 +258,8 @@ impl Repo {
     }
 }
 
-/// `main` at the initial commit; `feat/PROJ-1-merged` at the same commit, so
-/// it is merged; `feat/PROJ-2-open` one commit ahead, so it is not.
+/// `main` at the initial commit, checked out; `feat/PROJ-1-merged` at the same
+/// commit; `feat/PROJ-2-open` one commit ahead.
 fn repo_with_branches() -> Repo {
     let repo = Repo::new();
     repo.git(&["branch", "feat/PROJ-1-merged"]);
@@ -305,70 +305,6 @@ fn the_base_branch_is_what_origin_head_points_to() {
         base_branch(repo.path(), Some("release")).unwrap(),
         "release"
     );
-}
-
-#[test]
-fn merged_branches_are_the_ones_already_in_the_base() {
-    let repo = repo_with_branches();
-    assert_eq!(
-        merged_branches(repo.path(), "main").unwrap(),
-        ["feat/PROJ-1-merged", "main"]
-    );
-}
-
-#[test]
-fn a_branch_and_its_remote_twin_are_one_branch() {
-    let repo = repo_with_branches();
-    repo.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
-    repo.git(&[
-        "update-ref",
-        "refs/remotes/origin/feat/PROJ-1-merged",
-        "HEAD",
-    ]);
-    repo.git(&[
-        "symbolic-ref",
-        "refs/remotes/origin/HEAD",
-        "refs/remotes/origin/main",
-    ]);
-    // Counted once, so a ticket does not look ambiguous because its branch
-    // exists here and on the server; and `origin/HEAD` is not a branch.
-    assert_eq!(
-        merged_branches(repo.path(), "origin/main").unwrap(),
-        ["feat/PROJ-1-merged", "main"]
-    );
-}
-
-#[test]
-fn a_merged_branch_that_exists_only_on_the_remote_is_found() {
-    let repo = repo_with_branches();
-    repo.git(&[
-        "update-ref",
-        "refs/remotes/origin/feat/PROJ-3-remote",
-        "HEAD",
-    ]);
-    let merged = merged_branches(repo.path(), "main").unwrap();
-    assert!(
-        merged.contains(&"feat/PROJ-3-remote".to_owned()),
-        "{merged:?}"
-    );
-}
-
-#[test]
-fn a_base_that_does_not_exist_is_git_failing_not_an_empty_list() {
-    // An empty list would read as "nothing is merged" and quietly skip every
-    // Plan; git's own error says what is wrong.
-    let repo = repo_with_branches();
-    let err = merged_branches(repo.path(), "no-such-branch").unwrap_err();
-    assert!(matches!(err, GitError::Failed { .. }), "{err:?}");
-}
-
-#[test]
-fn a_base_that_looks_like_an_option_is_not_taken_for_one() {
-    // `--merged=--all` names a commit called `--all`; it does not turn the
-    // option on and list everything.
-    let repo = repo_with_branches();
-    let err = merged_branches(repo.path(), "--all").unwrap_err();
-    assert!(matches!(err, GitError::Failed { .. }), "{err:?}");
 }
 
 #[test]
@@ -449,29 +385,4 @@ fn a_removal_is_staged_and_an_untracked_path_is_no_error() {
 
     // Never tracked: nothing to stage, and not a failure.
     stage_removal(repo.path(), Path::new(".invar/plans/PROJ-9-never")).unwrap();
-}
-
-#[test]
-fn ref_names_are_reduced_to_branch_names() {
-    assert_eq!(
-        branch_name("refs/heads/feat/PROJ-1-x").as_deref(),
-        Some("feat/PROJ-1-x")
-    );
-    assert_eq!(
-        branch_name("refs/remotes/origin/feat/PROJ-1-x").as_deref(),
-        Some("feat/PROJ-1-x")
-    );
-    assert_eq!(
-        branch_name("refs/remotes/upstream/main").as_deref(),
-        Some("main")
-    );
-    for not_a_branch in [
-        "refs/remotes/origin/HEAD",
-        "refs/remotes/origin",
-        "refs/tags/v1",
-        "(HEAD detached at 1a2b3c4)",
-        "",
-    ] {
-        assert_eq!(branch_name(not_a_branch), None, "{not_a_branch:?}");
-    }
 }
