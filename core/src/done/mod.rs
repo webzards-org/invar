@@ -10,6 +10,10 @@
 //! 3. delete the Plan directory.
 //! 4. stage the deletion (`git rm -r --cached`), so it goes into the same
 //!    commit — and the same PR — as the code.
+//! 5. with `--commit <MESSAGE>`, commit the deletion alone, under that
+//!    message (`git commit --only`): anything else that is staged stays
+//!    staged. invar makes no commit unless asked; the project's hooks, signing
+//!    and identity apply, and are never bypassed.
 //!
 //! **No decision entry is read or written** (decision-entry.md 1.3.0, D-12).
 //! Entries are the developer's, approved from drafts with
@@ -46,6 +50,19 @@ pub struct Closed {
     /// The Plan directory, now gone.
     pub plan_dir: PathBuf,
     pub staged: Staged,
+    pub committed: Committed,
+}
+
+/// Whether the deletion was committed.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Committed {
+    /// No `--commit`.
+    NotAsked,
+    /// Committed, under this message.
+    Yes(String),
+    /// `--commit`, but git never tracked the Plan: there was nothing to
+    /// commit.
+    NothingTracked,
 }
 
 /// Whether the deletion was staged.
@@ -56,11 +73,21 @@ pub enum Staged {
     NotARepository(String),
 }
 
-/// Close the cycle of the Plan whose `spec.md` is `spec`.
-pub fn close(root: &ProjectRoot, spec: &Path, mode: Mode) -> Result<Closed, DoneError> {
+/// Close the cycle of the Plan whose `spec.md` is `spec`; with `commit`,
+/// commit the deletion under that message.
+pub fn close(
+    root: &ProjectRoot,
+    spec: &Path,
+    mode: Mode,
+    commit: Option<&str>,
+) -> Result<Closed, DoneError> {
     let plan_dir = spec
         .parent()
         .expect("a Plan's spec.md always has a parent directory")
+        .to_owned();
+    let relative = plan_dir
+        .strip_prefix(root.path())
+        .unwrap_or(&plan_dir)
         .to_owned();
 
     // 1. The Plan is approved and unchanged; changes nothing.
@@ -72,6 +99,24 @@ pub fn close(root: &ProjectRoot, spec: &Path, mode: Mode) -> Result<Closed, Done
         return Err(DoneError::DraftPending { draft });
     }
 
+    // `--commit` is checked before anything is deleted: a message that is
+    // empty, or a project outside git, refuses with the Plan still in place.
+    let commit = match commit {
+        None => None,
+        Some(message) => {
+            let message = message.trim();
+            if message.is_empty() {
+                return Err(DoneError::EmptyCommitMessage);
+            }
+            let git = |source| DoneError::Git { source };
+            if let WorkTree::Outside(said) = git::work_tree(root.path()).map_err(git)? {
+                return Err(DoneError::CommitOutsideRepository { said });
+            }
+            let tracked = git::is_tracked(root.path(), &relative).map_err(git)?;
+            Some((message.to_owned(), tracked))
+        }
+    };
+
     // 3. Delete. `remove_dir_all` does not follow a symlinked directory: it
     //    unlinks it, and leaves what it pointed at alone.
     fs::remove_dir_all(&plan_dir).map_err(|source| DoneError::Remove {
@@ -80,19 +125,38 @@ pub fn close(root: &ProjectRoot, spec: &Path, mode: Mode) -> Result<Closed, Done
     })?;
 
     // 4. Stage the deletion.
-    let staged = stage(root, &plan_dir).map_err(|source| DoneError::Stage {
+    let staged = stage(root, &relative).map_err(|source| DoneError::Stage {
         plan_dir: plan_dir.clone(),
         source,
     })?;
 
-    Ok(Closed { plan_dir, staged })
+    // 5. Commit it, alone, when asked.
+    let committed = match commit {
+        None => Committed::NotAsked,
+        Some((_, false)) => Committed::NothingTracked,
+        Some((message, true)) => {
+            git::commit_only(root.path(), &relative, &message).map_err(|source| {
+                DoneError::Commit {
+                    relative: relative.clone(),
+                    message: message.clone(),
+                    source,
+                }
+            })?;
+            Committed::Yes(message)
+        }
+    };
+
+    Ok(Closed {
+        plan_dir,
+        staged,
+        committed,
+    })
 }
 
-fn stage(root: &ProjectRoot, plan_dir: &Path) -> Result<Staged, GitError> {
+fn stage(root: &ProjectRoot, relative: &Path) -> Result<Staged, GitError> {
     if let WorkTree::Outside(said) = git::work_tree(root.path())? {
         return Ok(Staged::NotARepository(said));
     }
-    let relative = plan_dir.strip_prefix(root.path()).unwrap_or(plan_dir);
     git::stage_removal(root.path(), relative)?;
     Ok(Staged::Yes)
 }
@@ -143,6 +207,20 @@ pub enum DoneError {
     },
     /// The Plan was deleted, but git could not stage the deletion.
     Stage { plan_dir: PathBuf, source: GitError },
+    /// `--commit` with an empty message. Nothing was changed.
+    EmptyCommitMessage,
+    /// `--commit` outside a git work tree. Nothing was changed.
+    CommitOutsideRepository { said: String },
+    /// git could not be asked what `--commit` needs. Nothing was changed.
+    Git { source: GitError },
+    /// The deletion is staged, but the commit was refused (a hook, signing,
+    /// identity).
+    Commit {
+        /// The Plan directory, relative to the project root.
+        relative: PathBuf,
+        message: String,
+        source: GitError,
+    },
     /// No ticket given, and `HEAD` is not on a branch.
     DetachedHead,
     /// The Plans could not be listed.
@@ -176,6 +254,29 @@ impl fmt::Display for DoneError {
                  yourself with `git rm -r --cached {}`",
                 plan_dir.display(),
                 plan_dir.display()
+            ),
+            Self::EmptyCommitMessage => write!(
+                f,
+                "`--commit` needs the commit message, such as `--commit \"chore: remove the \
+                 Plan of SHOP-214\"`; nothing was changed"
+            ),
+            Self::CommitOutsideRepository { said } => write!(
+                f,
+                "`--commit` needs a git repository, and the project is not in one ({said}); \
+                 nothing was changed. Run `invar done` without `--commit`"
+            ),
+            Self::Git { source } => write!(f, "{source}; nothing was changed"),
+            Self::Commit {
+                relative,
+                message,
+                source,
+            } => write!(
+                f,
+                "{} was removed and the removal is staged, but the commit was refused: \
+                 {source}. Fix what git says, then commit it yourself: `git commit --only \
+                 -m {message:?} -- {}`",
+                relative.display(),
+                relative.display()
             ),
             Self::DetachedHead => write!(
                 f,

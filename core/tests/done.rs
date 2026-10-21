@@ -290,6 +290,114 @@ fn the_message_flag_is_gone() {
     assert!(project.exists(SPEC));
 }
 
+// --- --commit <MESSAGE> ---------------------------------------------------------
+
+#[test]
+fn commit_commits_the_deletion_alone_under_the_message() {
+    let project = Project::in_git(&approved_plan(), "feat/SHOP-214-cancel");
+    // Something else is staged; it must stay out of the commit.
+    fs::write(project.root().join("app.php"), "<?php\n").unwrap();
+    project.git(&["add", "app.php"]);
+
+    project
+        .done(&["SHOP-214", "--commit", "chore: remove the Plan of SHOP-214"])
+        .success()
+        .stdout(contains(format!(
+            "removed: {PLAN_DIR} (committed: chore: remove the Plan of SHOP-214)"
+        )))
+        .stderr("");
+
+    assert!(!project.exists(PLAN_DIR));
+    assert_eq!(
+        project.git(&["log", "-1", "--format=%s"]),
+        "chore: remove the Plan of SHOP-214\n"
+    );
+    assert_eq!(
+        project.git(&["diff", "--name-status", "HEAD~1", "HEAD"]),
+        format!("D\t{SPEC}\n")
+    );
+    // Still staged, still not committed.
+    assert_eq!(
+        project.git(&["diff", "--cached", "--name-status"]),
+        "A\tapp.php\n"
+    );
+}
+
+#[test]
+fn commit_without_a_ticket_uses_the_branch() {
+    let project = Project::in_git(&approved_plan(), "feat/SHOP-214-cancel");
+    project
+        .done(&["--commit", "chore: close SHOP-214"])
+        .success();
+    assert_eq!(
+        project.git(&["log", "-1", "--format=%s"]),
+        "chore: close SHOP-214\n"
+    );
+}
+
+#[test]
+fn commit_of_a_plan_git_never_tracked_makes_no_commit() {
+    // The Plan is on disk, and git does not track it.
+    let project = Project::in_git(&approved_plan(), "feat/SHOP-214-cancel");
+    project.git(&["rm", "-r", "-q", "--cached", PLAN_DIR]);
+    project.git(&["commit", "-q", "-m", "untrack"]);
+    let before_done = project.git(&["rev-parse", "HEAD"]);
+
+    project
+        .done(&["SHOP-214", "--commit", "chore: remove"])
+        .success()
+        .stdout(contains("nothing to commit"));
+    assert_eq!(project.git(&["rev-parse", "HEAD"]), before_done);
+    assert!(!project.exists(PLAN_DIR));
+}
+
+#[test]
+fn an_empty_commit_message_refuses_and_changes_nothing() {
+    let project = Project::in_git(&approved_plan(), "feat/SHOP-214-cancel");
+    project
+        .done(&["SHOP-214", "--commit", "  "])
+        .failure()
+        .stderr(contains("`--commit` needs the commit message"));
+    assert!(project.exists(SPEC));
+}
+
+#[test]
+fn commit_outside_a_repository_refuses_and_changes_nothing() {
+    let project = Project::new(&approved_plan());
+    project
+        .done(&["SHOP-214", "--commit", "chore: remove"])
+        .failure()
+        .stderr(contains("`--commit` needs a git repository"));
+    assert!(project.exists(SPEC));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_commit_a_hook_refuses_leaves_the_deletion_staged_and_says_how_to_finish() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let project = Project::in_git(&approved_plan(), "feat/SHOP-214-cancel");
+    let hook = project.root().join(".git/hooks/pre-commit");
+    fs::write(&hook, "#!/bin/sh\necho 'no commits today' >&2\nexit 1\n").unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    let before = project.git(&["rev-parse", "HEAD"]);
+
+    project
+        .done(&["SHOP-214", "--commit", "chore: remove"])
+        .failure()
+        .stderr(contains("the commit was refused"))
+        .stderr(contains("no commits today"))
+        .stderr(contains("git commit --only"));
+
+    // Never bypassed: no commit, the deletion staged for the developer.
+    assert_eq!(project.git(&["rev-parse", "HEAD"]), before);
+    assert!(!project.exists(PLAN_DIR));
+    assert_eq!(
+        project.git(&["diff", "--cached", "--name-status"]),
+        format!("D\t{SPEC}\n")
+    );
+}
+
 #[test]
 fn the_help_says_what_done_does_and_does_not_do() {
     Command::cargo_bin("invar")
@@ -298,6 +406,7 @@ fn the_help_says_what_done_does_and_does_not_do() {
         .assert()
         .success()
         .stdout(contains("stage the deletion"))
+        .stdout(contains("--commit <MESSAGE>"))
         .stdout(contains("/invar:log-approve"))
         .stdout(contains("Writes no"));
 }

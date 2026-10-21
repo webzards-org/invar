@@ -1257,9 +1257,12 @@ invar decision approve <ticket> # the developer's gate on the log: records
                                   # without a valid draft; `failed` resets
                                   # the Plan. Run by /invar:log-approve;
                                   # `plan guard` denies it to the agent
-invar done [ticket]             # closes the cycle: plan check, then deletes
+invar done [ticket] [--commit <message>]
+                                  # closes the cycle: plan check, then deletes
                                   # .invar/plans/<TICKET>-<slug>/ and stages
-                                  # the deletion. Without a ticket, the Plan
+                                  # the deletion; --commit also commits it,
+                                  # alone, under the message (never pushes,
+                                  # never bypasses hooks). Without a ticket, the Plan
                                   # the current branch names. Refuses while an
                                   # unapproved decision.md is there. Writes no
                                   # decision entry. The developer's, from a
@@ -1567,9 +1570,20 @@ error; `invar` never guesses.
 `plan guard` denies it (§13), and the protocol skill only tells the developer the
 cycle is ready to close. They run it from their terminal when they judge the work
 finished, or let CI run it: a workflow on pull-request approval, say, that runs
-`invar done <ticket>` on the PR branch and pushes the commit. It is usable there
-because it asks nothing of a session — and on a detached checkout it is given the
-ticket.
+`invar done <ticket> --commit "chore: remove the Plan of <ticket>"` on the PR
+branch and pushes. It is usable there because it asks nothing of a session — and
+on a detached checkout it is given the ticket.
+
+**`--commit <message>` is the one commit invar makes, and only when asked.** It
+commits the Plan directory alone (`git commit --only`), so whatever else is
+staged stays staged and out of it. The message is the caller's, because
+repositories have their own rules for messages (commitlint, conventional
+commits). The project's hooks, signing and identity apply and are never
+bypassed: a refused commit leaves the deletion staged and says how to finish it.
+It is checked before anything is deleted — an empty message, or a project outside
+git, refuses with the Plan in place. Without `--commit`, the deletion is staged
+and the commit is the developer's, so it can go into a commit of their own or be
+amended into the last one.
 
 **It writes no decision entry and requires none** (§7). Entries are approved
 from drafts, with `/invar:log-approve`, before the cycle closes. The one thing

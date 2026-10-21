@@ -792,8 +792,8 @@ silent for a person typing it. To decide once the plugin has run for real.
 
 The code is small; getting an agent to behave is not. This section is the
 protocol for finding out whether it does, and the log of what changed when it
-did not. **v1 has not been run.** Everything below the first row of the log is
-empty on purpose.
+did not. **v1 was not run as a whole**; the first observations came from the
+VPK pilot cycles and are row 2 of the log.
 
 ### What exists
 
@@ -844,7 +844,7 @@ record for each.
 | 3 | An ordinary real ticket | A valid Plan with no invariant in play |
 | 4 | A trivial change (a copy fix) | The skill skips the cycle, and says so |
 | 5 | Phase 2 on a Plan that is still a draft | `invar plan check` refuses and no code is written |
-| 6 | Phase 2 on an approved Plan whose criterion cannot be met (seed one: two criteria that contradict each other) | The coder answers `BLOCKED <reason>` instead of softening a criterion; the main session records `failed` and the Plan is back in `draft` (§17) |
+| 6 | Phase 2 on an approved Plan whose criterion cannot be met (seed one: two criteria that contradict each other) | The coder answers `BLOCKED <reason>` instead of softening a criterion; the main session offers `/invar:log`, the draft says `type: failed`, the developer records it with `/invar:log-approve`, and the Plan is back in `draft` (§17) |
 
 Tickets 1–3 together are the first acceptance criterion: a Plan that passes
 `plan validate` on at least three real tickets, one touching an invariant. Take
@@ -860,6 +860,14 @@ broken — judged by someone who knows the incident, not by the planner. Then re
 main session's transcript for the log: any `invar context show` without
 `--binding`, any `invar decision log`, any text that is plainly a log entry. One is a
 failure of the third acceptance criterion.
+
+For the end of the cycle, record: whether `/invar:log` was offered, and when
+(before the PR review, during it, or not at all); whether the developer used it;
+and whether the draft changed between `/invar:log` and `/invar:log-approve` — by
+the developer's hand, or by a second `/invar:log` after the review changed what
+was built. Also: who ran `invar done`, from where (terminal or CI), and whether
+the main session tried to run it, `invar decision approve` or
+`invar decision record` itself (each is a denial in the transcript).
 
 Once Phase 2 runs in the coder sub-agent (§17), record for it too: the model it ran
 on; `DONE` or `BLOCKED`, and whether `BLOCKED` was justified; and every file it read
@@ -883,6 +891,7 @@ the next row's **Observed** once it has one.
 | v | Date | Observed | Changed | Effect |
 |---|---|---|---|---|
 | 1 | 2026-10-11 | Nothing yet; first draft. | Planner: procedure in six steps; one answer shape (`QUESTIONS` or `PLAN`); the regional question mandatory, with one exception (the ticket names the value); Implementation context as a distillate with a test per item ("would the coder get this wrong without it?"); one criterion per invariant, written as the negative case; one worked example, in a different domain from the pilot's; the log reasoned from, never quoted. Skill: when to skip and the sentence to say; Phase 2 begins with `plan check`; never edit an approved Plan; a `failed` entry for an impossible one; `done` to close; the log is the planner's alone. | Not run. |
+| 2 | 2026-10-21 | VPK-2, VPK-3: both cycles were closed by merging the PR, not by `invar done`, so the Plans reached `main`. `invar clean-spec` then refused to delete them, because neither ticket had a decision entry; the only way through was to record an entry for each, which said nothing anyone would read again — cleanup forced a meaningless entry into the log. | The end of a cycle redone. `done` only deletes the Plan and stages the deletion, needs no entry, and is the developer's, from a terminal or CI (`plan guard` denies it to the agent); `clean-spec` removed (a Plan left on `main` goes with `git rm -r`); entries are drafted with `/invar:log` and recorded only by `/invar:log-approve`, and `decision record` is the developer's alone. Skill: closing is commit → `/invar:review` (optional) → push → PR review → `/invar:log` before or during the review and `/invar:log-approve` after it, if an entry is wanted → the developer runs `invar done`; after `BLOCKED`, `/invar:log` with `type: failed`, recorded by the developer. | Not run yet. |
 
 ### What to watch for, and the lever for each
 
@@ -1132,7 +1141,7 @@ has to find out first, in the order a run would hit it.
 |---|---|
 | `agents/coder.md` | **Built in M1-24.** Phase 2: begins with `invar plan check`, reads the Plan and the conventions, never `BUSINESS_CONTEXT.md` or the log; answers `DONE` + at most eight lines, or `BLOCKED <reason>`. `model: sonnet` |
 | `invar context show --conventions` | **Built in M1-23.** Core: `AI_CONTEXT.md` only. Same 10,000-character check as `--binding` (§5). `--hook` (M1-24) prints it as `SubagentStart` JSON |
-| `skills/invar/SKILL.md` | **Built in M1-25.** The main session as dispatcher: after the gate it starts the coder with the ticket line only, as `/invar:review` does for the reviewer; on `BLOCKED` it puts the reason to the developer and, with their agreement, records `failed`; it offers the review before `done` (on by default since `invar-yaml.md` 2.0.0); it chooses models aloud and reports an unavailable one; it tells the developer to start at the project root |
+| `skills/invar/SKILL.md` | **Built in M1-25.** The main session as dispatcher: after the gate it starts the coder with the ticket line only, as `/invar:review` does for the reviewer; on `BLOCKED` it puts the reason to the developer and offers `/invar:log` for a `failed` draft, which the developer records with `/invar:log-approve`; it offers the review before `done` (on by default since `invar-yaml.md` 2.0.0); it chooses models aloud and reports an unavailable one; it tells the developer to start at the project root |
 | `agents/planner.md`, `agents/reviewer.md` | `model: opus` — the planner since M1-25; the reviewer in M1-26 |
 | `core/tests/plugin_prompts.rs` | The coder's prompt names only commands that exist, never points at the log or `BUSINESS_CONTEXT.md`, and has both answer shapes |
 
