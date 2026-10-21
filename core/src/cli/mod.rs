@@ -17,7 +17,6 @@ use crate::format::config;
 use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
 
-mod clean_spec;
 mod context;
 mod decision;
 mod done;
@@ -85,6 +84,9 @@ pub enum Command {
     ReviewInput(review_input::Args),
     /// Close a cycle: delete the Plan directory, and stage the deletion (§12).
     ///
+    /// The only command that deletes a Plan. A Plan that reached the main
+    /// branch without it is removed with `git rm -r`.
+    ///
     /// The developer's command — from a terminal, or from CI (for example a
     /// workflow on pull-request approval). No agent runs it.
     ///
@@ -94,22 +96,6 @@ pub enum Command {
     /// directory: approve it with /invar:log-approve, or delete it. Writes no
     /// decision entry and requires none.
     Done(done::Args),
-    /// Delete the Plans that abandoned cycles left behind (§12).
-    ///
-    /// A dry run by default: it lists what would be deleted, and why, and
-    /// deletes nothing. `--force` deletes the Plans listed as eligible.
-    ///
-    /// Only `.invar/plans/` is touched — never `.invar/decisions/`, never
-    /// project code. A Plan with no decision entry for its ticket is never
-    /// deleted: that is a cycle that did not close properly, a signal and not
-    /// garbage. Record a `failed` or `note` entry first (`invar decision
-    /// record`), which is the honest way to close an abandoned cycle.
-    ///
-    /// `TICKET` limits the run to one Plan; `--merged` to Plans whose ticket
-    /// names a branch already merged into the base branch. A run over
-    /// everything keeps an approved Plan, because its cycle may still be
-    /// running: name it, or use `--merged`, to delete it.
-    CleanSpec(clean_spec::Args),
     /// Print the context the agents read: `AI_CONTEXT.md`,
     /// `BUSINESS_CONTEXT.md` and the decision log (§5, §5c, §7).
     #[command(subcommand)]
@@ -147,7 +133,6 @@ impl Cli {
             Command::PrBody(args) => pr_body::run(args).map(|()| ExitCode::SUCCESS),
             Command::ReviewInput(args) => review_input::run(args).map(|()| ExitCode::SUCCESS),
             Command::Done(args) => done::run(args).map(|()| ExitCode::SUCCESS),
-            Command::CleanSpec(args) => clean_spec::run(args).map(|()| ExitCode::SUCCESS),
             Command::Context(command) => context::run(command).map(|()| ExitCode::SUCCESS),
             Command::Init => init::run().map(|()| ExitCode::SUCCESS),
         }

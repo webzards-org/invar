@@ -14,7 +14,8 @@ and no plugin exist — the standing proof that no logic leaked into the plugin
 - Canonicalization and checksums (§4d)
 - Parsing of the on-disk formats: `.feature` metadata, Plan header,
   `invar.yaml`, decision entries — against the specifications in `contracts/`
-- The decision log, `clean-spec`, `context show` assembly
+- The decision log, `done` (the one command that deletes a Plan), `context
+  show` assembly
 - Starting language adapters as processes and exchanging JSON over stdio
 
 ## Must not

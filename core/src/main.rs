@@ -10,7 +10,6 @@
 //! with the exit code being right.
 
 mod calendar;
-mod clean_spec;
 mod cli;
 mod context;
 mod decision;

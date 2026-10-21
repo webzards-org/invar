@@ -1,6 +1,6 @@
 //! `invar.yaml` — the project config (§6).
 //!
-//! Implements `contracts/formats/invar-yaml.md` v2.0.0. The contract is the
+//! Implements `contracts/formats/invar-yaml.md` v2.0.1. The contract is the
 //! authority; section numbers below (`§3.4`, `D-2`) point into it.
 //!
 //! Light mode reads four keys: `scenarios`, `review.offer`,

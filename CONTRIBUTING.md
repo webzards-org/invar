@@ -13,9 +13,9 @@ Examples: `chore/m0-1-monorepo-skeleton`, `feat/m1-2-digest-and-hash-command`,
 
 Types: `feat`, `fix`, `chore`, `docs`, `test`, `ci`, `spike`.
 
-**The task id must appear in the branch name as a substring.** That is how
-`clean-spec --merged` maps a ticket to a merged branch (§12), by plain
-substring matching against `git branch --merged`. Following the convention here
+**The task id must appear in the branch name, as a whole segment.** That is how
+`invar done` without a ticket finds the Plan to close (§12): the ticket must be
+a whole segment of the current branch's name. Following the convention here
 keeps this repository usable as the tool's own first test subject.
 
 One branch per task. A task that turns out to contain two changes is two tasks.

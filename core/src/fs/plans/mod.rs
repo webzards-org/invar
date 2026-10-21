@@ -195,7 +195,7 @@ pub fn parse_dir_name(name: &str) -> Option<(&str, &str)> {
 /// Whether `query` occurs in `name` as a whole segment: no letter or digit
 /// directly before or after the occurrence (D-10).
 ///
-/// Also how `clean-spec --merged` matches a ticket against branch names: the
+/// Also how `done` matches a ticket against the current branch's name: the
 /// same hazard — `PROJ-41` must not find `feat/PROJ-412-x` — has the same
 /// answer.
 pub fn matches_segment(name: &str, query: &str) -> bool {

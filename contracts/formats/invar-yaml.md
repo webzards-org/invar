@@ -1,8 +1,8 @@
 # Contract: `invar.yaml`
 
-**Version:** 2.0.0 — `review.offer` defaults to `true`; see §11 for what changed and why
+**Version:** 2.0.1 — `git.base_branch` serves the review diff only; see §11
 **Status:** stable
-**Implements:** §6 (Config file), §12 (`--merged` base branch), §14.3; light
+**Implements:** §6 (Config file), §13c (the review's base branch), §14.3; light
 mode L-2 and L-7 (`docs/TASKS-M1.md`)
 **Read by:** the core (`format/config`), the protocol skill (`review.offer`,
 M1-18), any later reimplementation
@@ -47,7 +47,7 @@ later milestone is read by this one without failing and without noise.
 |---|---|---|---|
 | `scenarios` | bool | `false` | Plan shape (L-2). `false` is light mode. `true` is reserved for the milestone that introduces `.feature` files; see §3.1 |
 | `review.offer` | bool | `true` (since 2.0.0; `false` before) | Whether the protocol skill offers `/invar:review` before `invar done` (L-7, D-8) |
-| `git.base_branch` | string | detected, see §3.3 | Base branch for the review diff and for `clean-spec --merged` |
+| `git.base_branch` | string | detected, see §3.3 | Base branch for the review diff |
 | `context.binding_limit` | integer | `9000` | Character ceiling for `invar context show --binding` (M1-14) |
 
 A dotted key is a key inside a section: `review.offer` is written as
@@ -85,15 +85,14 @@ developer is offered, never what is enforced. Why the default is `true` is D-8.
 ### 3.3 `git.base_branch`
 
 A branch name as `git` resolves it, such as `main`, `develop` or
-`origin/main`. It is used for the diff `/invar:review` reads (M1-20) and for
-`clean-spec --merged` (§12, M1-13).
+`origin/main`. It is used for the diff `/invar:review` reads (M1-20).
 
 When the key is absent, the base branch is detected, in this order:
 
 1. `git symbolic-ref refs/remotes/origin/HEAD`
 2. `main`
 
-This is the detection of §12 unchanged. The key exists for repositories where
+The key exists for repositories where
 that detection is wrong — a team that merges into `develop`, or a clone without
 an `origin/HEAD` ref.
 
@@ -376,6 +375,13 @@ growing `BUSINESS_CONTEXT.md` would stop delivering its invariants and not
 notice. The fix is to trim or split the context files, not to raise the limit.
 
 ## 11. Version history
+
+**2.0.1 — `invar clean-spec` is gone.**
+
+- §3, §3.3: `git.base_branch` no longer feeds `clean-spec --merged`, which was
+  removed with the command; it serves the review diff alone.
+
+**Compatibility:** the key, its default and its values are unchanged.
 
 **2.0.0 — `review.offer` defaults to `true` (M1-25).**
 

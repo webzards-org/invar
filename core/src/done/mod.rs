@@ -19,8 +19,11 @@
 //!
 //! Which Plan: the one a ticket or path names, or — with neither — the one
 //! whose ticket the current branch names (`feat/SHOP-214-cancel` →
-//! `SHOP-214`), matched as `clean-spec --merged` matches: a whole segment of
-//! the branch name, never a guess between two.
+//! `SHOP-214`), matched as a Plan lookup matches: a whole segment of the branch
+//! name, never a guess between two.
+//!
+//! **The only way a Plan is deleted.** A Plan that reached the main branch
+//! without `done` is removed with `git rm -r`; there is no cleanup command.
 
 use std::fmt;
 use std::fs;
@@ -97,8 +100,8 @@ fn stage(root: &ProjectRoot, plan_dir: &Path) -> Result<Staged, GitError> {
 /// The `spec.md` of the one Plan whose ticket `branch` names.
 ///
 /// A ticket is named when it is a whole segment of the branch name, with its
-/// capitalisation (`plans::matches_segment`, as `clean-spec --merged` uses
-/// it): `feat/SHOP-214-cancel` names `SHOP-214`, and not `SHOP-21`.
+/// capitalisation (`plans::matches_segment`): `feat/SHOP-214-cancel` names
+/// `SHOP-214`, and not `SHOP-21`.
 pub fn plan_for_branch(root: &ProjectRoot, branch: &str) -> Result<PathBuf, DoneError> {
     let names = plans::list(root)
         .map_err(DoneError::Lookup)?

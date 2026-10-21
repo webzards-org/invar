@@ -7,7 +7,7 @@
 §12 (the entry survives the Plan); light mode L-1, L-4 (`docs/TASKS-M1.md`)
 **Read by:** the core (`format/decision`), `invar decision log`,
 `invar decision validate` and `invar decision approve` (the draft),
-`invar context show` (M1-14), `invar clean-spec` (M1-13), the `/invar:log` and
+`invar context show` (M1-14), the `/invar:log` and
 `/invar:log-approve` skills, any later
 reimplementation and the post-MVP decision graph
 
@@ -157,8 +157,7 @@ entry only when it is recorded.
 **Path:** `.invar/plans/<TICKET>-<slug>/decision.md`, next to the ticket's
 `spec.md`. One draft per Plan; writing it again replaces it. Recording it
 removes it. `invar done` refuses while it is there — deleting the Plan would
-delete the reviewed text with it — so it is recorded or deleted first;
-`invar clean-spec` removes it with an abandoned Plan.
+delete the reviewed text with it — so it is recorded or deleted first.
 
 **Structure:** the same as an entry (§3, §4) — `---`, a flat `Key: value` front
 matter, `---`, a non-empty body — with these fields:
@@ -256,8 +255,7 @@ out. So entries are written when a person decides: by closing a cycle with
 developer's call.
 
 **D-7 — `ticket` is required.** It is the join key back to the cycle: the
-Plan, the branch, `clean-spec`'s "every abandoned Plan has an entry" rule
-(M1-13). An entry that belongs to no ticket is a fact about the project, and
+Plan and the branch. An entry that belongs to no ticket is a fact about the project, and
 those belong in `AI_CONTEXT.md` or `BUSINESS_CONTEXT.md` (§7, "Boundary
 against the other context files").
 
