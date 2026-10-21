@@ -1127,8 +1127,8 @@ say before?" — is answerable from `.invar/decisions/` alone. This is why
   mechanically**: neither `invar generate` nor `invar done` writes it. The
   agent drafts it through `/invar:log` from what the cycle actually did, and
   the developer records it with `/invar:log-approve` — or does not, for a
-  cycle that decided nothing worth remembering. (Until `done` is reduced to
-  deleting the Plan, it still writes one from `-m`; see Who writes.)
+  cycle that decided nothing worth remembering. `invar done` only deletes the
+  Plan (§12).
 - `correction` — developer rejected a draft or corrected generated code.
   **Reserved for the manual `invar decision record` path** — a
   developer noting, after the fact, that they fixed something by hand
@@ -1161,9 +1161,8 @@ agent writes one at all:
   skips the draft, so it is never the agent's.
 
 `plan guard` denies the agent both commands (§13). `invar generate` writes no
-entry, and `invar done` is to be reduced to deleting the Plan; until it is, it
-still writes a `confirmed` entry from its `-m`, so a cycle whose draft was also
-approved has two.
+entry, and neither does `invar done`, which only deletes the Plan — and refuses
+while a draft nobody approved is still beside it (§12).
 
 **The agent drafts; the developer decides.** An entry written from memory at
 the end of a cycle is an entry that is not written. So the main session may
@@ -1261,6 +1260,16 @@ invar decision approve <ticket> # the developer's gate on the log: records
                                   # without a valid draft; `failed` resets
                                   # the Plan. Run by /invar:log-approve;
                                   # `plan guard` denies it to the agent
+invar done [ticket]             # closes the cycle: plan check, then deletes
+                                  # .invar/plans/<TICKET>-<slug>/ and stages
+                                  # the deletion. Without a ticket, the Plan
+                                  # the current branch names. Refuses while an
+                                  # unapproved decision.md is there. Writes no
+                                  # decision entry. The developer's, from a
+                                  # terminal or CI; `plan guard` denies it to
+                                  # the agent (§12)
+invar pr-body <ticket> [--out p] # the approved Plan as a PR description;
+                                  # run before `done` deletes the Plan
 invar decision log              # concatenates .invar/decisions/
                                   # newest-first (rendered view)
 invar decision validate <ticket>  # checks the draft entry next to the Plan,
@@ -1548,9 +1557,38 @@ part of a cycle is a different act; see §4c.)
 
 ### Deletion happens inside the PR
 
-When `invar generate` completes a cycle successfully, the Plan is deleted as
-part of the same branch. The merge therefore brings an already-clean state to
-`main`.
+**`invar done` closes a cycle by deleting the Plan, and nothing else.** It
+checks that the Plan is approved and unchanged, deletes
+`.invar/plans/<TICKET>-<slug>/` and stages the deletion, so it is part of the
+same branch as the code. The merge therefore brings an already-clean state to
+`main`. Without a ticket it closes the Plan whose ticket the current branch's
+name contains, matched as `--merged` matches (below).
+
+**Who deletes: the developer.** `done` is their command, never an agent's —
+`plan guard` denies it (§13), and the protocol skill only tells the developer the
+cycle is ready to close. They run it from their terminal when they judge the work
+finished, or let CI run it: a workflow on pull-request approval, say, that runs
+`invar done <ticket>` on the PR branch and pushes the commit. It is usable there
+because it asks nothing of a session — and on a detached checkout it is given the
+ticket.
+
+**It writes no decision entry and requires none** (§7). Entries are approved
+from drafts, with `/invar:log-approve`, before the cycle closes. The one thing
+`done` guards is that draft: **it refuses while an unapproved `decision.md` is
+in the Plan directory** — "approve it with /invar:log-approve, or delete it" —
+because deleting the Plan would delete the text the developer reviewed, the one
+way this flow could lose it without a word. The PR description is rendered with
+`invar pr-body` while the Plan still exists.
+
+**A CI commit and "dismiss stale approvals".** When CI commits the deletion to
+the PR branch after the approval that triggered it, a repository whose branch
+protection dismisses stale approvals on new commits dismisses that very approval,
+and the PR needs approving again — which, with the same trigger, runs the
+workflow again on a Plan that is already gone. Either the workflow runs on
+something other than approval (a label, a manual dispatch), or the deletion
+happens before review is requested (the developer runs `done` and pushes), or
+the setting is relaxed for this one commit. The workflow also needs
+`contents: write` on the PR branch — not on `main`.
 
 This is deliberately **not** a post-merge GitHub Action. A bot committing to
 `main` after every PR would require `contents: write`, a branch-protection
@@ -1626,7 +1664,7 @@ put it: on disk.
 | After a code edit (Phase 2) | `invar lint check` | No |
 | During Phase 2 iteration | `invar generate <n> --tests-path <current>` | No — and not while coders run in parallel (§13d) |
 | End of Phase 2 | `invar generate <n>` (full suite) | Yes — fails loudly; writes no decision entry (§7) |
-| — | `plan approve`, `scenario confirm`, `decision approve`, `decision record` | **Never hooked** — and a `Bash` guard denies the agent running them |
+| — | `plan approve`, `scenario confirm`, `decision approve`, `decision record`, `done` | **Never hooked** — and a `Bash` guard denies the agent running them |
 
 **"After a code edit" is narrower than it sounds.** A `PostToolUse` hook
 matches on the *tool* that ran, so a matcher of `Write|Edit` does not see a file
@@ -1667,7 +1705,10 @@ wait: the developer approves from their own terminal. It denies
 is the developer's approval of a draft entry, the second would write an entry
 past the draft altogether. Each reason names what to do instead — tell the
 developer the draft is ready, and they record it with `/invar:log-approve`.
-`decision record` stays, for the developer's own entries written by hand.
+`decision record` stays, for the developer's own entries written by hand. And it
+denies `invar done`, which deletes the approved Plan: the agent tells the
+developer the cycle is ready to close, and they close it, from a terminal or CI
+(§12).
 
 This costs the developer nothing, which is why it is preferred to making the
 command ask for confirmation: a prompt in every approval would be paid for by
@@ -2128,3 +2169,9 @@ source behind it.
 - **What counts as "touches" when a test failure is routed back to a unit**
   (§13d)? A failing scenario's test file, the files in its traceback, or the
   developer's call. Before M5b.
+- **Who runs `done`, and does the review have to come first?** If the agent
+  closed the cycle, the advisory review would be a step it could skip on the way.
+  *Settled: `done` is the developer's (§12). It deletes the Plan and nothing
+  else, an agent is denied it (§13), and the protocol offers the review and the
+  decision draft before telling the developer the cycle is ready to close. The
+  review stays advisory: `done` does not wait for it.*
