@@ -309,8 +309,13 @@ fn the_skill_runs_the_cycle_as_a_dispatcher() {
     );
     assert!(flat.contains("do not weaken a criterion"));
     assert!(flat.contains("**Never edit the approved Plan**"));
-    // The cycle closes with `done`.
-    assert!(flat.contains("`invar done <TICKET> -m"));
+    // The developer closes the cycle; the main session says it is ready.
+    assert!(flat.contains("**tell the developer the cycle is ready to close**, and stop"));
+    assert!(flat.contains("Never run `invar done` yourself"));
+    assert!(
+        !flat.contains("`invar done <TICKET> -m"),
+        "the old closing step"
+    );
     // The developer's step is theirs.
     assert!(flat.contains("**Stop and wait.** Never run `invar plan approve` yourself"));
     // Code of its own only when the cycle is skipped.
@@ -504,10 +509,10 @@ fn the_commands_the_two_prompts_split_between_them_are_the_ones_each_is_allowed(
             .map(|span| command_and_flags(span).0)
             .collect();
 
-    // `plan check` and `done` are the main session's (Phase 2 and closing);
-    // the planner names them only in what it never does.
+    // `plan check` and `pr-body` are the main session's (Phase 2 and
+    // closing); the planner names neither.
     assert!(skill_commands.contains(&vec!["plan".to_owned(), "check".to_owned()]));
-    assert!(skill_commands.contains(&vec!["done".to_owned()]));
+    assert!(skill_commands.contains(&vec!["pr-body".to_owned()]));
     // `plan validate` and the full `context show` are the planner's.
     assert!(planner_commands.contains(&vec!["plan".to_owned(), "validate".to_owned()]));
     assert!(planner_commands.contains(&vec!["context".to_owned(), "show".to_owned()]));
@@ -799,9 +804,10 @@ fn the_protocol_skill_offers_the_review_before_done_and_never_runs_it() {
     assert!(flat.contains("unless `invar.yaml` sets `review.offer: false`"));
     assert!(flat.contains("Run `/invar:review` before closing?"));
     assert!(flat.contains("do not start the reviewer yourself"));
-    // Offered before `done`, which removes the Plan the review needs.
+    // Offered before the cycle is closed, which removes the Plan the review
+    // needs.
     let offer = flat.find("Offer the review").unwrap();
-    let done = flat.find("`invar done <TICKET> -m").unwrap();
+    let done = flat.find("the cycle is ready to close**").unwrap();
     assert!(offer < done);
 }
 
@@ -1098,13 +1104,53 @@ fn the_protocol_skill_offers_log_after_blocked_and_before_done() {
     // Closing: after the review, before `done`, which removes the Plan.
     let review = flat.find("Offer the review").unwrap();
     let draft = flat.find("Offer to draft the decision entry").unwrap();
-    let done = flat.find("`invar done <TICKET> -m").unwrap();
+    let done = flat.find("the cycle is ready to close**").unwrap();
     assert!(review < draft && draft < done);
     // When an entry is probably not worth drafting, said once, and the
     // developer decides.
     assert!(flat.contains("probably needs no more than a one-line message"));
     assert!(flat.contains("leave the choice to the developer"));
     assert!(flat.contains("Do not draft it yourself without `/invar:log`"));
+}
+
+// --- invar done is the developer's --------------------------------------------------------
+
+#[test]
+fn the_protocol_skill_tells_the_developer_the_cycle_is_ready_and_never_closes_it() {
+    let flat = skill().1.replace('\n', " ");
+
+    // The PR description is rendered while the Plan exists, by the session.
+    assert!(flat.contains("`invar pr-body <TICKET> --out .invar/out/<TICKET>-pr.md`"));
+    let pr = flat.find("**Render the PR description**").unwrap();
+    let ready = flat.find("the cycle is ready to close**").unwrap();
+    assert!(pr < ready);
+    // Closing is the developer's, from a terminal or CI; a draft entry blocks it.
+    assert!(flat.contains("Closing is theirs"));
+    assert!(flat.contains("or CI runs it for them"));
+    assert!(flat.contains("never delete the Plan another way"));
+    assert!(flat.contains("It refuses while a draft entry is still beside the Plan"));
+    assert!(flat.contains("- run `invar plan approve` or `invar done`;"));
+}
+
+#[test]
+fn no_agent_is_told_to_run_done() {
+    // Every agent names `invar done` only among what it never runs.
+    for file in agents() {
+        let (_, body) = frontmatter(&file);
+        for line in body.lines().filter(|line| line.contains("invar done")) {
+            assert!(
+                [
+                    "never",
+                    "Never",
+                    "no `invar",
+                    "**Run `invar plan approve` or"
+                ]
+                .iter()
+                .any(|word| line.contains(word)),
+                "{file} names `invar done` without forbidding it: {line}"
+            );
+        }
+    }
 }
 
 // --- /invar:log-approve ----------------------------------------------------------------------

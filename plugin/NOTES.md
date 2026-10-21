@@ -1023,10 +1023,10 @@ of `--ticket` when the command has one, else its first argument.
 `plugin_prompts.rs` also checks that every line of every prompt naming either
 command forbids it.
 
-**`invar done` is unchanged, for now.** It still writes a `confirmed` entry from
-`-m`. It is to be reduced to deleting the Plan, with the entry left to the draft
-and its approval; until then a cycle whose `confirmed` draft was approved and
-then closed with `done -m` has two `confirmed` entries.
+**`invar done` writes no entry.** It deletes the Plan and stages the deletion,
+and refuses while an unapproved `decision.md` is beside it — "approve it with
+/invar:log-approve, or delete it". It is the developer's too: `plan guard`
+denies it, with a reason telling the agent to say the cycle is ready to close.
 
 #### Not exercised (needs a real Claude Code session)
 
@@ -1360,7 +1360,8 @@ protocol skill offers it — at closing, after the review offer, and after
 
 **It does not record.** The developer records the draft with
 `/invar:log-approve` (§15), which assigns `id` and `date` then and deletes the
-draft. A draft not approved before `done` is lost with the Plan.
+draft. `done` refuses while a draft is unapproved, so none is lost with the
+Plan.
 
 **What CI checks.** The example draft inside the skill passes the real
 `invar decision validate`, so a contract change that outdates it fails in CI.

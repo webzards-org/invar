@@ -336,7 +336,7 @@ fn done_closes_a_cycle_that_was_never_reviewed() {
         .current_dir(repo.root())
         .env("GIT_AUTHOR_NAME", "Test")
         .env("GIT_COMMITTER_NAME", "Test")
-        .args(["done", "SHOP-214", "-m", "Built as planned."])
+        .args(["done", "SHOP-214"])
         .assert()
         .success();
 }

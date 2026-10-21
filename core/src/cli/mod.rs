@@ -66,9 +66,7 @@ pub enum Command {
     /// is left out unless `--with-ticket` is given. Refuses on a draft Plan:
     /// a PR description describes an approved specification.
     ///
-    /// `invar done` renders the same way, to `.invar/out/<TICKET>-pr.md`,
-    /// before it deletes the Plan (§12); this command is also usable on its
-    /// own while the Plan still exists.
+    /// Run it while the Plan exists: `invar done` deletes it (§12).
     PrBody(pr_body::Args),
     /// Print what the reviewer reads: the approved Plan, the binding context
     /// and the branch's diff.
@@ -85,13 +83,16 @@ pub enum Command {
     /// unapproved specification proves nothing. Advisory: `done` does not
     /// depend on it, and no hook runs it.
     ReviewInput(review_input::Args),
-    /// Close a cycle: `plan check`, render the PR description, record a
-    /// `confirmed` decision entry, delete the Plan directory (§3, §7, §12).
+    /// Close a cycle: delete the Plan directory, and stage the deletion (§12).
     ///
-    /// All-or-nothing: a draft or changed Plan refuses before anything is
-    /// written, and a failure at any later step leaves nothing after it
-    /// done. Warns, but does not refuse, when uncommitted changes exist
-    /// outside `.invar/`.
+    /// The developer's command — from a terminal, or from CI (for example a
+    /// workflow on pull-request approval). No agent runs it.
+    ///
+    /// Without a ticket, closes the Plan whose ticket the current branch's
+    /// name contains. Refuses, changing nothing, on a draft or changed Plan,
+    /// and while a draft decision entry (`decision.md`) is still in the Plan
+    /// directory: approve it with /invar:log-approve, or delete it. Writes no
+    /// decision entry and requires none.
     Done(done::Args),
     /// Delete the Plans that abandoned cycles left behind (§12).
     ///
@@ -153,7 +154,7 @@ impl Cli {
     }
 }
 
-/// A command's free-text body from stdin (`decision record`, `done`). A
+/// A command's free-text body from stdin (`decision record`). A
 /// terminal is refused: nobody is going to type it there, and waiting would
 /// only look like a hang.
 fn read_stdin() -> Result<String> {

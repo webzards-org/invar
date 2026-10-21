@@ -200,8 +200,8 @@ fn plan_dir_name(relative: &Path) -> Option<String> {
 /// A command the agent must not run, because what it records is a person's
 /// decision.
 struct HumanOnly {
-    /// The two words that follow `invar`.
-    words: [&'static str; 2],
+    /// The words that follow `invar`: `["plan", "approve"]`, `["done"]`.
+    words: &'static [&'static str],
     /// What the agent is shown, given the ticket (or `<ticket>`). The
     /// transcript prefixes it with "hook error" (plugin/NOTES.md §11), so it
     /// has to say on its own what to do instead.
@@ -215,18 +215,25 @@ struct HumanOnly {
 /// (decision-entry.md §8): the first records the draft the developer reviewed,
 /// the second writes past the draft altogether. Both are the developer's —
 /// `decision record` stays for the notes they write by hand.
+///
+/// `done` deletes the approved Plan and closes the cycle: the developer runs it,
+/// from a terminal or from CI, when they judge the work finished.
 const HUMAN_ONLY: &[HumanOnly] = &[
     HumanOnly {
-        words: ["plan", "approve"],
+        words: &["plan", "approve"],
         reason: plan_approve_reason,
     },
     HumanOnly {
-        words: ["decision", "approve"],
+        words: &["decision", "approve"],
         reason: decision_approve_reason,
     },
     HumanOnly {
-        words: ["decision", "record"],
+        words: &["decision", "record"],
         reason: decision_record_reason,
+    },
+    HumanOnly {
+        words: &["done"],
+        reason: done_reason,
     },
 ];
 
@@ -272,6 +279,17 @@ fn decision_record_reason(target: &str) -> String {
          records it with `/invar:log-approve {target}`. `invar decision record` stays \
          for the notes the developer writes by hand, from their own terminal. {}",
         mention("decision record")
+    )
+}
+
+fn done_reason(target: &str) -> String {
+    format!(
+        "`invar done` is the developer's decision, not yours: it closes the cycle by \
+         deleting the approved Plan. Do not run it, and do not look for another way to do \
+         the same thing — do not delete the Plan directory either. Tell the developer the \
+         cycle is ready to close and wait: they run `invar done {target}` themselves, from \
+         their own terminal or from CI. {}",
+        mention("done")
     )
 }
 
@@ -326,12 +344,12 @@ fn human_only(command: &str) -> Option<(&'static HumanOnly, Option<String>)> {
             continue;
         }
         for entry in HUMAN_ONLY {
-            let [first, second] = entry.words;
+            let length = entry.words.len();
             let found = after
-                .windows(2)
-                .position(|pair| pair[0] == first && pair[1] == second);
+                .windows(length)
+                .position(|window| window == entry.words);
             if let Some(at) = found {
-                return Some((entry, ticket_of(&after[at + 2..])));
+                return Some((entry, ticket_of(&after[at + length..])));
             }
         }
     }

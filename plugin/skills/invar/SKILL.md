@@ -1,6 +1,6 @@
 ---
 name: invar
-description: The invar cycle for changing code in a project that has an invar.yaml. A ticket is planned by the planner agent, the developer approves the Plan, the coder agent implements it, and the cycle closes with invar done. Use it when a ticket or request touches business logic, behavior users can observe, permissions, money or data, or when the developer mentions a ticket, a Plan, acceptance criteria or invar. For trivial work such as a typo or a copy change, skip it and say so.
+description: The invar cycle for changing code in a project that has an invar.yaml. A ticket is planned by the planner agent, the developer approves the Plan, the coder agent implements it, and the developer closes the cycle. Use it when a ticket or request touches business logic, behavior users can observe, permissions, money or data, or when the developer mentions a ticket, a Plan, acceptance criteria or invar. For trivial work such as a typo or a copy change, skip it and say so.
 ---
 
 # The invar cycle
@@ -12,7 +12,8 @@ only way to a different Plan is back through the developer.
 
 You are the **main session**, and in the cycle you are the **dispatcher**. You talk
 to the developer, start the planner and relay its questions, wait at the gate,
-start the coder, offer the review, and close the cycle. **You do not implement an
+start the coder, offer the review, and tell the developer when the cycle is ready
+to close. **You do not implement an
 approved Plan yourself**: the coder does, in its own context, starting from the
 Plan and nothing you said. The only code you write is the trivial work this skill
 skips the cycle for.
@@ -157,15 +158,17 @@ developer. Do not draft it yourself without `/invar:log`, and do not offer again
 if they decline. **The developer records the draft** with `/invar:log-approve`,
 after reading it; never record it yourself.
 
-Then, when the developer is ready to close:
+**Render the PR description** while the Plan still exists:
+`invar pr-body <TICKET> --out .invar/out/<TICKET>-pr.md`. Tell the developer its
+path.
 
-`invar done <TICKET> -m "<what was actually built, including any deviation from the Plan>"`
-
-Say honestly what came out, from the coder's summary and the review. `done` checks
-the Plan once more, renders the PR description to `.invar/out/<TICKET>-pr.md`,
-and removes the Plan, with any draft still beside it — so a draft the developer
-wants kept is recorded with `/invar:log-approve` before `done`. Tell the developer
-the path of the PR description, and to commit everything into the same PR.
+Then **tell the developer the cycle is ready to close**, and stop. Closing is
+theirs: `invar done` checks the Plan once more, deletes it and stages the
+deletion, so it goes into the same PR as the code. They run it from their own
+terminal, or CI runs it for them (on the pull request's approval, say). Never
+run `invar done` yourself — a hook denies it — and never delete the Plan another
+way. It refuses while a draft entry is still beside the Plan: the developer
+records it with `/invar:log-approve` or deletes it first.
 
 ## Models
 
@@ -197,7 +200,7 @@ implementing it.
 ## Never
 
 - implement an approved Plan yourself, or tell the coder more than the ticket line;
-- run `invar plan approve`;
+- run `invar plan approve` or `invar done`;
 - edit an approved Plan, or start the coder on a draft;
 - answer the planner's questions for the developer;
 - record a decision entry: never `invar decision approve`, never `invar decision record`
@@ -217,5 +220,6 @@ implementing it.
 | `/invar:log` | the developer's: drafts the decision entry, at the end of Phase 2 or after `BLOCKED` |
 | `invar decision validate <TICKET>` | form of a draft entry (`/invar:log` runs it) |
 | `/invar:log-approve` | the developer's: records the draft and removes it; a `failed` one returns the Plan to `draft` |
-| `invar done <TICKET> -m "..."` | close the cycle |
+| `invar pr-body <TICKET> --out .invar/out/<TICKET>-pr.md` | the PR description, before the Plan is deleted |
+| `invar done` | the developer's: deletes the Plan and stages it; you tell them the cycle is ready to close |
 | `invar context show --binding` | the binding context, which you already have |

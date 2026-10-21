@@ -145,8 +145,7 @@ and **the person writes it** (D-12):
 - **The agent writes no entry**, not even when asked: it drafts one (§8.1),
   and `plan guard` denies it both commands.
 - **No hook ever writes an entry**, and no other command writes one as a side
-  effect. (`invar done` still writes a `confirmed` entry from its `-m` until it
-  is reduced to deleting the Plan; see D-12.)
+  effect. `invar done` only deletes the Plan (D-12).
 
 ### 8.1 The draft
 
@@ -156,9 +155,10 @@ lives with the Plan, nothing reads it as part of the log, and it becomes an
 entry only when it is recorded.
 
 **Path:** `.invar/plans/<TICKET>-<slug>/decision.md`, next to the ticket's
-`spec.md`. One draft per Plan; writing it again replaces it. It is removed with
-the Plan directory, by `invar done` or `invar clean-spec`, whether or not it was
-recorded.
+`spec.md`. One draft per Plan; writing it again replaces it. Recording it
+removes it. `invar done` refuses while it is there — deleting the Plan would
+delete the reviewed text with it — so it is recorded or deleted first;
+`invar clean-spec` removes it with an abandoned Plan.
 
 **Structure:** the same as an entry (§3, §4) — `---`, a flat `Key: value` front
 matter, `---`, a non-empty body — with these fields:
@@ -297,9 +297,8 @@ made the developer's decision a moment in a conversation rather than a step
 they took: the text recorded was whatever the agent typed after "yes". Now the
 agent drafts, the developer reads the draft in the file, and the developer's
 own command records exactly that file. `decision record` stays for the entries
-only the developer can write (D-11). `invar done` is to be reduced to deleting
-the Plan; until it is, it writes its own `confirmed` entry, so a cycle whose
-draft was also approved has two.
+only the developer can write (D-11). `invar done` writes no entry: it deletes
+the Plan, and refuses while an unapproved draft is beside it.
 
 ## 11. Open questions
 

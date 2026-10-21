@@ -77,12 +77,10 @@ pub fn now(dir: &Path) -> Result<Instant, GitError> {
 /// Paths with uncommitted changes — staged, unstaged or untracked — relative
 /// to `dir`: `git status --porcelain=v1`, parsed leniently.
 ///
-/// Used only to warn (`invar done`, `docs/TASKS-M1.md` M1-12), never to
-/// refuse: a developer may legitimately close a cycle and commit everything
-/// into the same PR. `-z` is NUL-separated and never quotes a path, so a
-/// filename with a space or a non-ASCII character still parses; a rename or a
-/// copy carries its old path as a second NUL-terminated field, which is
-/// skipped.
+/// Used only to warn (`invar review-input`), never to refuse. `-z` is
+/// NUL-separated and never quotes a path, so a filename with a space or a
+/// non-ASCII character still parses; a rename or a copy carries its old path
+/// as a second NUL-terminated field, which is skipped.
 pub fn uncommitted(dir: &Path) -> Result<Vec<PathBuf>, GitError> {
     const COMMAND: &str = "git status --porcelain=v1 -z";
     let output = run(
@@ -111,6 +109,49 @@ pub fn uncommitted(dir: &Path) -> Result<Vec<PathBuf>, GitError> {
         }
     }
     Ok(paths)
+}
+
+/// The branch checked out in `dir`, by its short name (`feat/SHOP-214-x`):
+/// `git symbolic-ref --short HEAD`. `None` when `HEAD` is detached — as in a
+/// CI checkout of a pull request — which is an answer, not a failure.
+pub fn current_branch(dir: &Path) -> Result<Option<String>, GitError> {
+    const COMMAND: &str = "git symbolic-ref --short HEAD";
+    let output = run(dir, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    // `--quiet`: a detached `HEAD` exits 1 and says nothing.
+    if output.status.code() == Some(1) && output.stderr.is_empty() {
+        return Ok(None);
+    }
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    let name = text(COMMAND, &output.stdout)?.trim();
+    Ok((!name.is_empty()).then(|| name.to_owned()))
+}
+
+/// Stage the removal of `path` (relative to `dir`, a directory or a file
+/// already deleted from the work tree): `git rm -r --cached --ignore-unmatch`.
+///
+/// Only the index changes. Files git never tracked are no error
+/// (`--ignore-unmatch`): a Plan that was never committed has nothing to stage.
+pub fn stage_removal(dir: &Path, path: &Path) -> Result<(), GitError> {
+    const COMMAND: &str = "git rm -r --cached";
+    let path = path.to_string_lossy();
+    let output = run(
+        dir,
+        &[
+            "rm",
+            "-r",
+            "--quiet",
+            "--cached",
+            "--ignore-unmatch",
+            "--",
+            &path,
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(())
 }
 
 /// Where `dir` stands in relation to a git work tree.
