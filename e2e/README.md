@@ -13,10 +13,10 @@ does not have.
 - A sample FastAPI project with `specs/`, `invar.yaml`, a marked
   `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`, and pytest-bdd tests
 - Scripted runs of the real commands in sequence: `init`, `plan validate`,
-  `plan approve`, `scenario confirm`, `generate`, `clean-spec`
+  `plan approve`, `scenario confirm`, `generate`, `done`
 - The failure paths, which matter as much as the happy one: a stale checksum, an
-  unapproved Plan, a `failed` entry resetting the cycle, a Plan deleted with and
-  without a matching decision entry
+  unapproved Plan, a `failed` entry resetting the cycle, `done` refusing while an
+  unapproved draft entry is beside the Plan
 
 ## Must not
 

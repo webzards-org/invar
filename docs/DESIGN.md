@@ -586,10 +586,10 @@ test file. There is no tombstone state. Two constraints:
   scenario has exactly one test file, whose `scenarios(...)` call points at the
   feature path; leaving the test behind breaks discovery for the whole suite.
 
-**`clean-spec` still never touches `specs/` (§12).** That prohibition is
-unchanged and not in tension with the above: deletion here is a declared,
-reviewed act inside a cycle, not something a cleanup command may do on its own
-judgement.
+**Nothing deletes from `specs/` on its own judgement (§12).** `invar done`
+deletes only the Plan directory, and there is no cleanup command. That is not
+in tension with the above: deletion here is a declared, reviewed act inside a
+cycle.
 
 **An impossible Scenario returns to Phase 1.** If the Codegen Agent finds a
 confirmed Scenario self-contradictory or unimplementable — as opposed to merely
@@ -663,14 +663,11 @@ Digests are recorded as `sha256:<hex>`.
 
 **A missing Plan is not an integrity failure by itself.** The Plan is deleted
 inside the PR once its cycle passes (§12), so any later run — the CI run in
-particular — finds it gone. `generate` therefore resolves absence the same way
-`clean-spec` does:
-
-- **absent, and a decision entry exists for that ticket** → the cycle is
-  closed. Plan checks are skipped; `.feature` checks still run. Not an error.
-- **absent, and no decision entry exists** → hard error. That combination means
-  a Plan was removed without its cycle ever completing, which is exactly the
-  signal `clean-spec` refuses to erase (§12).
+particular — finds it gone. Only `invar done` deletes a Plan, and only one that
+is approved and unchanged, so **an absent Plan is a closed cycle**: Plan checks
+are skipped; `.feature` checks still run. Not an error. (A decision entry is no
+longer the evidence: entries are the developer's to approve, and a cycle that
+decided nothing worth remembering has none, §7.)
 
 This is what makes §10's "full loop runs in CI with no agent and no plugin" a
 real test rather than a contradiction: in CI the scenarios still verify
@@ -1283,12 +1280,10 @@ invar plan approve <ticket>     # the human gate: records Approved-by /
                                   # Approved-at + body checksum +
                                   # Lockfile-checksum. Refuses if
                                   # `plan validate` does not pass.
-invar clean-spec [ticket] [--dry-run]  # deletes plans under .invar/plans/;
-                    [--force] [--merged] # never touches specs/ or
-                                         # .invar/decisions/. [ticket] scopes
-                                         # deletion to one Plan; --force is
-                                         # required to delete anything (§12).
 ```
+
+There is no cleanup command: `done` is the only way a Plan is deleted, and a
+Plan that reached `main` without it is removed with `git rm -r` (§12).
 
 ## 9. Explicitly out of scope for MVP
 
@@ -1299,7 +1294,9 @@ invar clean-spec [ticket] [--dry-run]  # deletes plans under .invar/plans/;
 - `invar` calling an LLM itself — the developer's own agent is the runtime (§11)
 - Automatic ticket fetching from JIRA or similar — the developer pastes the
   ticket text; no issue-tracker integration in MVP
-- Post-merge cleanup automation — Plans are deleted inside the PR (§12)
+- Post-merge cleanup automation, and any cleanup command — `invar done` deletes
+  a Plan inside the PR, and a Plan that reached `main` without it is removed by
+  hand with `git rm -r` (§12). `clean-spec` existed and was removed
 - Recursive / vector-based project memory (linear, chronological decision log only)
 - Weighted decision graph — a `.invar/decisions.graph.yml` holding edges and
   weights referencing entry `id`s, layered above the markdown files without
@@ -1375,8 +1372,7 @@ invar clean-spec [ticket] [--dry-run]  # deletes plans under .invar/plans/;
       same digest after canonicalization (§4d), and `init` writes the
       `.gitattributes` entries
 - [ ] `invar generate` passes in CI **after** the Plan has been deleted: a
-      missing Plan with a matching decision entry is a closed cycle, a missing
-      Plan without one is a hard error (§4d)
+      missing Plan is a closed cycle, because only `done` deletes one (§4d)
 - [ ] A `failed` decision entry returns the Plan to `draft` and every
       `.feature` of that ticket to `draft`, clearing both checksums without
       altering file contents (§4c)
@@ -1393,9 +1389,10 @@ invar clean-spec [ticket] [--dry-run]  # deletes plans under .invar/plans/;
       version, the installed version, and the match class
 - [ ] A cycle that deletes a scenario declares it in the Plan and removes the
       `.feature` file together with its pytest-bdd test file
-- [ ] `clean-spec` never touches `specs/` or `.invar/decisions/`, defaults to
-      `--dry-run`, and refuses to delete a Plan with no corresponding decision
-      entry
+- [ ] `invar done` is the only command that deletes a Plan: it deletes
+      `.invar/plans/<TICKET>-<slug>/` and nothing else — never `specs/`, never
+      `.invar/decisions/` — and refuses while an unapproved `decision.md` is
+      in it (§12)
 - [ ] Codegen Agent produces implementation + matching `pytest-bdd` step
       definitions from a `confirmed` scenario, and never edits a confirmed
       `.feature` file
@@ -1506,7 +1503,7 @@ What the plugin supplies:
 
 1. **Deterministic commands** — `init`, `doctor`, `context sync/show`,
    `lint check`, `generate`, `plan validate/approve`, `scenario
-   validate/confirm`, `decision validate/approve/record`, `clean-spec`
+   validate/confirm`, `decision validate/approve/record`, `done`
 2. **Context assembly** — `invar context show` prints all context sources
    plus in-budget decision entries in an agent-consumable form
 3. **Hooks** — the commands fire on the right events rather than on the agent's
@@ -1533,15 +1530,15 @@ intent from ticket to code, and is deleted once the code exists.
 
 ```
 specs/orders/reserve-stock.feature          # permanent — lives as long as the code
-.invar/plans/PROJ-412-reserve-stock/      # consumable — deleted by clean-spec
+.invar/plans/PROJ-412-reserve-stock/      # consumable — deleted by done
     spec.md
 ```
 
-The two are separated **by tree, not by file**, so `clean-spec` can delete a
-whole directory without inspecting its contents. Scenario files are the
-behavioral test suite — alongside unit and integration tests, they are the
-guarantee that the application does what it should — and must never be
-removable by a cleanup command. (Deleting a scenario as a declared, reviewed
+The two are separated **by tree, not by file**, so `done` can delete a whole
+directory without inspecting its contents. Scenario files are the behavioral
+test suite — alongside unit and integration tests, they are the guarantee that
+the application does what it should — and must never be removed as a side
+effect of closing a cycle. (Deleting a scenario as a declared, reviewed
 part of a cycle is a different act; see §4c.)
 
 ### Why it lives in git and not in tmp
@@ -1562,7 +1559,9 @@ checks that the Plan is approved and unchanged, deletes
 `.invar/plans/<TICKET>-<slug>/` and stages the deletion, so it is part of the
 same branch as the code. The merge therefore brings an already-clean state to
 `main`. Without a ticket it closes the Plan whose ticket the current branch's
-name contains, matched as `--merged` matches (below).
+name contains: the ticket as a whole segment of the name, with its
+capitalisation, as the Plan lookup matches (§4a). None, or several, is an
+error; `invar` never guesses.
 
 **Who deletes: the developer.** `done` is their command, never an agent's —
 `plan guard` denies it (§13), and the protocol skill only tells the developer the
@@ -1597,33 +1596,23 @@ commit on each `pull`. Deleting inside the PR needs none of that, and
 CodeRabbit has already seen the file — it reads the diff, and the deletion is
 simply the last commit on that branch.
 
-### `clean-spec` guarantees
+### A Plan left behind
 
-The command exists for Plans left behind by abandoned or failed cycles.
+**`done` is the only way a Plan is deleted.** An abandoned cycle's Plan is
+closed the same way — `invar done <ticket>`, once it is approved and unchanged —
+or removed by hand. A Plan that reached `main` without `done` is removed with
+`git rm -r .invar/plans/<TICKET>-<slug>`, in a commit of its own.
 
-- Never touches `specs/` or `.invar/decisions/` — only `.invar/plans/`
-- Defaults to `--dry-run`. **`--force` is always required to actually delete
-  anything** — naming a `[ticket]` never bypasses it.
-- An optional `[ticket]` positional argument scopes deletion to that one Plan
-- `--merged` limits deletion to Plans whose ticket maps to a merged branch —
-  a second, independent scope filter, composable with `[ticket]`
-- **Refuses to delete a Plan with no corresponding decision entry** — a missing
-  entry means the cycle never finished properly. That is a signal, not garbage.
+There used to be a cleanup command, `invar clean-spec`, with `--dry-run`,
+`--force` and `--merged` (which looked for the ticket among branches merged
+into the base branch). It was removed: once `done` closes a cycle inside the
+PR, a leftover Plan is rare, and deleting one is a decision a person makes
+about one directory — which `git rm -r` already expresses, reviewably, with
+nothing for `invar` to guess.
 
-### `--merged` branch detection
-
-**Convention: search `git branch --merged <default-branch> --all` for a
-branch name containing the ticket id as a substring.** The same approach
-already used by the Plan lookup (§4a) and the pytest-bdd test lookup (§4b):
-plain substring matching, nothing smarter.
-
-- **Zero matching merged branches** means "not merged" — the Plan simply isn't
-  eligible for deletion under `--merged` yet. Not an error.
-- **Ambiguity is a hard error, same as §4a/§4b:** more than one matching branch
-  fails loudly. `invar` never guesses.
-
-**`<default-branch>` detection:** `git symbolic-ref refs/remotes/origin/HEAD`.
-If that ref doesn't exist, the fallback is **`main`**.
+The base branch is still detected — `git.base_branch`, else
+`git symbolic-ref refs/remotes/origin/HEAD`, else **`main`** — for the diff the
+review reads (§13c).
 
 ## 13. The plugin — delivery form of the system
 
@@ -2004,7 +1993,7 @@ core binary or a separate executable is decided at M6 (§16).
 
 FastAPI is the first target, not the only one. The cheap insurance is that
 `invar` is already almost language-neutral: the Plan, the gate, the checksums,
-the decision log, `clean-spec`, `context show` — none of it knows Python
+the decision log, `done`, `context show` — none of it knows Python
 exists. Four operations do:
 
 | Seam | Python (MVP) | Notes |
@@ -2134,7 +2123,7 @@ milestone is demonstrable on its own and most of them teach one of those.
 | **M0 — Foundations** | Rust basics; a minimal plugin with one hook; first draft of `contracts/` | A toy plugin logs every edited file; a toy Rust CLI prints the §4d digest of a file |
 | **M1 — Core gate** | Canonicalization and checksums; `plan validate/approve`; `scenario validate/confirm` incl. `--plan`; `Lockfile-checksum` | Every gate refusal in §10 is covered by a test |
 | **M2 — Python adapter** | Adapter protocol; dependency and test discovery; pytest execution; `generate` without lint | `generate` passes and fails correctly on the e2e sample project |
-| **M3 — Cycle closure** | Decision log; `failed` reset (§4c); `clean-spec`; `context show` incl. `--binding` and `--conventions`, local sources only | The full loop runs in CI with no agent (§10) |
+| **M3 — Cycle closure** | Decision log; `failed` reset (§4c); `done`; `context show` incl. `--binding` and `--conventions`, local sources only | The full loop runs in CI with no agent (§10) |
 | **M4 — Lint** | Base rules; one inter-module rule on the runtime import graph (§6) | Extended rules activate from a marked `AI_CONTEXT.md` |
 | **M5 — Plugin** | Planning, coder and review sub-agents; hooks; protocol skill; context delivery (§5c); model defaults (§13d) | A ticket goes from pasted text to a closed cycle inside Claude Code with no manual wiring, Phase 2 running in the coder sub-agent |
 | **M5b — Work units** | `## Work units` in the Plan contract; its checks in `plan validate`; parallel coders in the protocol (§13d) | A Plan with two independent units closes in one cycle with two coders, and an overlapping Plan is refused at validation |
