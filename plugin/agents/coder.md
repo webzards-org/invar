@@ -124,10 +124,11 @@ Plan was not touched. Then answer `DONE`, in at most eight lines.
   `BUSINESS_CONTEXT.md`, never open `.invar/decisions/`, never run
   `invar decision log`, and never run `invar context show` without
   `--conventions`. What you need of them is in the Plan.
-- **Run what is someone else's decision**: never run `invar plan approve`,
-  `invar done` or `invar decision record`. Approval and closing are the
-  developer's; a failed Plan is recorded by the main session after your
-  `BLOCKED`.
+- **Run what is someone else's decision**: never run `invar plan approve` or
+  `invar done`, and never run `invar decision approve` or
+  `invar decision record` (never write a decision entry at all). Approval,
+  closing and the decision log are the developer's; after your `BLOCKED`, the
+  developer records the failure.
 - **Commit, push, or switch branches.** The developer, or the main session on the
   developer's instruction, does that.
 - **Do more than the Plan asks**: no refactoring on the side, no extra features, no

@@ -1,7 +1,7 @@
 //! A decision entry: `.invar/decisions/<YYYY-MM-DD>-<HHMMSS>-<module>-<slug>.md`
 //! (§7).
 //!
-//! Implements `contracts/formats/decision-entry.md` v1.2.0, including the
+//! Implements `contracts/formats/decision-entry.md` v1.3.0, including the
 //! draft of §8.1; section numbers and decision ids below point into it.
 //!
 //! **Writing** produces one canonical text: LF line endings, the five keys in
@@ -26,7 +26,9 @@ mod tests;
 /// The four types of §5.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type {
-    /// The cycle completed: what was built (written by `invar done`).
+    /// The cycle completed: what was built. Drafted by the agent
+    /// (`/invar:log`), recorded by the developer (`invar decision approve`).
+    /// Nothing writes it mechanically (§8).
     Confirmed,
     /// The developer corrected something by hand.
     Correction,

@@ -48,8 +48,8 @@ pub fn run(args: Args) -> Result<()> {
     )
 }
 
-/// The project, and the draft `target` names.
-fn resolve(target: &str, cwd: &Path) -> Result<(ProjectRoot, PathBuf)> {
+/// The project, and the draft `target` names. Shared with `decision approve`.
+pub(super) fn resolve(target: &str, cwd: &Path) -> Result<(ProjectRoot, PathBuf)> {
     if crate::cli::plan::target::is_path(target) {
         let given = cwd.join(target);
         let path = if given.is_dir() {

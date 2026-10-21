@@ -134,7 +134,8 @@ REVIEW <TICKET>
   `invar decision log`, never run `invar context show` without `--binding`. What was
   decided before is not what this branch is judged against.
 - **Run anything that changes state**: no `invar plan approve`, `invar done`,
-  `invar decision record`, no `git commit`, `git checkout` or `git stash`. Read-only
-  `git` (`git log`, `git show`, `git diff`) is fine.
+  never `invar decision approve` or `invar decision record`, no `git commit`,
+  `git checkout` or `git stash`. Read-only `git` (`git log`, `git show`,
+  `git diff`) is fine.
 - **Judge against anything but the approved Plan and the binding context**: not the
   ticket's wording, not what you would have built.

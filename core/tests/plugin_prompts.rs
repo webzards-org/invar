@@ -298,10 +298,15 @@ fn the_skill_runs_the_cycle_as_a_dispatcher() {
     assert!(flat.contains("**`DONE`**"));
     assert!(flat.contains("**`BLOCKED <reason>`**"));
     // An impossible Plan goes back, with a `failed` entry — not "fixed" — and
-    // the entry is the developer's call (decision-entry.md D-6).
-    assert!(flat.contains("--type failed"));
+    // the entry is the developer's to record (decision-entry.md D-6).
+    assert!(flat.contains("Draft the `failed` entry?"));
     assert!(flat.contains("returns the Plan to `draft`"));
-    assert!(flat.contains("when the developer agrees, record it"));
+    assert!(flat.contains("**The developer records it**, with `/invar:log-approve <TICKET>`"));
+    assert!(flat.contains("it is their call, not yours: never record it yourself"));
+    assert!(
+        !flat.contains("--type failed"),
+        "the old way of recording it"
+    );
     assert!(flat.contains("do not weaken a criterion"));
     assert!(flat.contains("**Never edit the approved Plan**"));
     // The cycle closes with `done`.
@@ -442,6 +447,7 @@ fn every_invar_command_and_flag_the_prompts_name_exists() {
         frontmatter("agents/reviewer.md").1,
         skill().1,
         frontmatter("skills/log/SKILL.md").1,
+        frontmatter("skills/log-approve/SKILL.md").1,
     ];
     texts
         .iter_mut()
@@ -461,7 +467,9 @@ fn every_invar_command_and_flag_the_prompts_name_exists() {
     }
     // The extraction itself has to be finding things.
     assert!(commands.len() >= 6, "found only {commands:?}");
-    assert!(seen.len() >= 4, "found only {seen:?}");
+    // Since `/invar:log-approve`, no prompt spells out `decision record` with
+    // its flags; `--binding` and `--conventions` are what is left.
+    assert!(seen.len() >= 2, "found only {seen:?}");
 
     for path in &commands {
         let assert = Command::cargo_bin("invar")
@@ -1083,9 +1091,9 @@ fn the_protocol_skill_offers_log_after_blocked_and_before_done() {
         2,
         "offered once after BLOCKED and once before closing"
     );
-    // After BLOCKED: before the `failed` entry is recorded.
+    // After BLOCKED: before the developer records the `failed` entry.
     let blocked = flat.find("Draft the `failed` entry?").unwrap();
-    let failed = flat.find("--type failed -m").unwrap();
+    let failed = flat.find("`/invar:log-approve <TICKET>`").unwrap();
     assert!(blocked < failed);
     // Closing: after the review, before `done`, which removes the Plan.
     let review = flat.find("Offer the review").unwrap();
@@ -1097,4 +1105,167 @@ fn the_protocol_skill_offers_log_after_blocked_and_before_done() {
     assert!(flat.contains("probably needs no more than a one-line message"));
     assert!(flat.contains("leave the choice to the developer"));
     assert!(flat.contains("Do not draft it yourself without `/invar:log`"));
+}
+
+// --- /invar:log-approve ----------------------------------------------------------------------
+
+#[test]
+fn log_approve_cannot_be_invoked_by_the_model() {
+    // Like /invar:approve: the entry is the developer's (decision-entry.md D-6),
+    // and a misspelt field would be ignored without a word, so the exact
+    // string.
+    let (meta, body) = frontmatter("skills/log-approve/SKILL.md");
+
+    assert_eq!(meta["name"], "log-approve");
+    assert_eq!(meta["disable-model-invocation"], "true");
+    assert_eq!(meta["argument-hint"], "[ticket]");
+    assert!(
+        !meta.contains_key("user-invocable"),
+        "it must stay in the / menu"
+    );
+    for (key, value) in &meta {
+        assert!(!value.contains(": "), "`{key}` contains `: `");
+        assert!(!value.contains(" #"), "`{key}` contains ` #`");
+    }
+    assert!(body.contains("Do not run `invar decision approve` yourself"));
+    assert!(body.contains("never run `invar decision record`"));
+}
+
+#[test]
+fn log_approve_runs_the_cli_through_shell_injection() {
+    let (_, body) = frontmatter("skills/log-approve/SKILL.md");
+    let block = body
+        .split_once("```!\n")
+        .expect("the command runs before the model, in a ```! block")
+        .1
+        .split_once("\n```")
+        .unwrap()
+        .0;
+
+    // The same guard on `$ARGUMENTS` as /invar:approve, and the command last.
+    assert!(block.contains("*[!A-Za-z0-9._/-]*)"));
+    assert!(
+        block.ends_with("invar decision approve \"$t\" 2>&1"),
+        "{block}"
+    );
+    assert!(body.contains("Show the output above to the developer exactly as it is, and stop."));
+}
+
+#[cfg(unix)]
+#[test]
+fn log_approve_finds_the_one_draft_and_lists_several() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let (_, body) = frontmatter("skills/log-approve/SKILL.md");
+    let block = body
+        .split_once("```!\n")
+        .unwrap()
+        .1
+        .split_once("\n```")
+        .unwrap()
+        .0
+        .to_owned();
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("fakebin");
+    fs::create_dir_all(&bin).unwrap();
+    fs::write(bin.join("invar"), "#!/bin/sh\necho \"$1 $2: $3\"\n").unwrap();
+    fs::set_permissions(bin.join("invar"), fs::Permissions::from_mode(0o755)).unwrap();
+    let run = |arguments: &str| {
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(block.replace("$ARGUMENTS", arguments))
+            .current_dir(dir.path())
+            .env(
+                "PATH",
+                format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+            )
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let plan = |name: &str, draft: bool| {
+        let p = dir.path().join(".invar/plans").join(name);
+        fs::create_dir_all(&p).unwrap();
+        fs::write(p.join("spec.md"), "").unwrap();
+        if draft {
+            fs::write(p.join("decision.md"), "").unwrap();
+        }
+    };
+
+    // A Plan without a draft has nothing to record.
+    plan("SHOP-100-no-draft", false);
+    let none = run("");
+    assert!(none.contains("no draft entry"), "{none}");
+    assert!(none.contains("/invar:log"), "{none}");
+    // The one draft is found by itself, whatever other Plans exist.
+    plan("SHOP-214-a", true);
+    assert_eq!(run(""), "decision approve: SHOP-214-a\n");
+    // Several are listed, and nothing is recorded.
+    plan("SHOP-300-b", true);
+    let several = run("");
+    assert!(several.contains("2 drafts are waiting"), "{several}");
+    assert!(several.contains("  SHOP-300-b\n"), "{several}");
+    assert!(!several.contains("decision approve:"), "{several}");
+    // A ticket is passed through; shell syntax is refused.
+    assert_eq!(run("SHOP-300"), "decision approve: SHOP-300\n");
+    assert!(run("x; touch pwned").contains("is not a ticket"));
+    assert!(!dir.path().join("pwned").exists());
+}
+
+#[test]
+fn log_approve_is_offered_by_log_and_by_the_protocol_skill() {
+    let log = frontmatter("skills/log/SKILL.md").1.replace('\n', " ");
+    assert!(log.contains("record it with `/invar:log-approve <TICKET>`"));
+    // The old instructions, which had the developer record by hand, are gone.
+    assert!(!log.contains("--type failed"));
+    assert!(!log.contains("`invar done <TICKET> -m"));
+
+    let flat = skill().1.replace('\n', " ");
+    assert!(flat.contains("| `/invar:log-approve` | the developer's:"));
+    assert!(flat.contains("**The developer records the draft** with `/invar:log-approve`"));
+}
+
+#[test]
+fn no_prompt_tells_an_agent_to_record_a_decision_entry() {
+    // `decision approve` is the developer's gate and `decision record` would
+    // go around it; `plan guard` denies both to the agent. Every line of every
+    // prompt that names either is a prohibition — the command itself runs only
+    // inside /invar:log-approve's ```! block, before the model.
+    let mut files: Vec<String> = agents();
+    for skill in fs::read_dir(plugin_dir().join("skills")).unwrap() {
+        let name = skill.unwrap().file_name().to_string_lossy().into_owned();
+        if plugin_dir()
+            .join("skills")
+            .join(&name)
+            .join("SKILL.md")
+            .is_file()
+        {
+            files.push(format!("skills/{name}/SKILL.md"));
+        }
+    }
+    let mut mentions = 0;
+    for file in &files {
+        let mut in_fence = false;
+        for line in read(file).lines() {
+            if line.trim_start().starts_with("```") {
+                in_fence = !in_fence;
+                continue;
+            }
+            if in_fence
+                || !(line.contains("invar decision approve")
+                    || line.contains("invar decision record"))
+            {
+                continue;
+            }
+            mentions += 1;
+            assert!(
+                ["never", "Never", "Do not", "do not"]
+                    .iter()
+                    .any(|word| line.contains(word)),
+                "{file} names a decision-recording command without forbidding it: {line}"
+            );
+        }
+    }
+    // The prohibitions themselves are there: planner, coder, reviewer, the
+    // protocol skill, /invar:log and /invar:log-approve.
+    assert!(mentions >= 6, "only {mentions} mentions");
 }

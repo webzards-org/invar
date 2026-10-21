@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
-use super::{RecordError, Request, existing_ids, log, new_id, new_id_from, order_key, record};
+use super::{
+    RecordError, Request, draft, existing_ids, log, new_id, new_id_from, order_key, record,
+};
 use crate::format::decision::{self, Type};
 use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
@@ -521,6 +523,137 @@ fn other_types_never_touch_the_plan() {
         assert_eq!(recorded.reset, None);
     }
     assert_eq!(fs::read_to_string(spec(&root)).unwrap(), original);
+}
+
+// --- approving a draft (`invar decision approve`) ---------------------------------------
+
+fn draft_path(root: &ProjectRoot) -> PathBuf {
+    spec(root).with_file_name(decision::DRAFT_FILE)
+}
+
+fn write_draft(root: &ProjectRoot, module: &str, kind: &str, body: &str) -> PathBuf {
+    let path = draft_path(root);
+    fs::write(
+        &path,
+        format!("---\nticket: SHOP-214\nmodule: {module}\ntype: {kind}\n---\n\n{body}\n"),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn approving_records_the_draft_as_it_is_now_and_removes_it() {
+    let (_dir, root) = project(Some(&approved_plan()));
+    let path = write_draft(&root, "orders", "confirmed", "First version.");
+    // The developer edits the draft while reading it; the edit is recorded.
+    write_draft(
+        &root,
+        "orders",
+        "confirmed",
+        "Stock is released in the cancel transaction.\r\n",
+    );
+
+    let approved = draft::approve(&root, &path, NOW, Mode::Light).unwrap();
+    assert!(approved.left_behind.is_none());
+    assert_eq!(approved.draft, path);
+    assert!(!path.exists(), "the draft is removed");
+
+    let recorded = approved.recorded;
+    assert_eq!(
+        recorded.path,
+        root.decisions_dir()
+            .join("2026-10-06-163712-orders-cancel-unpaid-order.md")
+    );
+    assert!(decision::is_id(&recorded.entry.id), "{}", recorded.entry.id);
+    assert_eq!(recorded.entry.date, "2026-10-06T18:37:12+02:00");
+    assert_eq!(recorded.entry.kind, Type::Confirmed);
+    assert_eq!(
+        recorded.entry.body,
+        "Stock is released in the cancel transaction."
+    );
+    assert_eq!(recorded.reset, None);
+    let text = fs::read_to_string(&recorded.path).unwrap();
+    assert_eq!(text, recorded.entry.render());
+    let name = recorded.path.file_name().unwrap().to_str().unwrap();
+    assert!(decision::check(name, &text).is_ok());
+    // The Plan is untouched, and only its spec is left beside it.
+    assert_eq!(fs::read_to_string(spec(&root)).unwrap(), approved_plan());
+    assert_eq!(plan_dir_files(&root), ["spec.md"]);
+}
+
+#[test]
+fn the_drafts_module_is_taken_as_written_even_when_the_plan_names_another() {
+    let (_dir, root) = project(Some(&approved_plan()));
+    let path = write_draft(&root, "global", "note", "Applies to every module.");
+    let recorded = draft::approve(&root, &path, NOW, Mode::Light)
+        .unwrap()
+        .recorded;
+    assert_eq!(recorded.entry.module, "global");
+    assert_eq!(
+        recorded.path.file_name().unwrap(),
+        "2026-10-06-163712-global-cancel-unpaid-order.md"
+    );
+}
+
+#[test]
+fn approving_a_failed_draft_returns_the_plan_to_draft() {
+    let (_dir, root) = project(Some(&approved_plan()));
+    let path = write_draft(&root, "orders", "failed", "The gateway has no void call.");
+    let recorded = draft::approve(&root, &path, NOW, Mode::Light)
+        .unwrap()
+        .recorded;
+    assert_eq!(recorded.entry.kind, Type::Failed);
+    assert_eq!(recorded.reset, Some(spec(&root)));
+    let plan = fs::read_to_string(spec(&root)).unwrap();
+    assert!(plan.contains("Status: draft"), "{plan}");
+    assert!(!path.exists());
+}
+
+#[test]
+fn without_a_draft_nothing_is_written() {
+    let (_dir, root) = project(Some(&approved_plan()));
+    match draft::approve(&root, &draft_path(&root), NOW, Mode::Light) {
+        Err(err @ draft::ApproveError::NoDraft { .. }) => {
+            assert!(err.to_string().contains("/invar:log"), "{err}");
+        }
+        other => panic!("expected NoDraft, got {other:?}"),
+    }
+    assert!(!root.decisions_dir().exists());
+}
+
+#[test]
+fn an_invalid_draft_is_refused_and_kept() {
+    let (_dir, root) = project(Some(&approved_plan()));
+    let path = write_draft(&root, "orders", "correction", "By hand.");
+    let before = fs::read_to_string(&path).unwrap();
+    match draft::approve(&root, &path, NOW, Mode::Light) {
+        Err(draft::ApproveError::Invalid(report)) => {
+            assert!(!report.problems.is_empty());
+            assert!(report.problems.to_string().contains("correction"));
+        }
+        other => panic!("expected Invalid, got {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+    assert!(!root.decisions_dir().exists());
+    // A failed draft that does not validate resets nothing either.
+    let path = write_draft(&root, "orders", "failed", "");
+    assert!(matches!(
+        draft::approve(&root, &path, NOW, Mode::Light),
+        Err(draft::ApproveError::Invalid(_))
+    ));
+    assert_eq!(fs::read_to_string(spec(&root)).unwrap(), approved_plan());
+}
+
+#[test]
+fn approving_twice_records_once() {
+    let (_dir, root) = project(Some(&approved_plan()));
+    let path = write_draft(&root, "orders", "note", "Once.");
+    draft::approve(&root, &path, NOW, Mode::Light).unwrap();
+    assert!(matches!(
+        draft::approve(&root, &path, NOW, Mode::Light),
+        Err(draft::ApproveError::NoDraft { .. })
+    ));
+    assert_eq!(names(&root).len(), 1);
 }
 
 // --- reading ----------------------------------------------------------------------------

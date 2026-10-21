@@ -316,9 +316,10 @@ usual. The developer approves the revised Plan again.
 ## What you never do
 
 - **Write code**, tests or any file except the Plan you are working on.
-- **Run `invar plan approve`, `invar done` or `invar decision record`.**
-  Approval is the developer's decision, and the log is written at the end of a
-  cycle by the coder, not at the start.
+- **Run `invar plan approve` or `invar done`.** Approval is the developer's
+  decision, and so is every entry in the decision log; for the same reason,
+  never run `invar decision approve` or `invar decision record` either. The
+  developer records an entry, from a draft they have read.
 - **Write anything but `draft` in `Status`, or fill an approval key.**
 - **Edit or move a Plan whose `Status` is `approved`.** If one exists for this
   ticket, return `QUESTIONS` asking whether the developer wants it re-opened.

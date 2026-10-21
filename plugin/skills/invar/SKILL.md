@@ -118,19 +118,18 @@ edit the Plan, and do not start the coder again with your own interpretation.
 1. Put the coder's reason to the developer, as it gave it.
 2. Offer to draft the entry, once: *"Draft the `failed` entry? Run `/invar:log`."*
    It writes the draft next to the Plan for the developer to read; it records
-   nothing. Then, with the text in hand — the draft, or the developer's own —
-   and when the developer agrees, record it:
+   nothing. **The developer records it**, with `/invar:log-approve <TICKET>`, after
+   reading and perhaps editing it. Recording it returns the Plan to `draft` and
+   clears its approval, with the text untouched — it de-approves their Plan, so
+   it is their call, not yours: never record it yourself.
+3. Once the developer has recorded it, go back to **Phase 1**: call the planner
+   with the ticket and the failure. It revises the draft; the developer approves
+   it again.
 
-   `invar decision record --ticket <TICKET> --type failed -m "Plan required X; impossible because Y"`
-
-   That entry returns the Plan to `draft` and clears its approval, with the text
-   untouched. It is the developer's call because it de-approves their Plan.
-3. Go back to **Phase 1**: call the planner with the ticket and the failure. It
-   revises the draft; the developer approves it again.
-
-"Plan required X; impossible because Y" is one of the most useful entries the log
-will hold, so write it precisely. If the developer would rather change the approved
-Plan themselves, they edit it and approve it again with `--reapprove`.
+*"The Plan required X; impossible because Y"* is one of the most useful entries
+the log will hold, so the draft says it precisely. If the developer would rather
+change the approved Plan themselves, they edit it and approve it again with
+`--reapprove`.
 
 **Never edit the approved Plan** — with any tool, however small the edit. A hook
 refuses edits made through `Write` and `Edit`; an edit made through a shell is caught
@@ -155,18 +154,18 @@ it records nothing. A cycle that only changed CI, copy, or fixed something
 without leaving a rule the next Plan should know probably needs no more than a
 one-line message — say so in the same line, and leave the choice to the
 developer. Do not draft it yourself without `/invar:log`, and do not offer again
-if they decline.
+if they decline. **The developer records the draft** with `/invar:log-approve`,
+after reading it; never record it yourself.
 
 Then, when the developer is ready to close:
 
 `invar done <TICKET> -m "<what was actually built, including any deviation from the Plan>"`
 
-Say honestly what came out, from the coder's summary and the review; the message
-becomes the permanent decision entry. If there is a draft the developer agreed
-with, its body is the message. `done` checks the Plan once more, renders the
-PR description to `.invar/out/<TICKET>-pr.md`, records the entry and removes the
-Plan. Tell the developer the path of the PR description, and to commit everything
-into the same PR.
+Say honestly what came out, from the coder's summary and the review. `done` checks
+the Plan once more, renders the PR description to `.invar/out/<TICKET>-pr.md`,
+and removes the Plan, with any draft still beside it — so a draft the developer
+wants kept is recorded with `/invar:log-approve` before `done`. Tell the developer
+the path of the PR description, and to commit everything into the same PR.
 
 ## Models
 
@@ -201,7 +200,8 @@ implementing it.
 - run `invar plan approve`;
 - edit an approved Plan, or start the coder on a draft;
 - answer the planner's questions for the developer;
-- record a `failed` entry without the developer's agreement;
+- record a decision entry: never `invar decision approve`, never `invar decision record`
+  — the developer records it, with `/invar:log-approve`;
 - switch an agent's model without saying so;
 - read the decision log;
 - skip the cycle without saying so.
@@ -213,9 +213,9 @@ implementing it.
 | `invar plan check <TICKET>` | before you start the coder; refuses draft, changed and unrecorded approvals |
 | `invar plan validate <TICKET>` | form of a draft Plan (the planner runs it) |
 | `/invar:approve` | the developer's; `invar plan approve <TICKET>` from their own terminal |
-| `invar decision record --ticket <TICKET> --type failed -m "..."` | after `BLOCKED`, with the developer's agreement |
 | `/invar:review` | the developer's, before `done`, unless `review.offer: false` |
 | `/invar:log` | the developer's: drafts the decision entry, at the end of Phase 2 or after `BLOCKED` |
 | `invar decision validate <TICKET>` | form of a draft entry (`/invar:log` runs it) |
+| `/invar:log-approve` | the developer's: records the draft and removes it; a `failed` one returns the Plan to `draft` |
 | `invar done <TICKET> -m "..."` | close the cycle |
 | `invar context show --binding` | the binding context, which you already have |

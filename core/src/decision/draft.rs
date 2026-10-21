@@ -1,22 +1,32 @@
 //! The draft of a decision entry: `.invar/plans/<TICKET>-<slug>/decision.md`
 //! (decision-entry.md §8.1).
 //!
-//! The agent writes the draft (`/invar:log`); this module only checks it, so a
+//! The agent writes the draft (`/invar:log`); [`validate`] checks it, so a
 //! malformed draft is found when it is written and not when the developer
-//! records it. A draft is not an entry: nothing here touches
-//! `.invar/decisions/`, and nothing reads a draft as part of the log.
+//! records it. A draft is not an entry, and nothing reads a draft as part of
+//! the log.
+//!
+//! [`approve`] is the developer's gate (`invar decision approve`, run through
+//! `/invar:log-approve`): it validates the draft as it is now — after any
+//! edits the developer made while reading it — records it as an entry, and
+//! removes it. It is the only thing here that touches `.invar/decisions/`.
 //!
 //! The checks are the draft's own (`format::decision::parse_draft`) and the
 //! ones that need its place: it sits in a Plan directory, next to a `spec.md`,
 //! and names that directory's ticket.
 
+use std::fmt;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use crate::diagnostics::Diagnostics;
 use crate::format::decision::{self, DRAFT_FILE, Draft};
+use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
 use crate::fs::plans::{self, LookupError, SPEC_FILE};
+use crate::git::Instant;
+
+use super::{RecordError, Recorded};
 
 /// The result of validating one draft.
 #[derive(Debug)]
@@ -77,6 +87,100 @@ pub fn validate(root: &ProjectRoot, path: &Path) -> Report {
         path: path.to_owned(),
         draft,
         problems,
+    }
+}
+
+// --- approving --------------------------------------------------------------------
+
+/// What [`approve`] did.
+#[derive(Debug)]
+pub struct Approved {
+    /// The entry, and the Plan reset for `failed`.
+    pub recorded: Recorded,
+    /// The draft that was recorded.
+    pub draft: PathBuf,
+    /// Why the draft could not be removed, when it could not. The entry is
+    /// recorded either way; the draft left behind must not be approved again.
+    pub left_behind: Option<io::Error>,
+}
+
+/// Record the draft at `path` (absolute; [`path_for`] finds it from a
+/// ticket), and remove it.
+///
+/// The draft is read and validated now, so what is recorded is what the
+/// developer has just read, edits included. It refuses when there is no
+/// draft, or when the draft is not valid; nothing is written then. A
+/// `failed` draft returns the Plan to `draft` with its entry (decision-entry.md
+/// §7, D-8).
+pub fn approve(
+    root: &ProjectRoot,
+    path: &Path,
+    now: Instant,
+    mode: Mode,
+) -> Result<Approved, ApproveError> {
+    if matches!(
+        std::fs::symlink_metadata(path),
+        Err(err) if err.kind() == io::ErrorKind::NotFound
+    ) {
+        return Err(ApproveError::NoDraft {
+            path: path.to_owned(),
+        });
+    }
+    let report = validate(root, path);
+    let Some(draft) = report.draft else {
+        return Err(ApproveError::Invalid(Box::new(report)));
+    };
+    let recorded = super::record_draft(root, draft, now, mode).map_err(ApproveError::Record)?;
+    let left_behind = std::fs::remove_file(path).err();
+    Ok(Approved {
+        recorded,
+        draft: path.to_owned(),
+        left_behind,
+    })
+}
+
+#[derive(Debug)]
+pub enum ApproveError {
+    /// The Plan has no `decision.md`.
+    NoDraft { path: PathBuf },
+    /// The draft has problems; the report lists them all. Boxed: it is far
+    /// larger than the other variants (`clippy::result_large_err`).
+    Invalid(Box<Report>),
+    /// The draft is valid, but the entry could not be written.
+    Record(RecordError),
+}
+
+impl fmt::Display for ApproveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoDraft { path } => write!(
+                f,
+                "there is no draft to record: {} does not exist. Have the agent draft the \
+                 entry with `/invar:log` first, read it, then approve it; nothing was \
+                 written",
+                path.display()
+            ),
+            Self::Invalid(report) => {
+                let count = report.problems.len();
+                write!(
+                    f,
+                    "the draft is not valid ({count} {}), so nothing was recorded; fix it \
+                     — by hand, or with `/invar:log` — then approve it again:\n{}",
+                    if count == 1 { "problem" } else { "problems" },
+                    report.problems.render(&report.path).trim_end()
+                )
+            }
+            Self::Record(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for ApproveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Record(err) => Some(err),
+            Self::NoDraft { .. } | Self::Invalid(_) => None,
+        }
     }
 }
 

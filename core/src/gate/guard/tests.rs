@@ -343,6 +343,11 @@ fn other_commands_pass_and_so_does_every_other_invar_command() {
         "invar plan check SHOP-214",
         "invar plan guard",
         "invar context show",
+        // The decision commands that record nothing.
+        "invar decision validate SHOP-214",
+        "invar decision log",
+        "echo decision approve",
+        "invar decision validate SHOP-214; echo decision record",
         // The words appear, but no `invar` runs them.
         "echo plan approve",
         "grep -rn approve invar/core/src",
@@ -363,8 +368,84 @@ fn asking_for_help_is_not_running_the_command() {
         "invar plan approve --help",
         "invar plan approve -h",
         "invar plan approve SHOP-214 --help",
+        "invar decision approve --help",
+        "invar decision record -h",
     ] {
         assert_eq!(verdict_on(command), Verdict::Pass, "{command:?}");
+    }
+}
+
+// `decision approve` records the draft the developer reviewed; `decision
+// record` writes past the draft. Both write the insert-only log, so both are the
+// developer's (decision-entry.md §8).
+
+#[test]
+fn running_decision_approve_is_denied_and_points_at_the_skill() {
+    let reason = denied("invar decision approve SHOP-214");
+    assert!(
+        reason.starts_with("`invar decision approve` is the developer's decision, not yours"),
+        "{reason}"
+    );
+    assert!(reason.contains("Do not run it"), "{reason}");
+    assert!(reason.contains("`/invar:log-approve SHOP-214`"), "{reason}");
+    assert!(reason.contains("returns the Plan to `draft`"), "{reason}");
+    assert!(
+        reason.contains("without `invar` directly in front of `decision approve`"),
+        "{reason}"
+    );
+    // It never suggests the command it denies, or the other one.
+    assert!(!reason.contains("invar decision approve SHOP"), "{reason}");
+    assert!(!reason.contains("decision record"), "{reason}");
+}
+
+#[test]
+fn running_decision_record_is_denied_and_points_at_the_draft() {
+    let reason = denied("invar decision record --type failed --ticket SHOP-214 -m 'no'");
+    assert!(
+        reason.starts_with("`invar decision record` is the developer's decision, not yours"),
+        "{reason}"
+    );
+    assert!(reason.contains("Do not run it"), "{reason}");
+    assert!(reason.contains("`/invar:log SHOP-214`"), "{reason}");
+    assert!(reason.contains("`/invar:log-approve SHOP-214`"), "{reason}");
+    assert!(
+        reason.contains("stays for the notes the developer writes by hand"),
+        "{reason}"
+    );
+    assert!(!reason.contains("--type"), "{reason}");
+}
+
+#[test]
+fn the_ticket_of_decision_record_is_read_from_its_flag() {
+    assert!(
+        denied("invar decision record --ticket=SHOP-9 --type note -m x")
+            .contains("`/invar:log-approve SHOP-9`")
+    );
+    assert!(
+        denied("invar decision record --type note --ticket SHOP-9").contains("`/invar:log SHOP-9`")
+    );
+    // Plan approve is unchanged: its ticket is its first argument.
+    assert!(
+        denied("invar plan approve --reapprove SHOP-9").contains("`invar plan approve SHOP-9`")
+    );
+    assert!(denied("invar decision approve").contains("`/invar:log-approve <ticket>`"));
+}
+
+#[test]
+fn every_way_of_writing_the_decision_commands_is_denied() {
+    for command in [
+        "invar decision approve SHOP-214",
+        "invar decision approve .invar/plans/SHOP-214-cancel",
+        "/usr/local/bin/invar decision approve SHOP-214",
+        "cd app && invar decision approve SHOP-214",
+        "invar decision validate SHOP-214 && invar decision approve SHOP-214",
+        "bash -c 'invar decision approve SHOP-214'",
+        "invar decision record --ticket SHOP-214 --type note -m 'x'",
+        "echo text | invar decision record --ticket SHOP-214 --type failed",
+        "$(invar decision record --ticket SHOP-214 --type note -m x)",
+        "env invar decision record --ticket SHOP-214 --type note -m x",
+    ] {
+        denied(command);
     }
 }
 

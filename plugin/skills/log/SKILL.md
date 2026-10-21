@@ -99,13 +99,14 @@ its line; fix them and run it again until it says `ok:`.
 
 Show the developer the draft as you wrote it, and its path. **Do not record it**:
 whether the cycle is worth an entry, and what it says, is the developer's call.
-Tell them, in one line, what recording it takes:
+Tell them, in one line, that they read it, edit it if they want to, and record it
+with `/invar:log-approve <TICKET>` — which records the draft as it is then, and
+removes it. For `failed`, add that recording it also returns the Plan to `draft`.
 
-- `confirmed` — it becomes the message of `invar done <TICKET> -m "..."` when they
-  close the cycle;
-- `failed` — `invar decision record --ticket <TICKET> --type failed -m "..."`,
-  which also returns the Plan to `draft`;
-- `note` — `invar decision record --ticket <TICKET> --type note -m "..."`.
+Recording is never yours: do not run `invar decision approve` or
+`invar decision record` — a hook denies both — and do not write the entry into
+the log any other way.
 
-If the developer edits the draft or asks for another, change it and run
-`invar decision validate <TICKET>` again.
+If the developer asks for another draft, change it and run
+`invar decision validate <TICKET>` again. If they edit it themselves, leave it as
+they left it.

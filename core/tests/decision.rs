@@ -590,3 +590,119 @@ fn the_help_says_what_a_draft_is_and_that_it_records_nothing() {
         .stdout(contains("no `id` and no `date`"))
         .stdout(contains("Writes nothing; records nothing"));
 }
+
+// --- approve: the developer records the draft --------------------------------------
+
+impl Project {
+    fn approve(&self, target: &str) -> assert_cmd::assert::Assert {
+        self.invar(&["decision", "approve", target]).assert()
+    }
+
+    fn exists(&self, relative: &str) -> bool {
+        self.root().join(relative).exists()
+    }
+}
+
+#[test]
+fn approve_records_the_draft_with_a_new_id_and_date_and_removes_it() {
+    let project = Project::new(Some(&approved_plan()));
+    project.draft(VALID_DRAFT);
+    project
+        .approve("SHOP-214")
+        .success()
+        .stdout(contains(format!("recorded: {ENTRY} (d-")))
+        .stdout(contains(", confirmed, orders)"))
+        .stdout(contains(format!("removed: {DRAFT}")));
+    let text = project.read(ENTRY);
+    assert!(text.starts_with("---\nid: d-"), "{text}");
+    assert!(
+        text.contains(&format!(
+            "\ndate: {NOW}\nticket: SHOP-214\nmodule: orders\ntype: confirmed\n---\n\n\
+             Stock is released inside the cancel transaction, through `StockLedger`.\n"
+        )),
+        "{text}"
+    );
+    assert!(!project.exists(DRAFT));
+    assert_eq!(project.read(SPEC), approved_plan());
+}
+
+#[test]
+fn approve_records_what_the_developer_edited_by_ticket_or_by_path() {
+    let project = Project::new(Some(&approved_plan()));
+    // The agent's draft, as the developer left it after reading it.
+    project.draft(
+        &VALID_DRAFT
+            .replace("module: orders", "module: global")
+            .replace("type: confirmed", "type: note"),
+    );
+    project
+        .approve(".invar/plans/SHOP-214-cancel-unpaid-order")
+        .success()
+        .stdout(contains(", note, global)"));
+    assert_eq!(
+        project.entries(),
+        ["2026-10-06-163712-global-cancel-unpaid-order.md"]
+    );
+    assert!(!project.exists(DRAFT));
+}
+
+#[test]
+fn approve_of_a_failed_draft_returns_the_plan_to_draft() {
+    let project = Project::new(Some(&approved_plan()));
+    project.draft(&VALID_DRAFT.replace("type: confirmed", "type: failed"));
+    project
+        .approve("SHOP-214")
+        .success()
+        .stdout(contains(", failed, orders)"))
+        .stdout(contains(format!("reset: {SPEC} is `draft` again")));
+    assert!(project.read(SPEC).contains("Status: draft"));
+    assert_eq!(project.entries().len(), 1);
+    assert!(!project.exists(DRAFT));
+}
+
+#[test]
+fn approve_without_a_draft_refuses_and_writes_nothing() {
+    let project = Project::new(Some(&approved_plan()));
+    project
+        .approve("SHOP-214")
+        .failure()
+        .stderr(contains("there is no draft to record"))
+        .stderr(contains("/invar:log"));
+    assert!(project.entries().is_empty());
+    assert_eq!(project.read(SPEC), approved_plan());
+}
+
+#[test]
+fn approve_of_an_invalid_draft_lists_every_problem_and_keeps_it() {
+    let project = Project::new(Some(&approved_plan()));
+    let invalid = "---\nid: d-1234\nticket: SHOP-214\nmodule: orders\ntype: failed\n---\n";
+    project.draft(invalid);
+    project
+        .approve("SHOP-214")
+        .failure()
+        .stdout(contains(format!("{DRAFT}:2: a draft has no `id`")))
+        .stdout(contains(format!("{DRAFT}: the body is empty")))
+        .stderr(contains(
+            "the draft is not valid (2 problems), so nothing was recorded",
+        ));
+    assert_eq!(project.read(DRAFT), invalid);
+    assert!(project.entries().is_empty());
+    // `failed`, but not valid: the Plan is not reset either.
+    assert_eq!(project.read(SPEC), approved_plan());
+}
+
+#[test]
+fn approve_for_a_ticket_with_no_plan_is_a_lookup_error() {
+    Project::new(None).approve("SHOP-214").failure();
+}
+
+#[test]
+fn the_help_says_approve_is_the_developers_gate() {
+    Command::cargo_bin("invar")
+        .unwrap()
+        .args(["decision", "approve", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("/invar:log-approve"))
+        .stdout(contains("deletes `decision.md`"));
+}

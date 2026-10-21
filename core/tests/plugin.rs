@@ -418,6 +418,29 @@ fn the_pre_tool_use_hook_also_answers_for_a_bash_call() {
         .failure()
         .code(2)
         .stderr(contains("developer's decision"));
+    // So are the two that write the decision log: the draft's approval, and
+    // the manual entry that would go around it.
+    for (command, skill) in [
+        (
+            "invar decision approve SHOP-214",
+            "/invar:log-approve SHOP-214",
+        ),
+        (
+            "invar decision record --ticket SHOP-214 --type failed -m x",
+            "/invar:log SHOP-214",
+        ),
+    ] {
+        Command::cargo_bin("invar")
+            .unwrap()
+            .current_dir(&root)
+            .args(&hook.args)
+            .write_stdin(bash(command))
+            .assert()
+            .failure()
+            .code(2)
+            .stderr(contains("developer's decision"))
+            .stderr(contains(skill));
+    }
 }
 
 // --- the launcher ----------------------------------------------------------------------------------------
