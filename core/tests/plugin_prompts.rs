@@ -957,6 +957,126 @@ mod approve_block {
         let dir = tempfile::tempdir().unwrap();
         assert!(run(dir.path(), "").contains("no Plan in .invar/plans/"));
     }
+
+    #[test]
+    fn no_start_still_approves_and_says_phase_2_is_not_started() {
+        let dir = tempfile::tempdir().unwrap();
+        plan(dir.path(), "SHOP-214-a");
+        plan(dir.path(), "SHOP-300-b");
+        assert_eq!(
+            run(dir.path(), "SHOP-300 --no-start"),
+            "approved: SHOP-300\nPhase 2: not started (--no-start)\n"
+        );
+        // Either order.
+        assert_eq!(
+            run(dir.path(), "--no-start SHOP-214"),
+            "approved: SHOP-214\nPhase 2: not started (--no-start)\n"
+        );
+        // Without it, no such line.
+        assert_eq!(run(dir.path(), "SHOP-300"), "approved: SHOP-300\n");
+    }
+
+    #[test]
+    fn no_start_works_without_a_ticket_too() {
+        let dir = tempfile::tempdir().unwrap();
+        plan(dir.path(), "SHOP-214-cancel-unpaid-order");
+        assert_eq!(
+            run(dir.path(), "--no-start"),
+            "approved: SHOP-214-cancel-unpaid-order\nPhase 2: not started (--no-start)\n"
+        );
+    }
+
+    #[test]
+    fn another_option_or_a_second_ticket_approves_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        plan(dir.path(), "SHOP-214-a");
+        let unknown = run(dir.path(), "SHOP-214 --reapprove");
+        assert!(unknown.contains("the one option is --no-start"), "{unknown}");
+        assert!(!unknown.contains("approved:"), "{unknown}");
+        let two = run(dir.path(), "SHOP-214 SHOP-300");
+        assert!(two.contains("give one ticket"), "{two}");
+        assert!(!two.contains("approved:"), "{two}");
+    }
+}
+
+#[test]
+fn approve_starts_phase_2_only_on_the_recorded_line() {
+    // Task 6: the approval is the decision to implement, so the skill starts
+    // Phase 2 — but only when the command's own success line is there, never
+    // on the model's reading of the output.
+    let (meta, body) = frontmatter("skills/approve/SKILL.md");
+    let flat = body.replace('\n', " ");
+
+    assert_eq!(meta["argument-hint"], "[ticket] [--no-start]");
+    let condition = flat
+        .find("**If the output contains the line `approved <TICKET> checksum sha256:…`**")
+        .expect("the start is conditional on the recorded line");
+    let no_start = flat
+        .find("**and no line `Phase 2: not started (--no-start)`**")
+        .expect("--no-start is part of the condition");
+    let start = flat
+        .find("**Start Phase 2 for that ticket now**")
+        .expect("the start instruction");
+    let otherwise = flat
+        .find("**Otherwise, stop.** Write no code and start no coder.")
+        .expect("what to do without the line");
+    assert!(condition < no_start && no_start < start && start < otherwise);
+    // Phase 2 as the protocol describes it: the check first, then the coder.
+    assert!(flat.contains("run `invar plan check <TICKET>` first"));
+    assert!(flat.contains("with the ticket line and nothing else"));
+    assert!(flat.contains("never by your own reading"));
+    // The block prints the --no-start line the condition names.
+    assert!(body.contains("echo \"Phase 2: not started (--no-start)\""));
+    // And still never runs the approval itself.
+    assert!(body.contains("Do not run `invar plan approve` yourself"));
+
+    // The protocol skill no longer waits for a second prompt after the gate.
+    let protocol = skill().1.replace('\n', " ");
+    assert!(protocol.contains("**The approval starts Phase 2; no second prompt is needed.**"));
+    assert!(protocol.contains("`approved <TICKET> checksum sha256:…`"));
+    assert!(protocol.contains("`Phase 2: not started (--no-start)`"));
+    assert!(!protocol.contains("When the developer tells you the Plan is approved, go on."));
+}
+
+#[test]
+fn the_line_approve_keys_on_is_the_line_the_cli_prints() {
+    // The skill names `approved <TICKET> checksum sha256:…`; the real
+    // `plan approve` has to end with exactly that shape.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("invar.yaml"), "").unwrap();
+    fs::write(dir.path().join(".gitconfig"), "[user]\n\tname = rade\n").unwrap();
+    let plan_dir = dir.path().join(".invar/plans/ACME-87-export-invoices-csv");
+    fs::create_dir_all(&plan_dir).unwrap();
+    fs::write(plan_dir.join("spec.md"), example_plan()).unwrap();
+
+    let assert = Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", dir.path().join(".gitconfig"))
+        .env("HOME", dir.path())
+        .args(["plan", "approve", "ACME-87"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let last = stdout.lines().last().unwrap();
+
+    let (_, body) = frontmatter("skills/approve/SKILL.md");
+    let named = body
+        .split_once("the line `")
+        .unwrap()
+        .1
+        .split_once("…`")
+        .unwrap()
+        .0
+        .replace("<TICKET>", "ACME-87");
+    assert_eq!(named, "approved ACME-87 checksum sha256:");
+    assert!(last.starts_with(&named), "{last}");
+    let hex = &last[named.len()..];
+    assert!(
+        hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()),
+        "{last}"
+    );
 }
 
 // --- /invar:log ------------------------------------------------------------------------------

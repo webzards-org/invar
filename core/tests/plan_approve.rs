@@ -163,6 +163,12 @@ fn approves_a_draft_printing_the_criteria_first() {
     let checksum = header_value(&written, "Approved-checksum");
     assert_eq!(checksum, body_digest(&draft, project.dir.path()));
     assert!(stdout.contains(&format!("Approved-checksum: {checksum}")));
+    // The last line is the fixed one `/invar:approve` starts Phase 2 on.
+    assert_eq!(
+        stdout.lines().last(),
+        Some(format!("approved PROJ-412 checksum {checksum}").as_str()),
+        "{stdout}"
+    );
 
     // The body is byte-identical.
     assert_eq!(
@@ -245,6 +251,32 @@ fn lookup_errors_are_reported() {
 }
 
 // --- re-approval (D-12) --------------------------------------------------------------
+
+#[test]
+fn only_a_run_that_records_an_approval_prints_the_recorded_line() {
+    // `/invar:approve` keys on `approved <TICKET> checksum …` to start Phase 2:
+    // a refusal, or an approval that was already there, must never print it.
+    let recorded = contains("approved PROJ-412 checksum sha256:");
+
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412"]).success().stdout(recorded.clone());
+    // Already approved, unchanged: nothing new was recorded.
+    project
+        .approve(&["PROJ-412"])
+        .success()
+        .stdout(recorded.clone().not());
+    // Changed after approval, without `--reapprove`: refused.
+    let edited = project.read_spec().replace("order is refused", "order waits");
+    project.write_spec(&edited);
+    project
+        .approve(&["PROJ-412"])
+        .failure()
+        .stdout(recorded.clone().not());
+    // Not valid: refused.
+    let project = Project::new(Some("rade"));
+    project.write_spec(&plan_text("PROJ-412").replace("## Intent\n", "## Intentions\n"));
+    project.approve(&["PROJ-412"]).failure().stdout(recorded.not());
+}
 
 #[test]
 fn approving_again_with_an_unchanged_body_does_nothing() {

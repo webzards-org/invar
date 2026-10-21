@@ -84,10 +84,23 @@ pub fn run(args: Args) -> Result<()> {
     }
     println!();
 
+    let ticket = pending.ticket().to_owned();
     let approval = pending.commit(by, at)?;
     println!("approved: {shown}");
     println!("  Approved-by: {}", approval.by);
     println!("  Approved-at: {}", approval.at);
     println!("  Approved-checksum: {}", approval.checksum);
+    println!();
+    println!("{}", recorded_line(&ticket, &approval.checksum));
     Ok(())
+}
+
+/// The last line of a run that has just recorded an approval, and only of such
+/// a run: `approved <TICKET> checksum sha256:<hex>`.
+///
+/// Fixed and parseable, because `/invar:approve` starts Phase 2 on it: the
+/// skill keys on this line, not on the model's reading of the output. A Plan
+/// that was already approved, and every refusal, prints no such line.
+fn recorded_line(ticket: &str, checksum: &impl std::fmt::Display) -> String {
+    format!("approved {ticket} checksum {checksum}")
 }
