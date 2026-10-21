@@ -1,8 +1,8 @@
 //! The decision log, `.invar/decisions/` (§7): writing one entry, and reading
 //! them all.
 //!
-//! Implements `contracts/formats/decision-entry.md` v1.2.0; the draft of
-//! §8.1 is checked in [`draft`].
+//! Implements `contracts/formats/decision-entry.md` v1.3.0; the draft of
+//! §8.1 is checked and recorded in [`draft`].
 //!
 //! **Insert-only** (§6). An entry is created with an exclusive create, so an
 //! existing file can never be replaced; a name that is taken gets the next
@@ -10,7 +10,10 @@
 //!
 //! **Written on a person's decision** (§8, D-6). This module writes when it is
 //! called; who may call it is the protocol's business, and the answer is: the
-//! developer, or the agent when the developer asks — never a hook.
+//! developer — approving a draft the agent wrote (`invar decision approve`,
+//! through `/invar:log-approve`), or writing a note by hand (`invar decision
+//! record`). Never the agent, and never a hook: `plan guard` denies the agent
+//! both commands.
 //!
 //! **`failed` resets the cycle** (§7, §4c). The ticket's Plan returns to
 //! `draft` with its approval values cleared, and its body untouched. The Plan
@@ -127,9 +130,95 @@ pub fn record(
         .as_ref()
         .map_or_else(|| ticket.to_lowercase(), |(dir, _, _)| dir.slug.clone());
 
+    write(
+        root,
+        Resolved {
+            ticket,
+            module,
+            slug,
+            kind,
+            scenario: None,
+            body,
+            plan: plan.map(|(_, spec, text)| (spec, text)),
+        },
+        now,
+        mode,
+    )
+}
+
+/// Record a validated draft (decision-entry.md §8.1) as it stands: its
+/// `module` and `scenario` are the draft's, taken as written — the developer
+/// read them, and a draft may say `global` for a ticket whose Plan names a
+/// module. The draft sits next to its Plan, which supplies the slug, and which
+/// a `failed` entry returns to `draft`.
+///
+/// Does not touch the draft file; [`draft::approve`] removes it.
+pub fn record_draft(
+    root: &ProjectRoot,
+    draft: decision::Draft,
+    now: Instant,
+    mode: Mode,
+) -> Result<Recorded, RecordError> {
+    let body = decision::normalize_body(&draft.body);
+    if body.is_empty() {
+        return Err(RecordError::EmptyBody);
+    }
+    let dir = plans::find(root, &draft.ticket).map_err(RecordError::Lookup)?;
+    let spec = dir.spec_path();
+    let text = fs::read_to_string(&spec).map_err(|source| RecordError::Io {
+        path: spec.clone(),
+        source,
+    })?;
+    write(
+        root,
+        Resolved {
+            ticket: draft.ticket,
+            module: draft.module,
+            slug: dir.slug,
+            kind: draft.kind,
+            scenario: draft.scenario,
+            body,
+            plan: Some((spec, text)),
+        },
+        now,
+        mode,
+    )
+}
+
+/// An entry with everything settled but its `id`, `date` and file name.
+struct Resolved {
+    ticket: String,
+    module: String,
+    slug: String,
+    kind: Type,
+    scenario: Option<String>,
+    /// Normalized, not empty.
+    body: String,
+    /// The ticket's Plan, `spec.md` and its text, when it has one.
+    plan: Option<(PathBuf, String)>,
+}
+
+/// Write the entry — after returning the Plan to `draft`, for `failed`, and
+/// putting it back if the entry cannot be written (D-8).
+fn write(
+    root: &ProjectRoot,
+    resolved: Resolved,
+    now: Instant,
+    mode: Mode,
+) -> Result<Recorded, RecordError> {
+    let Resolved {
+        ticket,
+        module,
+        slug,
+        kind,
+        scenario,
+        body,
+        plan,
+    } = resolved;
+
     // `failed`: return the Plan to `draft` before writing anything else.
     let reset = if kind == Type::Failed {
-        let Some((_, spec, text)) = &plan else {
+        let Some((spec, text)) = &plan else {
             return Err(RecordError::NoPlanToReset {
                 ticket,
                 plans_dir: root.plans_dir(),
@@ -154,7 +243,7 @@ pub fn record(
                 ticket: ticket.clone(),
                 module: module.clone(),
                 kind,
-                scenario: None,
+                scenario,
                 body,
             };
             let name = FileName {
@@ -170,7 +259,7 @@ pub fn record(
         Ok((path, entry)) => Ok(Recorded { path, entry, reset }),
         Err(err) => {
             // D-8: no reset Plan without its entry.
-            if let (Some(spec), Some((_, _, original))) = (&reset, &plan)
+            if let (Some(spec), Some((_, original))) = (&reset, &plan)
                 && let Err(source) = restore_plan(spec, original, mode)
             {
                 return Err(RecordError::RestoreFailed {
