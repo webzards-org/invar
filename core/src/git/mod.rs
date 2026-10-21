@@ -153,6 +153,38 @@ pub fn stage_removal(dir: &Path, path: &Path) -> Result<(), GitError> {
     Ok(())
 }
 
+/// Whether git tracks anything at `path` (relative to `dir`, a file or a
+/// directory): `git ls-files`. Read before a deletion, to know whether there
+/// will be anything to commit.
+pub fn is_tracked(dir: &Path, path: &Path) -> Result<bool, GitError> {
+    const COMMAND: &str = "git ls-files";
+    let path = path.to_string_lossy();
+    let output = run(dir, &["ls-files", "-z", "--", &path])?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(!output.stdout.is_empty())
+}
+
+/// Commit `path` alone (relative to `dir`), with `message`: `git commit --only
+/// -- <path>`. Whatever else is staged stays staged and out of the commit.
+///
+/// The project's hooks run, and its signing and identity settings apply: a
+/// commit refused by any of them is an error with git's own words, never
+/// bypassed.
+pub fn commit_only(dir: &Path, path: &Path, message: &str) -> Result<(), GitError> {
+    const COMMAND: &str = "git commit";
+    let path = path.to_string_lossy();
+    let output = run(
+        dir,
+        &["commit", "--quiet", "--only", "-m", message, "--", &path],
+    )?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(())
+}
+
 /// Where `dir` stands in relation to a git work tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkTree {
