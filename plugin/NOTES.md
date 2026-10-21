@@ -994,6 +994,54 @@ so they are the first thing in the output.
 - [ ] `disableSkillShellExecution: true` in settings makes the command unusable:
       say so in the docs for teams that set it
 
+### `/invar:log-approve` — the same gate, on the decision log
+
+`plugin/skills/log-approve/SKILL.md`, invoked as `/invar:log-approve [ticket]`.
+It runs `invar decision approve <ticket>`, which reads
+`.invar/plans/<TICKET>-*/decision.md` as it is then — after whatever the
+developer changed while reading it — validates it, writes
+`.invar/decisions/<date>-<HHMMSS>-<module>-<slug>.md` with a new `id` and `date`,
+and deletes the draft. It refuses, writing nothing, without a draft or with one
+that does not validate; a `failed` draft resets the Plan, as any `failed` entry
+does (decision-entry.md 1.3.0 §8, D-12).
+
+**Same construction as `/invar:approve`**, for the same reasons:
+`disable-model-invocation: true` (exact spelling held by `plugin_prompts.rs`),
+the command in a `` ```! `` block so the developer is the one who runs it, every
+path ending `exit 0`, `2>&1`. Without a ticket it counts
+`.invar/plans/*/decision.md` — drafts, not Plans: one is recorded, several are
+listed, none says to run `/invar:log` first.
+
+**The guard, three entries now.** `plan guard` denies the agent
+`invar plan approve`, `invar decision approve` and `invar decision record`.
+Each has its own reason: the first tells the agent to wait for
+`invar plan approve <ticket>`, the other two to tell the developer the draft is
+ready for `/invar:log-approve <ticket>`. `decision record` is denied because it
+would write an entry past the draft; it stays for the developer's own `note`s
+and `correction`s, typed in their terminal. The ticket in a reason is the value
+of `--ticket` when the command has one, else its first argument.
+`plugin_prompts.rs` also checks that every line of every prompt naming either
+command forbids it.
+
+**`invar done` is unchanged, for now.** It still writes a `confirmed` entry from
+`-m`. It is to be reduced to deleting the Plan, with the entry left to the draft
+and its approval; until then a cycle whose `confirmed` draft was approved and
+then closed with `done -m` has two `confirmed` entries.
+
+#### Not exercised (needs a real Claude Code session)
+
+- [ ] `/invar:log-approve` appears in the `/` menu with its `argument-hint`, and
+      asking the agent to "record the decision" does not run it
+- [ ] Asked to record it anyway, the agent tries `invar decision approve` or
+      `invar decision record`, is denied, and says the developer runs
+      `/invar:log-approve`
+- [ ] The developer edits `decision.md` by hand, runs `/invar:log-approve`, and
+      the entry has the edit
+- [ ] A refused approval (no draft, invalid draft) shows its message, and the
+      agent does not retry
+- [ ] After a `failed` draft is approved, the agent goes back to Phase 1 only
+      when the developer asks
+
 ## 16. The review (M1-20)
 
 Three parts: `invar review-input <TICKET>` (core), `agents/reviewer.md`, and
@@ -1310,11 +1358,9 @@ protocol skill offers it — at closing, after the review offer, and after
 `BLOCKED`, before the `failed` entry — and the developer runs it.
 `plugin_prompts.rs` holds the frontmatter and both offers.
 
-**What it does not do yet.** It does not record. The developer still records
-through `invar done -m` (a `confirmed` draft) or `invar decision record -m`
-(`failed`, `note`), with the draft's body as the message; recording a draft
-directly, with `id` and `date` assigned then, is the next step. Until then a
-draft the developer did not copy is lost when `done` removes the Plan.
+**It does not record.** The developer records the draft with
+`/invar:log-approve` (§15), which assigns `id` and `date` then and deletes the
+draft. A draft not approved before `done` is lost with the Plan.
 
 **What CI checks.** The example draft inside the skill passes the real
 `invar decision validate`, so a contract change that outdates it fails in CI.

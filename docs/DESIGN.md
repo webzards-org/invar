@@ -187,7 +187,8 @@ Developer
    │
    │  If the Scenario turns out to be impossible or self-contradictory —
    │  not merely failing — the coder answers BLOCKED and the cycle returns
-   │  to [1]: `invar decision record --type failed`, then a new Plan. The
+   │  to [1]: a `failed` entry — drafted by /invar:log, recorded by the
+   │  developer with /invar:log-approve — then a new Plan. The
    │  Codegen Agent never repairs the specification (§4c).
    │
    ▼
@@ -1071,8 +1072,9 @@ agent's understanding of the application over time.
 Because it is advisory, no agent may fail or block on the content of the
 decision log. The Scenario Agent may depart from a past entry when the
 developer asks for it; it should merely note the departure ("previously
-decided X, this goes against it — intentional?"). This is also what makes the
-log safe to write automatically.
+decided X, this goes against it — intentional?"). It is not, however, written
+automatically: an entry is permanent, so each one is the developer's to approve
+(Who writes, below).
 
 ### Structure
 
@@ -1121,10 +1123,12 @@ say before?" — is answerable from `.invar/decisions/` alone. This is why
 
 **Entry types:**
 
-- `confirmed` — cycle completed successfully. **This is what `invar
-  generate` always writes on a clean pass** — a single invocation has no
-  way to know whether the result was corrected along the way versus a
-  first-try clean pass, so it never distinguishes.
+- `confirmed` — cycle completed successfully. **No longer written
+  mechanically**: neither `invar generate` nor `invar done` writes it. The
+  agent drafts it through `/invar:log` from what the cycle actually did, and
+  the developer records it with `/invar:log-approve` — or does not, for a
+  cycle that decided nothing worth remembering. (Until `done` is reduced to
+  deleting the Plan, it still writes one from `-m`; see Who writes.)
 - `correction` — developer rejected a draft or corrected generated code.
   **Reserved for the manual `invar decision record` path** — a
   developer noting, after the fact, that they fixed something by hand
@@ -1132,8 +1136,10 @@ say before?" — is answerable from `.invar/decisions/` alone. This is why
 - `failed` — generation failed, or a confirmed Scenario turned out to be
   impossible (§4c). Written deliberately: a failed attempt is often more
   useful context than a successful one, and without it the agent repeats the
-  same mistake months later.
-- `note` — manual entry by the developer
+  same mistake months later. Drafted by the agent after a `BLOCKED`, recorded
+  by the developer; recording it returns the Plan to `draft`.
+- `note` — anything else worth keeping: drafted by the agent and approved, or
+  written by hand by the developer
 
 ### Who writes
 
@@ -1142,10 +1148,22 @@ describes what actually came out, including corrections made during
 generation, rather than what was intended. One entry per cycle, however many
 coders ran (§13d): `invar scenario confirm` writes nothing.
 
-- `invar generate` calls `decision record` automatically at the end, on
-  success (`confirmed`) and on failure (`failed`)
-- `invar decision record` manually, when the developer changes something
-  outside the pipeline, or when a cycle returns to Phase 1 (§4c)
+**Every entry is the developer's.** Nothing writes one mechanically, and no
+agent writes one at all:
+
+- `invar decision approve <ticket>` — the developer's gate, run through
+  `/invar:log-approve`: it records the draft below, as it stands when the
+  developer approves it, with a new `id` and `date`, and deletes the draft. It
+  refuses when there is no draft, or the draft does not validate. A `failed`
+  draft returns the Plan to `draft` with it (§4c).
+- `invar decision record` — the developer's own entry, written by hand: a
+  `correction` after fixing something outside the pipeline, or a `note`. It
+  skips the draft, so it is never the agent's.
+
+`plan guard` denies the agent both commands (§13). `invar generate` writes no
+entry, and `invar done` is to be reduced to deleting the Plan; until it is, it
+still writes a `confirmed` entry from its `-m`, so a cycle whose draft was also
+approved has two.
 
 **The agent drafts; the developer decides.** An entry written from memory at
 the end of a cycle is an entry that is not written. So the main session may
@@ -1158,8 +1176,9 @@ for a finished cycle, `failed` after a `BLOCKED` or an impossible Plan, `note`
 otherwise; and a body that says what was decided and why, not what the diff
 shows. `invar decision validate` checks it when it is written. A draft is not
 an entry: it sits with the Plan, nothing reads it as part of the log, and it
-goes when the Plan goes. It becomes an entry only when the developer records
-it (decision-entry.md §8.1, D-9 to D-11).
+goes when the Plan goes. It becomes an entry only when the developer approves
+it with `/invar:log-approve` — after reading it, and editing it if they want
+to (decision-entry.md §8.1, D-9 to D-12).
 
 ### How it is read
 
@@ -1232,9 +1251,16 @@ invar generate <n> [--tests-path p]  # verifies code the agent just wrote:
                                   # A cycle is only closed by a full run.
                                   # Warns, never fails, on lockfile drift.
 invar lint check [--ci]         # verification only, independent of generation
-invar decision record           # writes a decision entry; called
-                                  # automatically by `generate`, available
-                                  # manually for out-of-pipeline changes
+invar decision record           # writes a decision entry by hand: the
+                                  # developer's own `correction` or `note`.
+                                  # Never the agent's — `plan guard` denies
+                                  # it (§13); no command calls it
+invar decision approve <ticket> # the developer's gate on the log: records
+                                  # the draft decision.md as it is now (new
+                                  # id and date) and deletes it; refuses
+                                  # without a valid draft; `failed` resets
+                                  # the Plan. Run by /invar:log-approve;
+                                  # `plan guard` denies it to the agent
 invar decision log              # concatenates .invar/decisions/
                                   # newest-first (rendered view)
 invar decision validate <ticket>  # checks the draft entry next to the Plan,
@@ -1429,7 +1455,11 @@ invar clean-spec [ticket] [--dry-run]  # deletes plans under .invar/plans/;
       sub-agent, and neither the main session nor the coder receives the
       decision log
 - [ ] Hooks run `context sync`, lint, and current-scenario tests
-      non-blockingly, and never run `plan approve` or `scenario confirm` (§13)
+      non-blockingly, and never run `plan approve`, `scenario confirm`,
+      `decision approve` or `decision record` (§13)
+- [ ] Every decision entry is approved by the developer: the agent drafts,
+      `invar decision approve` records, and `plan guard` denies the agent
+      both `decision approve` and `decision record` (§7, §13)
 - [ ] The full loop runs in CI with no agent and no plugin present — the
       standing proof that no logic leaked out of the CLI (§13b). This replaces
       the previous "completable from two different runtimes" criterion, which
@@ -1467,7 +1497,7 @@ What the plugin supplies:
 
 1. **Deterministic commands** — `init`, `doctor`, `context sync/show`,
    `lint check`, `generate`, `plan validate/approve`, `scenario
-   validate/confirm`, `decision record`, `clean-spec`
+   validate/confirm`, `decision validate/approve/record`, `clean-spec`
 2. **Context assembly** — `invar context show` prints all context sources
    plus in-budget decision entries in an agent-consumable form
 3. **Hooks** — the commands fire on the right events rather than on the agent's
@@ -1595,8 +1625,8 @@ put it: on disk.
 | Before planning (Phase 1) | `invar context sync` | No |
 | After a code edit (Phase 2) | `invar lint check` | No |
 | During Phase 2 iteration | `invar generate <n> --tests-path <current>` | No — and not while coders run in parallel (§13d) |
-| End of Phase 2 | `invar generate <n>` (full suite) | Yes — fails loudly, writes the decision entry |
-| — | `plan approve`, `scenario confirm` | **Never hooked** — and a `Bash` guard denies the agent running them |
+| End of Phase 2 | `invar generate <n>` (full suite) | Yes — fails loudly; writes no decision entry (§7) |
+| — | `plan approve`, `scenario confirm`, `decision approve`, `decision record` | **Never hooked** — and a `Bash` guard denies the agent running them |
 
 **"After a code edit" is narrower than it sounds.** A `PostToolUse` hook
 matches on the *tool* that ran, so a matcher of `Write|Edit` does not see a file
@@ -1623,17 +1653,25 @@ run.
 
 **Human decisions are never hooked.** A hook that confirms a scenario has
 abolished the gate. `plan approve` and `scenario confirm` are commands the
-developer runs deliberately; that deliberateness is their entire function.
+developer runs deliberately; that deliberateness is their entire function. So
+is `decision approve`, which records a draft decision entry the developer has
+read (§7): an entry is permanent, and a `failed` one de-approves the Plan.
 
 **The agent is kept from running them by a hook that only ever says no.** The
 same `PreToolUse` guard that keeps `Write` and `Edit` off an approved Plan
 (`plan guard`) also reads a `Bash` call's command line, and denies one that
 runs `invar plan approve` — and, once `.feature` files exist, `scenario
 confirm`. The reason it gives tells the agent to say the Plan is ready and
-wait: the developer approves from their own terminal. This costs the developer
-nothing, which is why it is preferred to making the command ask for
-confirmation: a prompt in every approval would be paid for by every cycle,
-and an agent running in the same terminal could not be told from a person
+wait: the developer approves from their own terminal. It denies
+`invar decision approve` and `invar decision record` the same way: the first
+is the developer's approval of a draft entry, the second would write an entry
+past the draft altogether. Each reason names what to do instead — tell the
+developer the draft is ready, and they record it with `/invar:log-approve`.
+`decision record` stays, for the developer's own entries written by hand.
+
+This costs the developer nothing, which is why it is preferred to making the
+command ask for confirmation: a prompt in every approval would be paid for by
+every cycle, and an agent running in the same terminal could not be told from a person
 anyway. It has the standing of every guard here and no more. It scans words,
 not a shell, so a command built at run time or run from a script gets past it;
 a hook that fails lets the call through; and an agent that edits the hook
@@ -1653,6 +1691,7 @@ developer: the main session offers it and waits.
 | `/invar:approve` | Runs `invar plan approve`: the gate (§3) | The developer only |
 | `/invar:review` | Starts the reviewer on the approved Plan; advisory (§13c) | The developer only, on the protocol's offer before `done` |
 | `/invar:log` | Drafts the decision entry at `.invar/plans/<TICKET>-<slug>/decision.md` and runs `invar decision validate`; records nothing (§7) | The developer only, on the protocol's offer at the end of Phase 2 and after `BLOCKED` |
+| `/invar:log-approve` | Runs `invar decision approve` before the model sees it: records the draft as it is now and deletes it; a `failed` draft returns the Plan to `draft` (§7) | The developer only, after reading the draft |
 
 **The largest gain is the return path, not the enforcement.** Today the
 developer copies command output back to the agent by hand. A hook puts lint and
@@ -1770,8 +1809,9 @@ returns one answer, so its answer has a fixed shape, as the planner's does:
   that the tests were not run, for a parallel coder, §13d)
 - `BLOCKED <reason>` — the Plan or a scenario is impossible,
   self-contradictory, or silent on something the code cannot proceed without.
-  The main session puts the reason to the developer and records
-  `invar decision record --type failed` (§4c); the cycle returns to Phase 1.
+  The main session puts the reason to the developer and offers `/invar:log`
+  to draft the `failed` entry; the developer records it with
+  `/invar:log-approve` (§4c, §7), and the cycle returns to Phase 1.
 
 That a coder cannot negotiate is the point. In the main session a
 specification could be "clarified" in conversation halfway through Phase 2,
@@ -1851,9 +1891,9 @@ something the developer saw rather than something an agent invented.
   possible later (§9).
 - **One `BLOCKED` stops the cycle.** A unit that cannot be implemented means
   the approved Plan was wrong as a whole. The main session lets running
-  coders finish, starts no new ones, and records `failed` for the ticket; the
-  Plan and its scenarios return to `draft` (§4c). Work already on disk stays,
-  de-approved, not reverted.
+  coders finish, starts no new ones, and offers the `failed` entry for the
+  ticket, which the developer records; the Plan and its scenarios return to
+  `draft` (§4c). Work already on disk stays, de-approved, not reverted.
 - **One cycle, one close.** Units close nothing on their own. The full-suite
   `generate` and the decision entry happen once, for the ticket (§7).
 
