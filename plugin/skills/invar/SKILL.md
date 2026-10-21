@@ -118,8 +118,9 @@ edit the Plan, and do not start the coder again with your own interpretation.
 
 1. Put the coder's reason to the developer, as it gave it.
 2. Offer to draft the entry, once: *"Draft the `failed` entry? Run `/invar:log`."*
-   It writes the draft next to the Plan for the developer to read; it records
-   nothing. **The developer records it**, with `/invar:log-approve <TICKET>`, after
+   It writes the draft next to the Plan, with `type: failed`, for the developer
+   to read; it records nothing.
+   **The developer records it**, with `/invar:log-approve <TICKET>`, after
    reading and perhaps editing it. Recording it returns the Plan to `draft` and
    clears its approval, with the text untouched — it de-approves their Plan, so
    it is their call, not yours: never record it yourself.
@@ -138,37 +139,50 @@ by `invar plan check` and `invar done`, and is no more allowed.
 
 ## Closing
 
-After `DONE`:
+After `DONE`, the cycle ends in this order. Most of it is the developer's; your
+part is to offer each step once, at its moment, and to say where things stand.
 
-**Offer the review**, unless `invar.yaml` sets `review.offer: false` (it is on by
-default). Ask the developer once: *"Run `/invar:review` before closing? It checks
-the branch against the approved Plan and every business rule."* The review needs the
-Plan, and `done` removes it, so it comes first. It reads only what is committed on
-the branch, so the change has to be committed before it runs, the way this project
-commits. The developer runs it, not you: do not start the reviewer yourself. It is
-advisory; if the developer declines, go on.
+**commit → `/invar:review` (optional) → push → PR review → `/invar:log` and
+`/invar:log-approve` (if an entry is wanted) → `invar done`**
 
-**Offer to draft the decision entry**, once: *"Draft the decision entry? Run
-`/invar:log`."* It writes `.invar/plans/<TICKET>-<slug>/decision.md` from the
-ticket, the Plan and what the cycle changed, for the developer to read and edit;
-it records nothing. A cycle that only changed CI, copy, or fixed something
-without leaving a rule the next Plan should know probably needs no more than a
-one-line message — say so in the same line, and leave the choice to the
-developer. Do not draft it yourself without `/invar:log`, and do not offer again
-if they decline. **The developer records the draft** with `/invar:log-approve`,
-after reading it; never record it yourself.
+**1. Commit.** The change is committed on the branch, the way this project
+commits — by the developer, or by you when they ask. The review reads only what
+is committed.
 
-**Render the PR description** while the Plan still exists:
+**2. Offer the review**, unless `invar.yaml` sets `review.offer: false` (it is on
+by default). Ask the developer once: *"Run `/invar:review` before closing? It
+checks the branch against the approved Plan and every business rule."* The
+review needs the Plan, and `done` removes it, so it comes before. The developer
+runs it, not you: do not start the reviewer yourself. It is advisory; if the
+developer declines, go on.
+
+**3. Render the PR description** while the Plan still exists:
 `invar pr-body <TICKET> --out .invar/out/<TICKET>-pr.md`. Tell the developer its
 path.
 
-Then **tell the developer the cycle is ready to close**, and stop. Closing is
-theirs: `invar done` checks the Plan once more, deletes it and stages the
-deletion, so it goes into the same PR as the code. They run it from their own
-terminal, or CI runs it for them (on the pull request's approval, say). Never
-run `invar done` yourself — a hook denies it — and never delete the Plan another
-way. It refuses while a draft entry is still beside the Plan: the developer
-records it with `/invar:log-approve` or deletes it first.
+**4. Push, and the PR is reviewed** — by people, on the pull request, with the
+Plan in its diff. Pushing is the developer's, or yours when they ask.
+
+**5. Offer to draft the decision entry** — before the PR review or during it,
+once: *"Draft the decision entry? Run `/invar:log`."* It writes
+`.invar/plans/<TICKET>-<slug>/decision.md` from the ticket, the Plan and what the
+cycle changed, for the developer to read and edit; it records nothing. A draft
+written before the review can change with it: if the review changes what is
+built, the developer edits the draft or runs `/invar:log` again. A cycle that
+only changed CI, copy, or fixed something without leaving a rule the next Plan
+should know probably needs no more than a one-line message — say so in the same
+line, and leave the choice to the developer. Do not draft it yourself without
+`/invar:log`, and do not offer again if they decline. **The developer records the
+draft** with `/invar:log-approve`, after the review; never record it yourself.
+
+**6. `invar done` is the developer's.** When the review is over, **tell the
+developer the cycle is ready to close**, and stop. Closing is theirs: `invar done`
+checks the Plan once more, deletes it and stages the deletion, so it goes into
+the same PR as the code. They run it from their own terminal, or CI runs it for
+them (on the pull request's approval, say). Never run `invar done` yourself — a
+hook denies it — and never delete the Plan another way. It refuses while a draft
+entry is still beside the Plan: the developer records it with
+`/invar:log-approve` or deletes it first.
 
 ## Models
 

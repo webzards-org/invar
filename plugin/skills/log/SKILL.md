@@ -102,6 +102,8 @@ whether the cycle is worth an entry, and what it says, is the developer's call.
 Tell them, in one line, that they read it, edit it if they want to, and record it
 with `/invar:log-approve <TICKET>` — which records the draft as it is then, and
 removes it. For `failed`, add that recording it also returns the Plan to `draft`.
+At the end of Phase 2, add that it is recorded after the PR review, so the review
+can still change it.
 
 Recording is never yours: do not run `invar decision approve` or
 `invar decision record` — a hook denies both — and do not write the entry into
