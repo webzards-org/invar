@@ -1692,6 +1692,21 @@ verified (§4b). Passing one scenario in isolation does not show the rest of
 the application still works — which is the whole point of the behavioral test
 run.
 
+**What follows the gate.** Approval is the decision to implement, so it is the
+last thing the developer has to say before Phase 2. `/invar:approve` still runs
+`invar plan approve` through shell injection, as the developer's own action —
+the model never runs it, and the guard still denies it. What changes is what
+happens after: when the command has just recorded an approval it ends with one
+fixed line, `approved <TICKET> checksum sha256:<hex>`, and the skill tells the
+main session to start Phase 2 for that ticket at once (§13c). The trigger is
+that line, not the model's reading of the output: a refusal, or a Plan that was
+already approved, prints no such line, and the session stops. `/invar:approve
+<ticket> --no-start` approves and starts nothing, for a developer who implements
+later or elsewhere; an approval made in the developer's own terminal starts
+nothing either. Automating the start is safe because it renders no verdict: the
+coder begins with `invar plan check`, which still refuses a Plan that is not
+approved or whose checksum no longer matches.
+
 **Human decisions are never hooked.** A hook that confirms a scenario has
 abolished the gate. `plan approve` and `scenario confirm` are commands the
 developer runs deliberately; that deliberateness is their entire function. So
@@ -1732,7 +1747,7 @@ developer: the main session offers it and waits.
 | Skill | What it does | Invoked by |
 |---|---|---|
 | `invar` — the protocol skill | The cycle as the main session lives it: when to use or skip it, dispatching the agents, the gate, closing (§5c, §13c) | The model, when a request matches it |
-| `/invar:approve` | Runs `invar plan approve`: the gate (§3) | The developer only |
+| `/invar:approve` | Runs `invar plan approve`: the gate (§3). When it records an approval, the main session starts Phase 2 at once, unless `--no-start` ("What follows the gate", above) | The developer only |
 | `/invar:review` | Starts the reviewer on the approved Plan; advisory (§13c) | The developer only, on the protocol's offer before `done` |
 | `/invar:log` | Drafts the decision entry at `.invar/plans/<TICKET>-<slug>/decision.md` and runs `invar decision validate`; records nothing (§7) | The developer only, on the protocol's offer at the end of Phase 2 and after `BLOCKED` |
 | `/invar:log-approve` | Runs `invar decision approve` before the model sees it: records the draft as it is now and deletes it; a `failed` draft returns the Plan to `draft` (§7) | The developer only, after reading the draft |
@@ -1819,6 +1834,11 @@ of the CLI, not advertised as a feature, and not tested against other runtimes
 in MVP.
 
 ### 13c. The coder and review sub-agents
+
+**Who starts the coder, and when: the main session.** At once, when
+`/invar:approve` has just recorded the approval (§13, "What follows the gate") —
+no second prompt from the developer; after an approval made in the developer's
+own terminal, or with `--no-start`, when the developer asks.
 
 **Phase 2 runs in its own sub-agent, as Phase 1 does.** The main session
 starts it after the gate with the ticket id — and, when the Plan declares work
