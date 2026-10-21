@@ -1,13 +1,14 @@
 # Contract: Decision entry
 
-**Version:** 1.2.0 — the draft, `.invar/plans/<TICKET>-<slug>/decision.md`;
-see §8.1 and §13
+**Version:** 1.3.0 — every entry is the developer's: a draft is recorded by
+`invar decision approve`; see §8 and §13
 **Status:** stable
 **Implements:** §7 (Decision log), §4c (a `failed` entry resets the cycle),
 §12 (the entry survives the Plan); light mode L-1, L-4 (`docs/TASKS-M1.md`)
 **Read by:** the core (`format/decision`), `invar decision log`,
-`invar decision validate` (the draft), `invar context show` (M1-14),
-`invar clean-spec` (M1-13), the `/invar:log` skill, any later
+`invar decision validate` and `invar decision approve` (the draft),
+`invar context show` (M1-14), `invar clean-spec` (M1-13), the `/invar:log` and
+`/invar:log-approve` skills, any later
 reimplementation and the post-MVP decision graph
 
 > Changing this file is a **public-contract change** (§14.3). It is made
@@ -101,10 +102,10 @@ The four types of §7:
 
 | Type | Meaning | Written by |
 |---|---|---|
-| `confirmed` | The cycle completed: what was built, including any deviation from the Plan | `invar done` (M1-12), when it closes a cycle |
-| `correction` | The developer corrected generated code, or changed something by hand outside the cycle | `invar decision record`, when the developer asks for it |
-| `failed` | The cycle could not be completed, or the approved Plan turned out to be impossible (§4c) | `invar decision record`, when the developer asks for it — and it resets the cycle (§7) |
-| `note` | Anything else the developer wants the planner to know next time | `invar decision record`, when the developer asks for it |
+| `confirmed` | The cycle completed: what was built, including any deviation from the Plan | `invar decision approve`, from a draft (§8.1). Not written mechanically (D-12) |
+| `correction` | The developer corrected generated code, or changed something by hand outside the cycle | `invar decision record`, by the developer |
+| `failed` | The cycle could not be completed, or the approved Plan turned out to be impossible (§4c) | `invar decision approve`, from a draft, or `invar decision record`, by the developer — and it resets the cycle (§7) |
+| `note` | Anything else the developer wants the planner to know next time | `invar decision approve`, from a draft, or `invar decision record`, by the developer |
 
 ## 6. Insert-only
 
@@ -133,18 +134,19 @@ written, the Plan is restored to the exact bytes it had (D-8).
 
 ## 8. Who writes, and when
 
-**An entry is written because a person decided it is worth keeping** (D-6).
-In M1:
+**An entry is written because a person decided it is worth keeping** (D-6),
+and **the person writes it** (D-12):
 
-- `invar done` writes the `confirmed` entry when it closes a cycle (M1-12).
-  Closing the cycle is itself the developer's decision; the body says what
-  was actually built.
-- Every other entry is written by `invar decision record`, run by the
-  developer — or by the agent **only when the developer asks it to**. The
-  agent may *propose* an entry, including a `failed` one when it finds the
-  approved Plan impossible, but it does not write one on its own.
+- `invar decision approve <ticket>` records the ticket's draft (§8.1), as it
+  is at that moment, and deletes the draft. It is the developer's, run through
+  `/invar:log-approve`.
+- `invar decision record` writes an entry the developer types themselves: a
+  `correction`, or a `note`.
+- **The agent writes no entry**, not even when asked: it drafts one (§8.1),
+  and `plan guard` denies it both commands.
 - **No hook ever writes an entry**, and no other command writes one as a side
-  effect.
+  effect. (`invar done` still writes a `confirmed` entry from its `-m` until it
+  is reduced to deleting the Plan; see D-12.)
 
 ### 8.1 The draft
 
@@ -181,8 +183,17 @@ reasons it cannot find there.
 
 **Who writes it:** the main session, through `/invar:log`, when the developer
 asks or accepts the protocol's offer. It is checked with
-`invar decision validate`. Drafting writes no entry and resets nothing; the
-rules of §8 for entries are unchanged.
+`invar decision validate`. Drafting writes no entry and resets nothing.
+
+**Recording it:** `invar decision approve <ticket>`, run by the developer
+(`/invar:log-approve`). It reads the draft as it is then — with any edits the
+developer made while reading it — and validates it; writes the entry with a new
+`id` (D-4) and `date` (D-2), its `module` and `scenario` taken from the draft
+and its slug from the Plan directory (§2); and deletes the draft. A `failed`
+draft resets the cycle as any `failed` entry does (§7, D-8). It refuses, and
+writes nothing, when there is no draft or the draft is not valid. A draft that
+cannot be deleted after its entry is written is reported; approving it again
+would record it twice.
 
 ## 9. Reading
 
@@ -278,6 +289,17 @@ stale date into the log.
 `correction` records something the developer changed by hand outside the cycle;
 the agent did not see it happen and cannot draft it truthfully. The developer
 records a correction directly with `invar decision record`.
+
+**D-12 — Every entry is approved by the developer; none is written
+mechanically.** Until 1.3.0, `invar done` wrote the `confirmed` entry from its
+`-m`, and the agent ran `invar decision record` when the developer agreed. Both
+made the developer's decision a moment in a conversation rather than a step
+they took: the text recorded was whatever the agent typed after "yes". Now the
+agent drafts, the developer reads the draft in the file, and the developer's
+own command records exactly that file. `decision record` stays for the entries
+only the developer can write (D-11). `invar done` is to be reduced to deleting
+the Plan; until it is, it writes its own `confirmed` entry, so a cycle whose
+draft was also approved has two.
 
 ## 11. Open questions
 
@@ -385,6 +407,20 @@ not a draft type (D-11); and the draft names `SHOP-300` in the Plan directory of
 `SHOP-214`.
 
 ## 13. Version history
+
+**1.3.0 — the developer approves the draft.**
+
+- §8: every entry is written by the developer — `invar decision approve` for a
+  draft, `invar decision record` by hand; the agent writes none. D-12.
+- §8.1: recording a draft — read as it is, validated, written with a new `id`
+  and `date`, deleted.
+- §5: who writes each type.
+
+**Why:** the developer's decision to keep an entry has to be a step they take
+on a text they have read, not a "yes" the agent acts on (D-12).
+
+**Compatibility:** the entry and draft formats are unchanged; every valid file
+stays valid.
 
 **1.2.0 — the draft.**
 
