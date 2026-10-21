@@ -21,6 +21,14 @@
   branch. `git.base_branch` in `invar.yaml` stays: it sets the base branch of the
   review diff.
 
+### Added
+
+- **`invar done --commit <MESSAGE>`** commits the Plan's deletion, alone, under
+  the given message (`git commit --only`): anything else that is staged stays
+  out of it. Hooks, signing and identity apply and are never bypassed; nothing is
+  pushed. For CI: `invar done <TICKET> --commit "chore: remove the Plan of
+  <TICKET>" && git push`.
+
 ### Changed
 
 - **`invar done [TICKET]` only deletes the Plan.** It checks that the Plan is
