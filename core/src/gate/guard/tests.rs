@@ -348,6 +348,9 @@ fn other_commands_pass_and_so_does_every_other_invar_command() {
         "invar decision log",
         "echo decision approve",
         "invar decision validate SHOP-214; echo decision record",
+        // `done` as a word, but not `invar`'s.
+        "invar plan check SHOP-214 && echo done",
+        "git commit -m done",
         // The words appear, but no `invar` runs them.
         "echo plan approve",
         "grep -rn approve invar/core/src",
@@ -370,6 +373,7 @@ fn asking_for_help_is_not_running_the_command() {
         "invar plan approve SHOP-214 --help",
         "invar decision approve --help",
         "invar decision record -h",
+        "invar done --help",
     ] {
         assert_eq!(verdict_on(command), Verdict::Pass, "{command:?}");
     }
@@ -444,6 +448,43 @@ fn every_way_of_writing_the_decision_commands_is_denied() {
         "echo text | invar decision record --ticket SHOP-214 --type failed",
         "$(invar decision record --ticket SHOP-214 --type note -m x)",
         "env invar decision record --ticket SHOP-214 --type note -m x",
+    ] {
+        denied(command);
+    }
+}
+
+// `done` deletes the approved Plan and closes the cycle: the developer's.
+
+#[test]
+fn running_done_is_denied_and_the_agent_is_told_the_cycle_is_ready() {
+    let reason = denied("invar done SHOP-214");
+    assert!(
+        reason.starts_with("`invar done` is the developer's decision, not yours"),
+        "{reason}"
+    );
+    assert!(reason.contains("Do not run it"), "{reason}");
+    assert!(
+        reason.contains("do not delete the Plan directory either"),
+        "{reason}"
+    );
+    assert!(reason.contains("cycle is ready to close"), "{reason}");
+    assert!(
+        reason.contains("they run `invar done SHOP-214` themselves"),
+        "{reason}"
+    );
+    assert!(denied("invar done").contains("`invar done <ticket>`"));
+}
+
+#[test]
+fn every_way_of_writing_done_is_denied() {
+    for command in [
+        "invar done",
+        "invar done SHOP-214",
+        "invar done .invar/plans/SHOP-214-cancel",
+        "/usr/local/bin/invar done",
+        "cd app && invar done",
+        "git add -A && invar done SHOP-214 && git commit -m close",
+        "bash -c 'invar done'",
     ] {
         denied(command);
     }
