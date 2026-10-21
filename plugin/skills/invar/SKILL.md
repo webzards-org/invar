@@ -78,8 +78,14 @@ Approval is the developer's one manual step, and it is theirs alone: they run
 records who read the Plan and when.
 
 **Stop and wait.** Never run `invar plan approve` yourself: a hook denies it, and you
-must not look for another way to record an approval. When the developer tells you
-the Plan is approved, go on.
+must not look for another way to record an approval.
+
+**The approval starts Phase 2; no second prompt is needed.** When the developer
+approves with `/invar:approve` and the output ends with the line
+`approved <TICKET> checksum sha256:…`, that skill tells you to begin Phase 2 at
+once — do. Without that line (a refusal, `already approved`), or with
+`Phase 2: not started (--no-start)`, Phase 2 waits until the developer asks for
+it. When they approved in their own terminal, they tell you, and you go on.
 
 ## Phase 2 — the coder implements
 
@@ -229,7 +235,7 @@ implementing it.
 |---|---|
 | `invar plan check <TICKET>` | before you start the coder; refuses draft, changed and unrecorded approvals |
 | `invar plan validate <TICKET>` | form of a draft Plan (the planner runs it) |
-| `/invar:approve` | the developer's; `invar plan approve <TICKET>` from their own terminal |
+| `/invar:approve` | the developer's; starts Phase 2 when the approval is recorded, unless `--no-start`. `invar plan approve <TICKET>` from their own terminal does not |
 | `/invar:review` | the developer's, before `done`, unless `review.offer: false` |
 | `/invar:log` | the developer's: drafts the decision entry, at the end of Phase 2 or after `BLOCKED` |
 | `invar decision validate <TICKET>` | form of a draft entry (`/invar:log` runs it) |

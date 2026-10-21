@@ -861,6 +861,11 @@ main session's transcript for the log: any `invar context show` without
 `--binding`, any `invar decision log`, any text that is plainly a log entry. One is a
 failure of the third acceptance criterion.
 
+At the gate, record: whether Phase 2 started on its own after a recorded
+approval (and began with `invar plan check`), and that it did **not** after a
+refused approval or with `--no-start`. A coder started after a refusal is a
+failure of the gate, whatever the coder then did.
+
 For the end of the cycle, record: whether `/invar:log` was offered, and when
 (before the PR review, during it, or not at all); whether the developer used it;
 and whether the draft changed between `/invar:log` and `/invar:log-approve` — by
@@ -989,6 +994,30 @@ because an injection that fails aborts the invocation and the developer would
 see no reason. `plan approve` prints the Acceptance criteria before it writes,
 so they are the first thing in the output.
 
+**Approval starts Phase 2.** The approval is the developer's decision to
+implement, so a second message saying "now implement it" was friction. When
+`plan approve` has just recorded an approval, its last line is fixed:
+`approved <TICKET> checksum sha256:<hex>` (a refusal, or an `already approved`
+run, never prints it). The skill keys on that line — not on the model's reading
+of the output — and tells the main session to start Phase 2 for that ticket at
+once: `invar plan check`, then the coder with the ticket line. Without the line
+it stops and writes no code. `plan_approve.rs` holds the line's shape and that
+only a recording run prints it; `plugin_prompts.rs` holds that the skill's start
+instruction is conditional on it, and that the line the skill names is the one
+the real binary prints.
+
+**`--no-start`.** `/invar:approve <ticket> --no-start` (either order, ticket
+optional) approves and starts nothing: the block prints
+`Phase 2: not started (--no-start)` after the CLI's output, and the condition
+excludes it. Any other `-` word, or a second ticket, is refused before
+`plan approve` runs. Arguments are split into words by the block itself, each
+checked against `[A-Za-z0-9._/-]`.
+
+**Why automating the start is safe.** It renders no verdict. The coder begins
+with `invar plan check`, which still refuses a Plan that is not approved or
+whose checksum no longer matches; the gate itself — the shell injection, the
+guard — is unchanged.
+
 ### Not exercised (needs a real Claude Code session)
 
 - [ ] `/invar:approve` appears in the `/` menu with the `argument-hint`
@@ -1002,6 +1031,10 @@ so they are the first thing in the output.
 - [ ] `claude plugin validate --strict` accepts the skill
 - [ ] `disableSkillShellExecution: true` in settings makes the command unusable:
       say so in the docs for teams that set it
+- [ ] After a recorded approval the main session starts Phase 2 without a
+      second prompt, beginning with `invar plan check`
+- [ ] After a refused approval, and after `--no-start`, it starts nothing and
+      writes no code
 
 ### `/invar:log-approve` — the same gate, on the decision log
 
