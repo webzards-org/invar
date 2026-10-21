@@ -5,10 +5,12 @@
 //! Two jobs, one hook, told apart by `tool_name`: a `Write` or `Edit` is judged
 //! by the file it targets; a `Bash` call is judged by the command line it runs
 //! (`HUMAN_ONLY`, at the end of this file). Both answer with the same
-//! [`Verdict`]. The second job exists because `plan approve` is a person's
-//! decision, and nothing in the command itself can tell a person from an agent
-//! that has a shell: the developer approves from another terminal, and the
-//! agent is told, at the moment it tries, that this step is not its to take.
+//! [`Verdict`]. The second job exists because `plan approve`, `decision
+//! approve` and `decision record` are a person's decisions, and nothing in the
+//! command itself can tell a person from an agent that has a shell: the
+//! developer runs them (from another terminal, or through a skill the model
+//! cannot invoke), and the agent is told, at the moment it tries, that this
+//! step is not its to take.
 //!
 //! Run by a `PreToolUse` hook (M1-17), it reads the hook's JSON payload —
 //! here, in the CLI, so the plugin stays a thin shell (§13b) and the guard can
@@ -200,35 +202,77 @@ fn plan_dir_name(relative: &Path) -> Option<String> {
 struct HumanOnly {
     /// The two words that follow `invar`.
     words: [&'static str; 2],
-    /// Why, finishing "… is the developer's decision, not yours: …".
-    why: &'static str,
+    /// What the agent is shown, given the ticket (or `<ticket>`). The
+    /// transcript prefixes it with "hook error" (plugin/NOTES.md §11), so it
+    /// has to say on its own what to do instead.
+    reason: fn(&str) -> String,
 }
 
 /// `scenario confirm` joins this list with the milestone that adds `.feature`
 /// files.
-const HUMAN_ONLY: &[HumanOnly] = &[HumanOnly {
-    words: ["plan", "approve"],
-    why: "it records that a person read the Plan and accepted it, and every later \
-          check relies on that",
-}];
+///
+/// `decision approve` and `decision record` write the insert-only decision log
+/// (decision-entry.md §8): the first records the draft the developer reviewed,
+/// the second writes past the draft altogether. Both are the developer's —
+/// `decision record` stays for the notes they write by hand.
+const HUMAN_ONLY: &[HumanOnly] = &[
+    HumanOnly {
+        words: ["plan", "approve"],
+        reason: plan_approve_reason,
+    },
+    HumanOnly {
+        words: ["decision", "approve"],
+        reason: decision_approve_reason,
+    },
+    HumanOnly {
+        words: ["decision", "record"],
+        reason: decision_record_reason,
+    },
+];
 
-impl HumanOnly {
-    /// What the agent is shown. The transcript prefixes it with "hook error"
-    /// (plugin/NOTES.md §11), so it has to say on its own what to do instead.
-    fn reason(&self, target: Option<&str>) -> String {
-        let [first, second] = self.words;
-        let target = target.unwrap_or("<ticket>");
-        format!(
-            "`invar {first} {second}` is the developer's decision, not yours: {}. Do not \
-             run it, and do not look for another way to record the same thing. Tell the \
-             developer the Plan is ready and wait: they run `invar {first} {second} \
-             {target}` themselves, from their own terminal (with `--reapprove` if the \
-             Plan was approved before and has changed), and you carry on once they \
-             have. If you only meant to mention the command, write it without `invar` \
-             directly in front of `{first} {second}`.",
-            self.why
-        )
-    }
+/// How every reason ends: what to do when the command was only mentioned.
+fn mention(words: &str) -> String {
+    format!(
+        "If you only meant to mention the command, write it without `invar` directly in \
+         front of `{words}`."
+    )
+}
+
+fn plan_approve_reason(target: &str) -> String {
+    format!(
+        "`invar plan approve` is the developer's decision, not yours: it records that a \
+         person read the Plan and accepted it, and every later check relies on that. Do \
+         not run it, and do not look for another way to record the same thing. Tell the \
+         developer the Plan is ready and wait: they run `invar plan approve {target}` \
+         themselves, from their own terminal (with `--reapprove` if the Plan was \
+         approved before and has changed), and you carry on once they have. {}",
+        mention("plan approve")
+    )
+}
+
+fn decision_approve_reason(target: &str) -> String {
+    format!(
+        "`invar decision approve` is the developer's decision, not yours: it records the \
+         draft entry in the decision log, which is never changed afterwards, and a \
+         `failed` entry also returns the Plan to `draft`. Do not run it, and do not look \
+         for another way to record the same thing. Tell the developer the draft \
+         (`decision.md`, next to the Plan) is ready and wait: they read it, edit it if \
+         they want to, and record it themselves with `/invar:log-approve {target}`. {}",
+        mention("decision approve")
+    )
+}
+
+fn decision_record_reason(target: &str) -> String {
+    format!(
+        "`invar decision record` is the developer's decision, not yours: it writes \
+         straight into the decision log, which is never changed afterwards, past the \
+         draft the developer reviews. Do not run it, and do not look for another way to \
+         record the same thing. If an entry is worth keeping, say so and wait: the \
+         developer has it drafted with `/invar:log {target}`, reads the draft, and \
+         records it with `/invar:log-approve {target}`. `invar decision record` stays \
+         for the notes the developer writes by hand, from their own terminal. {}",
+        mention("decision record")
+    )
 }
 
 /// A `Bash` call: deny it when its command line runs a human-only command.
@@ -246,14 +290,15 @@ fn judge_command(payload: &Value) -> Verdict {
     };
     match human_only(command) {
         Some((entry, target)) => Verdict::Deny {
-            reason: entry.reason(target.as_deref()),
+            reason: (entry.reason)(target.as_deref().unwrap_or("<ticket>")),
         },
         None => Verdict::Pass,
     }
 }
 
-/// The human-only command a shell command line runs, and the first argument
-/// after it (the ticket, normally), if there is one.
+/// The human-only command a shell command line runs, and its ticket: the value
+/// of `--ticket` when there is one, the first argument after the command
+/// otherwise.
 ///
 /// **Words, not shell.** The line is cut at `;`, `&`, `|`, `(`, `)`, backticks
 /// and newlines into simple commands, and each is split into words with quotes
@@ -286,15 +331,27 @@ fn human_only(command: &str) -> Option<(&'static HumanOnly, Option<String>)> {
                 .windows(2)
                 .position(|pair| pair[0] == first && pair[1] == second);
             if let Some(at) = found {
-                let target = after[at + 2..]
-                    .iter()
-                    .find(|word| !word.starts_with('-'))
-                    .map(|word| (*word).to_owned());
-                return Some((entry, target));
+                return Some((entry, ticket_of(&after[at + 2..])));
             }
         }
     }
     None
+}
+
+/// The ticket among a command's arguments: the value of `--ticket`
+/// (`decision record`), or else the first word that is not an option (`plan
+/// approve SHOP-214`, `decision approve SHOP-214`).
+fn ticket_of(words: &[&str]) -> Option<String> {
+    let flagged = words.iter().enumerate().find_map(|(at, word)| {
+        if *word == "--ticket" {
+            words.get(at + 1).copied()
+        } else {
+            word.strip_prefix("--ticket=")
+        }
+    });
+    flagged
+        .or_else(|| words.iter().copied().find(|word| !word.starts_with('-')))
+        .map(str::to_owned)
 }
 
 /// `invar`, `/usr/local/bin/invar`, `.\target\debug\invar.exe`.
