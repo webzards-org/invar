@@ -7,8 +7,8 @@
 use std::path::Path;
 
 use super::{
-    GitError, Instant, WorkTree, base_branch, branch_name, merged_branches, today, user_name,
-    work_tree,
+    GitError, Instant, WorkTree, base_branch, branch_name, current_branch, merged_branches,
+    stage_removal, today, user_name, work_tree,
 };
 use crate::calendar::civil_from_days;
 
@@ -406,6 +406,49 @@ fn inside_the_git_directory_itself_is_not_a_work_tree() {
         work_tree(&repo.path().join(".git")).unwrap(),
         WorkTree::Outside(_)
     ));
+}
+
+#[test]
+fn the_current_branch_is_its_short_name_and_a_detached_head_is_none() {
+    let repo = repo_with_branches();
+    assert_eq!(
+        current_branch(repo.path()).unwrap().as_deref(),
+        Some("main")
+    );
+    repo.git(&["checkout", "--quiet", "feat/PROJ-2-open"]);
+    assert_eq!(
+        current_branch(repo.path()).unwrap().as_deref(),
+        Some("feat/PROJ-2-open")
+    );
+    repo.git(&["checkout", "--quiet", "--detach"]);
+    assert_eq!(current_branch(repo.path()).unwrap(), None);
+}
+
+#[test]
+fn outside_a_repository_the_current_branch_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let err = current_branch(dir.path()).unwrap_err();
+    assert!(matches!(err, GitError::Failed { .. }), "{err:?}");
+}
+
+#[test]
+fn a_removal_is_staged_and_an_untracked_path_is_no_error() {
+    let repo = Repo::new();
+    let plan = repo.path().join(".invar/plans/PROJ-1-x");
+    std::fs::create_dir_all(&plan).unwrap();
+    std::fs::write(plan.join("spec.md"), "plan\n").unwrap();
+    repo.git(&["add", "-A"]);
+    repo.commit("plan");
+
+    std::fs::remove_dir_all(&plan).unwrap();
+    stage_removal(repo.path(), Path::new(".invar/plans/PROJ-1-x")).unwrap();
+    assert_eq!(
+        repo.git(&["diff", "--cached", "--name-status"]),
+        "D\t.invar/plans/PROJ-1-x/spec.md\n"
+    );
+
+    // Never tracked: nothing to stage, and not a failure.
+    stage_removal(repo.path(), Path::new(".invar/plans/PROJ-9-never")).unwrap();
 }
 
 #[test]
