@@ -1121,7 +1121,7 @@ fn the_protocol_skill_tells_the_developer_the_cycle_is_ready_and_never_closes_it
 
     // The PR description is rendered while the Plan exists, by the session.
     assert!(flat.contains("`invar pr-body <TICKET> --out .invar/out/<TICKET>-pr.md`"));
-    let pr = flat.find("**Render the PR description**").unwrap();
+    let pr = flat.find("Render the PR description**").unwrap();
     let ready = flat.find("the cycle is ready to close**").unwrap();
     assert!(pr < ready);
     // Closing is the developer's, from a terminal or CI; a draft entry blocks it.
@@ -1151,6 +1151,93 @@ fn no_agent_is_told_to_run_done() {
             );
         }
     }
+}
+
+// --- the end of a cycle (task 5) ---------------------------------------------------------
+
+#[test]
+fn the_skill_ends_a_cycle_in_the_new_order() {
+    let flat = skill().1.replace('\n', " ");
+
+    // The order, stated once, as the developer will live it.
+    assert!(flat.contains(
+        "**commit → `/invar:review` (optional) → push → PR review → `/invar:log` and \
+         `/invar:log-approve` (if an entry is wanted) → `invar done`**"
+    ));
+    // And the steps in that order.
+    let steps: Vec<usize> = [
+        "**1. Commit.**",
+        "**2. Offer the review**",
+        "**3. Render the PR description**",
+        "**4. Push, and the PR is reviewed**",
+        "**5. Offer to draft the decision entry**",
+        "**6. `invar done` is the developer's.**",
+    ]
+    .iter()
+    .map(|step| flat.find(step).unwrap_or_else(|| panic!("no {step:?}")))
+    .collect();
+    assert!(steps.windows(2).all(|w| w[0] < w[1]), "{steps:?}");
+    // The draft is written before or during the PR review, recorded after it.
+    assert!(flat.contains("before the PR review or during it"));
+    assert!(flat.contains("with `/invar:log-approve`, after the review"));
+    assert!(flat.contains("the developer edits the draft or runs `/invar:log` again"));
+}
+
+#[test]
+fn after_blocked_the_skill_offers_a_failed_draft_the_developer_approves() {
+    let flat = skill().1.replace('\n', " ");
+    let blocked = flat
+        .split_once("## When the coder answers BLOCKED")
+        .unwrap()
+        .1
+        .split_once("## Closing")
+        .unwrap()
+        .0;
+
+    assert!(blocked.contains("Run `/invar:log`."));
+    assert!(blocked.contains("with `type: failed`"));
+    assert!(blocked.contains("**The developer records it**, with `/invar:log-approve <TICKET>`"));
+    assert!(blocked.contains("never record it yourself"));
+}
+
+#[test]
+fn the_skill_names_both_commands_and_never_tells_the_agent_to_run_what_is_the_developers() {
+    let (_, body) = skill();
+    let flat = body.replace('\n', " ");
+
+    assert!(flat.contains("`/invar:log`"));
+    assert!(flat.contains("`/invar:log-approve`"));
+
+    // Each of the developer's commands appears after "run" only as "never run".
+    for command in [
+        "invar done",
+        "invar decision approve",
+        "invar decision record",
+    ] {
+        for verb in ["run `", "Run `"] {
+            let needle = format!("{verb}{command}");
+            for (at, _) in flat.match_indices(&needle) {
+                let before = &flat[..at];
+                assert!(
+                    before.ends_with("never ") || before.ends_with("Never "),
+                    "the skill tells the agent to run `{command}`: …{}",
+                    &flat[at.saturating_sub(60)..(at + needle.len() + 20).min(flat.len())]
+                );
+            }
+        }
+        // Never written as a command line for the agent to copy.
+        for line in body.lines() {
+            let trimmed = line.trim();
+            assert!(
+                !(trimmed.starts_with(&format!("`{command} ")) && trimmed.ends_with('`')),
+                "a command line to copy: {line}"
+            );
+        }
+    }
+    // The prohibitions themselves.
+    assert!(flat.contains("Never run `invar done` yourself"));
+    assert!(flat.contains("- run `invar plan approve` or `invar done`;"));
+    assert!(flat.contains("never `invar decision approve`, never `invar decision record`"));
 }
 
 // --- /invar:log-approve ----------------------------------------------------------------------

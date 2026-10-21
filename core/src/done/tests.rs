@@ -7,9 +7,14 @@ use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
-use super::{DoneError, Staged, close, plan_for_branch};
+use super::{Closed, DoneError, Staged, plan_for_branch};
 use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
+
+/// `done` without `--commit`.
+fn close(root: &ProjectRoot, spec: &Path, mode: Mode) -> Result<Closed, DoneError> {
+    super::close(root, spec, mode, None)
+}
 
 fn contract_example(number: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/plan-header.md");
@@ -147,6 +152,32 @@ fn a_plan_that_cannot_be_removed_is_reported() {
         other => panic!("expected Remove, got {other:?}"),
     }
     assert!(plan_dir.exists());
+}
+
+// --- `--commit`, refused before anything is deleted -----------------------------------
+
+#[test]
+fn an_empty_commit_message_refuses_and_changes_nothing() {
+    let (_dir, root, spec) = project(&approved_plan());
+    for message in ["", "   ", "\n"] {
+        let err = super::close(&root, &spec, Mode::Light, Some(message)).unwrap_err();
+        assert!(matches!(err, DoneError::EmptyCommitMessage), "{err}");
+        assert!(spec.exists());
+    }
+}
+
+#[test]
+fn commit_outside_a_repository_refuses_and_changes_nothing() {
+    // Not a git repository: there is nothing to commit into, so the Plan is
+    // not deleted only to fail afterwards.
+    let (_dir, root, spec) = project(&approved_plan());
+    let err = super::close(&root, &spec, Mode::Light, Some("chore: remove")).unwrap_err();
+    assert!(
+        matches!(err, DoneError::CommitOutsideRepository { .. }),
+        "{err}"
+    );
+    assert!(err.to_string().contains("nothing was changed"), "{err}");
+    assert!(spec.exists());
 }
 
 // --- which Plan, from the branch -------------------------------------------------
