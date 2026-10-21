@@ -23,6 +23,12 @@
 
 ### Added
 
+- **`/invar:approve` starts Phase 2.** When `invar plan approve` records an
+  approval it now ends with one fixed line, `approved <TICKET> checksum
+  sha256:<hex>`, and on that line the session begins Phase 2 at once — no second
+  prompt. `/invar:approve <ticket> --no-start` approves without starting it. A
+  refusal, or a Plan that was already approved, starts nothing.
+
 - **`invar done --commit <MESSAGE>`** commits the Plan's deletion, alone, under
   the given message (`git commit --only`): anything else that is staged stays
   out of it. Hooks, signing and identity apply and are never bypassed; nothing is
