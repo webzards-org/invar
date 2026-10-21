@@ -37,7 +37,7 @@ pub fn run(args: Args) -> Result<()> {
 
     // A PR description describes an approved specification: one that has been
     // approved, and has not changed since. That is the question `plan check`
-    // and `invar done` ask, and this asks it too, in the same words. A lighter
+    // asks, and this asks it too, in the same words. A lighter
     // rule — refusing only a draft — would let a Plan edited after approval be
     // described under an "Approved by …" line it no longer has any right to.
     require_approved::require(&root, &spec, mode, &cwd).context(
@@ -50,8 +50,8 @@ pub fn run(args: Args) -> Result<()> {
     let rendered = pr_body::render(&plan, &ticket, args.with_ticket);
     match args.out {
         Some(path) => {
-            // `.invar/out/` is where `invar done` writes, and `init` does not
-            // create it: a description asked for there must not fail on that.
+            // `.invar/out/` is the usual place, and `init` does not create
+            // it: a description asked for there must not fail on that.
             if let Some(parent) = path
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
