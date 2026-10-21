@@ -1,15 +1,15 @@
-//! Tests for `invar done` (M1-12): all-or-nothing closing of a cycle.
+//! Tests for `invar done`: delete the Plan, refuse what would lose something.
+//! Staging, which needs a real repository, is tested end to end
+//! (`tests/done.rs`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
-use super::{DoneError, Request, close};
-use crate::format::decision::Type;
+use super::{DoneError, Staged, close, plan_for_branch};
 use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
-use crate::git::Instant;
 
 fn contract_example(number: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/plan-header.md");
@@ -41,115 +41,91 @@ fn project(text: &str) -> (TempDir, ProjectRoot, PathBuf) {
     (dir, root, spec)
 }
 
-fn now() -> Instant {
-    Instant::from_ident("t <t@x> 1791304632 +0200").unwrap()
-}
-
-fn request(spec: &Path, message: &str) -> Request {
-    Request {
-        spec: spec.to_owned(),
-        body: message.to_owned(),
-        with_ticket: false,
-    }
-}
-
 #[test]
-fn closes_the_cycle_all_the_way() {
+fn deletes_the_plan_and_writes_nothing_else() {
     let (_dir, root, spec) = project(&approved_plan());
     let plan_dir = spec.parent().unwrap().to_owned();
 
-    let closed = close(
-        &root,
-        request(&spec, "Shipped as planned."),
-        Mode::Light,
-        now(),
-    )
-    .unwrap();
-
-    assert_eq!(closed.pr_description, root.out_dir().join("SHOP-214-pr.md"));
-    let rendered = fs::read_to_string(&closed.pr_description).unwrap();
-    assert!(rendered.starts_with("# SHOP-214"), "{rendered}");
-    assert!(
-        rendered.contains("Given a pending, unpaid order of mine"),
-        "{rendered}"
-    );
-
-    assert!(closed.entry.path.is_file());
-    assert_eq!(closed.entry.entry.ticket, "SHOP-214");
-    assert_eq!(closed.entry.entry.module, "orders");
-    assert_eq!(closed.entry.entry.kind, Type::Confirmed);
-    assert_eq!(closed.entry.entry.body, "Shipped as planned.");
+    let closed = close(&root, &spec, Mode::Light).unwrap();
 
     assert_eq!(closed.plan_dir, plan_dir);
     assert!(!plan_dir.exists());
+    // Not a git repository here: nothing to stage, and said so.
+    assert!(
+        matches!(closed.staged, Staged::NotARepository(_)),
+        "{:?}",
+        closed.staged
+    );
+    // No entry, no PR description.
+    assert!(!root.decisions_dir().exists());
+    assert!(!root.out_dir().exists());
 }
 
 #[test]
-fn a_draft_plan_refuses_and_writes_nothing() {
+fn a_draft_plan_refuses_and_changes_nothing() {
     let (_dir, root, spec) = project(&contract_example("9.1"));
 
-    let err = close(&root, request(&spec, "x"), Mode::Light, now()).unwrap_err();
+    let err = close(&root, &spec, Mode::Light).unwrap_err();
 
     assert!(matches!(err, DoneError::Check(_)), "{err}");
     assert!(err.to_string().contains("is still a draft"), "{err}");
-    assert!(!root.out_dir().exists());
-    assert!(!root.decisions_dir().exists());
     assert!(spec.exists());
 }
 
 #[test]
-fn a_changed_plan_refuses_and_writes_nothing() {
+fn a_changed_plan_refuses_and_changes_nothing() {
     let (_dir, root, spec) = project(&approved_plan());
     let edited = fs::read_to_string(&spec)
         .unwrap()
         .replace("refused with 403", "refused with 409");
     fs::write(&spec, edited).unwrap();
 
-    let err = close(&root, request(&spec, "x"), Mode::Light, now()).unwrap_err();
+    let err = close(&root, &spec, Mode::Light).unwrap_err();
 
     assert!(
         err.to_string().contains("changed after it was approved"),
         "{err}"
     );
-    assert!(!root.out_dir().exists());
-    assert!(!root.decisions_dir().exists());
+    assert!(spec.exists());
 }
 
 #[test]
-fn a_blocked_pr_description_leaves_no_entry_and_the_plan_in_place() {
+fn an_unapproved_draft_entry_refuses_and_keeps_both() {
+    // The reviewed text would go with the Plan: the one way to lose it
+    // silently.
     let (_dir, root, spec) = project(&approved_plan());
-    let plan_dir = spec.parent().unwrap().to_owned();
-    // A file sits where `.invar/out/` needs to be a directory.
-    fs::create_dir_all(root.path().join(".invar")).unwrap();
-    fs::write(root.out_dir(), "").unwrap();
+    let draft = spec.with_file_name("decision.md");
+    fs::write(&draft, "---\nticket: SHOP-214\n---\n\nKept.\n").unwrap();
 
-    let err = close(&root, request(&spec, "x"), Mode::Light, now()).unwrap_err();
+    let err = close(&root, &spec, Mode::Light).unwrap_err();
 
-    assert!(matches!(err, DoneError::Io { .. }), "{err}");
-    assert!(!root.decisions_dir().exists());
-    assert!(plan_dir.exists());
+    assert!(matches!(err, DoneError::DraftPending { .. }), "{err}");
+    let message = err.to_string();
+    assert!(
+        message.contains("Approve it with /invar:log-approve, or delete it"),
+        "{message}"
+    );
+    assert!(spec.exists());
+    assert!(draft.exists());
 }
 
 #[test]
-fn a_blocked_decision_log_leaves_the_pr_description_but_not_the_plan_removed() {
+fn a_decision_entry_is_not_required() {
+    // Before decision-entry.md 1.3.0, `done` wrote one; now it neither writes
+    // nor looks for one.
     let (_dir, root, spec) = project(&approved_plan());
-    let plan_dir = spec.parent().unwrap().to_owned();
-    fs::create_dir_all(root.path().join(".invar")).unwrap();
-    fs::write(root.decisions_dir(), "").unwrap();
-
-    let err = close(&root, request(&spec, "x"), Mode::Light, now()).unwrap_err();
-
-    assert!(matches!(err, DoneError::Record(_)), "{err}");
-    assert!(root.out_dir().join("SHOP-214-pr.md").is_file());
-    assert!(plan_dir.exists());
+    assert!(!root.decisions_dir().exists());
+    close(&root, &spec, Mode::Light).unwrap();
+    assert!(!root.decisions_dir().exists());
 }
 
 #[cfg(unix)]
 #[test]
-fn a_plan_that_cannot_be_removed_still_has_its_entry_on_record() {
-    use std::os::unix::fs::PermissionsExt;
+fn a_plan_that_cannot_be_removed_is_reported() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-    if is_root() {
+    let probe = tempfile::NamedTempFile::new().unwrap();
+    if probe.as_file().metadata().unwrap().uid() == 0 {
         eprintln!("skipped: running as root, permissions are not enforced");
         return;
     }
@@ -160,27 +136,77 @@ fn a_plan_that_cannot_be_removed_still_has_its_entry_on_record() {
     // Removing a directory needs write permission on its *parent*.
     fs::set_permissions(&plans_dir, fs::Permissions::from_mode(0o500)).unwrap();
 
-    let result = close(&root, request(&spec, "x"), Mode::Light, now());
+    let result = close(&root, &spec, Mode::Light);
 
     fs::set_permissions(&plans_dir, fs::Permissions::from_mode(0o700)).unwrap();
 
     match result {
-        Err(DoneError::RemovePlan {
-            entry,
-            plan_dir: reported,
-            ..
-        }) => {
-            assert!(entry.is_file(), "{entry:?}");
-            assert_eq!(reported, plan_dir);
-        }
-        other => panic!("expected RemovePlan, got {other:?}"),
+        Err(DoneError::Remove {
+            plan_dir: reported, ..
+        }) => assert_eq!(reported, plan_dir),
+        other => panic!("expected Remove, got {other:?}"),
     }
     assert!(plan_dir.exists());
 }
 
-#[cfg(unix)]
-fn is_root() -> bool {
-    use std::os::unix::fs::MetadataExt;
-    let probe = tempfile::NamedTempFile::new().unwrap();
-    probe.as_file().metadata().unwrap().uid() == 0
+// --- which Plan, from the branch -------------------------------------------------
+
+fn plans(names: &[&str]) -> (TempDir, ProjectRoot) {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("invar.yaml"), "").unwrap();
+    let root = ProjectRoot::for_test(dir.path());
+    for name in names {
+        fs::create_dir_all(root.plans_dir().join(name)).unwrap();
+    }
+    (dir, root)
+}
+
+#[test]
+fn the_branch_names_the_plan_by_its_ticket() {
+    let (_dir, root) = plans(&["SHOP-214-cancel", "SHOP-300-refunds"]);
+    for branch in ["feat/SHOP-214-cancel", "SHOP-214", "fix/SHOP-214_hotfix"] {
+        assert_eq!(
+            plan_for_branch(&root, branch).unwrap(),
+            root.plans_dir().join("SHOP-214-cancel/spec.md"),
+            "{branch}"
+        );
+    }
+}
+
+#[test]
+fn a_ticket_that_is_only_part_of_a_segment_is_not_named() {
+    // `SHOP-21` is not `SHOP-214`.
+    let (_dir, root) = plans(&["SHOP-21-old"]);
+    assert!(matches!(
+        plan_for_branch(&root, "feat/SHOP-214-cancel"),
+        Err(DoneError::BranchNamesNoPlan { .. })
+    ));
+}
+
+#[test]
+fn a_branch_that_names_no_plan_lists_the_plans() {
+    let (_dir, root) = plans(&["SHOP-214-cancel"]);
+    let err = plan_for_branch(&root, "main").unwrap_err();
+    let message = err.to_string();
+    assert!(message.contains("`main`"), "{message}");
+    assert!(message.contains("SHOP-214-cancel"), "{message}");
+    assert!(message.contains("invar done <TICKET>"), "{message}");
+}
+
+#[test]
+fn a_branch_that_names_several_plans_is_never_guessed() {
+    let (_dir, root) = plans(&["SHOP-214-cancel", "SHOP-300-refunds"]);
+    match plan_for_branch(&root, "feat/SHOP-214-and-SHOP-300") {
+        Err(DoneError::BranchNamesSeveral { plans, .. }) => {
+            assert_eq!(plans, ["SHOP-214-cancel", "SHOP-300-refunds"]);
+        }
+        other => panic!("expected BranchNamesSeveral, got {other:?}"),
+    }
+}
+
+#[test]
+fn without_plans_the_branch_names_none() {
+    let (_dir, root) = plans(&[]);
+    let err = plan_for_branch(&root, "feat/SHOP-1-x").unwrap_err();
+    assert!(err.to_string().contains("no Plans"), "{err}");
 }

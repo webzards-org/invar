@@ -1,5 +1,5 @@
-//! End-to-end tests for `invar done` (M1-12): the real binary, a real
-//! project, and git's clock fixed through `GIT_COMMITTER_DATE`.
+//! End-to-end tests for `invar done`: the real binary, a real project, and —
+//! where staging is the point — a real git repository.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use tempfile::TempDir;
 
 const SPEC: &str = ".invar/plans/SHOP-214-cancel-unpaid-order/spec.md";
 const PLAN_DIR: &str = ".invar/plans/SHOP-214-cancel-unpaid-order";
-const NOW: &str = "2026-10-06T18:37:12+02:00";
+const DRAFT: &str = ".invar/plans/SHOP-214-cancel-unpaid-order/decision.md";
 
 fn contract_example(number: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/plan-header.md");
@@ -41,12 +41,21 @@ impl Project {
         fs::write(project.root().join("invar.yaml"), "").unwrap();
         fs::write(
             project.root().join(".gitconfig-test"),
-            "[user]\n\tname = Test\n\temail = test@example.com\n",
+            "[user]\n\tname = Test\n\temail = test@example.com\n[commit]\n\tgpgsign = false\n",
         )
         .unwrap();
         let spec = project.root().join(SPEC);
         fs::create_dir_all(spec.parent().unwrap()).unwrap();
         fs::write(spec, plan).unwrap();
+        project
+    }
+
+    /// The project as a repository: everything committed on `branch`.
+    fn in_git(plan: &str, branch: &str) -> Self {
+        let project = Self::new(plan);
+        project.git(&["init", "-q", "-b", branch]);
+        project.git(&["add", "-A"]);
+        project.git(&["commit", "-q", "-m", "initial"]);
         project
     }
 
@@ -58,16 +67,25 @@ impl Project {
         fs::read_to_string(self.root().join(relative)).unwrap()
     }
 
-    fn git(&self, args: &[&str]) {
-        let status = std::process::Command::new("git")
+    fn exists(&self, relative: &str) -> bool {
+        self.root().join(relative).exists()
+    }
+
+    fn git(&self, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
             .args(args)
             .current_dir(self.root())
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", self.root().join(".gitconfig-test"))
             .env("HOME", self.root())
-            .status()
+            .output()
             .unwrap();
-        assert!(status.success(), "git {args:?} failed");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
     }
 
     fn done(&self, args: &[&str]) -> assert_cmd::assert::Assert {
@@ -76,86 +94,143 @@ impl Project {
         Command::cargo_bin("invar")
             .unwrap()
             .current_dir(self.root())
-            .env("GIT_COMMITTER_DATE", NOW)
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", self.root().join(".gitconfig-test"))
             .env("HOME", self.root())
             .args(&all)
             .assert()
     }
-
-    fn decisions(&self) -> Vec<String> {
-        let mut names: Vec<String> = fs::read_dir(self.root().join(".invar/decisions"))
-            .map(|dir| {
-                dir.map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-                    .collect()
-            })
-            .unwrap_or_default();
-        names.sort();
-        names
-    }
 }
 
 // --- success ------------------------------------------------------------------
 
 #[test]
-fn closes_the_cycle_and_prints_every_path() {
-    let project = Project::new(&approved_plan());
+fn deletes_the_plan_and_stages_the_deletion() {
+    let project = Project::in_git(&approved_plan(), "feat/SHOP-214-cancel");
 
     project
-        .done(&["SHOP-214", "-m", "Shipped as planned."])
+        .done(&["SHOP-214"])
         .success()
-        .stdout(contains("pr description: .invar/out/SHOP-214-pr.md"))
-        .stdout(contains(
-            ".invar/decisions/2026-10-06-163712-orders-cancel-unpaid-order.md",
-        ))
-        .stdout(contains(", confirmed, orders)"))
-        .stdout(contains(format!("removed: {PLAN_DIR}")))
+        .stdout(contains(format!("removed: {PLAN_DIR} (staged")))
         .stderr("");
 
-    let pr = project.read(".invar/out/SHOP-214-pr.md");
-    assert!(pr.starts_with("# SHOP-214"), "{pr}");
-
-    assert_eq!(
-        project.decisions(),
-        ["2026-10-06-163712-orders-cancel-unpaid-order.md"]
-    );
-    let entry = project.read(".invar/decisions/2026-10-06-163712-orders-cancel-unpaid-order.md");
-    assert!(entry.contains("type: confirmed"), "{entry}");
-    assert!(entry.contains("Shipped as planned."), "{entry}");
-
-    assert!(!project.root().join(PLAN_DIR).exists());
+    assert!(!project.exists(PLAN_DIR));
+    // Staged as a deletion, nothing else touched.
+    let staged = project.git(&["diff", "--cached", "--name-status"]);
+    assert_eq!(staged, format!("D\t{SPEC}\n"));
+    // No entry, no PR description.
+    assert!(!project.exists(".invar/decisions"));
+    assert!(!project.exists(".invar/out"));
 }
 
 #[test]
-fn the_body_can_come_from_stdin() {
+fn without_a_ticket_the_branch_names_the_plan() {
+    let project = Project::in_git(&approved_plan(), "feat/SHOP-214-cancel");
+
+    project
+        .done(&[])
+        .success()
+        .stdout(contains(format!("removed: {PLAN_DIR}")));
+
+    assert!(!project.exists(PLAN_DIR));
+}
+
+#[test]
+fn a_branch_that_names_no_plan_refuses_and_says_how_to_name_one() {
+    let project = Project::in_git(&approved_plan(), "main");
+
+    project
+        .done(&[])
+        .failure()
+        .stderr(contains(
+            "no Plan's ticket appears in the branch name `main`",
+        ))
+        .stderr(contains("invar done <TICKET>"));
+
+    assert!(project.exists(SPEC));
+}
+
+#[test]
+fn a_detached_head_needs_the_ticket() {
+    // A CI checkout of a pull request is detached.
+    let project = Project::in_git(&approved_plan(), "feat/SHOP-214-cancel");
+    project.git(&["checkout", "-q", "--detach"]);
+
+    project
+        .done(&[])
+        .failure()
+        .stderr(contains("HEAD is not on a branch"));
+    assert!(project.exists(SPEC));
+
+    // Named, it closes.
+    project.done(&["SHOP-214"]).success();
+    assert!(!project.exists(PLAN_DIR));
+}
+
+#[test]
+fn a_plan_never_committed_is_deleted_with_nothing_to_stage() {
     let project = Project::new(&approved_plan());
-    Command::cargo_bin("invar")
-        .unwrap()
-        .current_dir(project.root())
-        .env("GIT_COMMITTER_DATE", NOW)
-        .args(["done", "SHOP-214"])
-        .write_stdin("Built from stdin.\n")
-        .assert()
-        .success();
-    let entry = project.read(".invar/decisions/2026-10-06-163712-orders-cancel-unpaid-order.md");
-    assert!(entry.contains("Built from stdin."), "{entry}");
+    project.git(&["init", "-q", "-b", "feat/SHOP-214-cancel"]);
+
+    project.done(&["SHOP-214"]).success();
+
+    assert!(!project.exists(PLAN_DIR));
+    assert_eq!(project.git(&["diff", "--cached", "--name-status"]), "");
+}
+
+#[test]
+fn outside_a_repository_it_deletes_and_warns_that_nothing_was_staged() {
+    let project = Project::new(&approved_plan());
+
+    project
+        .done(&["SHOP-214"])
+        .success()
+        .stdout(contains(format!("removed: {PLAN_DIR}")))
+        .stderr(contains("warning: not staged"));
+
+    assert!(!project.exists(PLAN_DIR));
+}
+
+#[test]
+fn it_works_by_path_too() {
+    let project = Project::new(&approved_plan());
+    project.done(&[PLAN_DIR]).success();
+    assert!(!project.exists(PLAN_DIR));
 }
 
 // --- refusals -------------------------------------------------------------------
 
 #[test]
-fn refuses_on_a_draft_plan_and_writes_nothing() {
+fn refuses_while_an_unapproved_draft_entry_is_in_the_plan_directory() {
+    let project = Project::in_git(&approved_plan(), "feat/SHOP-214-cancel");
+    let draft = "---\nticket: SHOP-214\nmodule: orders\ntype: confirmed\n---\n\nReviewed.\n";
+    fs::write(project.root().join(DRAFT), draft).unwrap();
+
+    project
+        .done(&["SHOP-214"])
+        .failure()
+        .stderr(contains("Approve it with /invar:log-approve, or delete it"));
+
+    assert_eq!(project.read(DRAFT), draft);
+    assert!(project.exists(SPEC));
+    assert_eq!(project.git(&["diff", "--cached", "--name-status"]), "");
+
+    // Once it is gone, the Plan goes.
+    fs::remove_file(project.root().join(DRAFT)).unwrap();
+    project.done(&["SHOP-214"]).success();
+    assert!(!project.exists(PLAN_DIR));
+}
+
+#[test]
+fn refuses_on_a_draft_plan_and_changes_nothing() {
     let project = Project::new(&draft_plan());
 
     project
-        .done(&["SHOP-214", "-m", "x"])
+        .done(&["SHOP-214"])
         .failure()
         .stderr(contains("is still a draft"));
 
-    assert!(!project.root().join(".invar/out").exists());
-    assert!(!project.root().join(".invar/decisions").exists());
-    assert!(project.root().join(SPEC).exists());
+    assert!(project.exists(SPEC));
 }
 
 #[test]
@@ -163,14 +238,14 @@ fn a_refusal_is_printed_once() {
     // An error whose cause repeats its message would print it twice.
     let project = Project::new(&draft_plan());
 
-    let assert = project.done(&["SHOP-214", "-m", "x"]).failure();
+    let assert = project.done(&["SHOP-214"]).failure();
 
     let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
     assert_eq!(stderr.matches("is still a draft").count(), 1, "{stderr}");
 }
 
 #[test]
-fn a_plan_that_is_not_valid_lists_its_problems_and_writes_nothing() {
+fn a_plan_that_is_not_valid_lists_its_problems_and_changes_nothing() {
     // The refusal says "fix every problem listed above": the list has to be
     // there, on stdout, as `plan validate` prints it.
     let project = Project::new(
@@ -178,20 +253,18 @@ fn a_plan_that_is_not_valid_lists_its_problems_and_writes_nothing() {
     );
 
     project
-        .done(&["SHOP-214", "-m", "x"])
+        .done(&["SHOP-214"])
         .failure()
         .stdout(contains("spec.md:"))
         .stdout(contains("Acceptance criteria"))
         .stderr(contains("the Plan is not valid"))
         .stderr(contains("listed above"));
 
-    assert!(!project.root().join(".invar/out").exists());
-    assert!(!project.root().join(".invar/decisions").exists());
-    assert!(project.root().join(SPEC).exists());
+    assert!(project.exists(SPEC));
 }
 
 #[test]
-fn refuses_on_a_plan_changed_after_approval_and_writes_nothing() {
+fn refuses_on_a_plan_changed_after_approval_and_changes_nothing() {
     let project = Project::new(&approved_plan());
     let edited = project
         .read(SPEC)
@@ -199,98 +272,32 @@ fn refuses_on_a_plan_changed_after_approval_and_writes_nothing() {
     fs::write(project.root().join(SPEC), edited).unwrap();
 
     project
-        .done(&["SHOP-214", "-m", "x"])
+        .done(&["SHOP-214"])
         .failure()
         .stderr(contains("changed after it was approved"));
 
-    assert!(!project.root().join(".invar/out").exists());
-    assert!(!project.root().join(".invar/decisions").exists());
-}
-
-// --- all-or-nothing: forcing a failure at each later step -----------------------
-
-#[test]
-fn a_blocked_pr_description_leaves_no_entry_and_the_plan_in_place() {
-    let project = Project::new(&approved_plan());
-    fs::create_dir_all(project.root().join(".invar")).unwrap();
-    fs::write(project.root().join(".invar/out"), "").unwrap();
-
-    project.done(&["SHOP-214", "-m", "x"]).failure();
-
-    assert!(!project.root().join(".invar/decisions").exists());
-    assert!(project.root().join(PLAN_DIR).exists());
+    assert!(project.exists(SPEC));
 }
 
 #[test]
-fn a_blocked_decision_log_leaves_the_pr_description_but_not_the_plan_removed() {
+fn the_message_flag_is_gone() {
+    // `done` writes no entry, so it takes no entry text.
     let project = Project::new(&approved_plan());
-    fs::create_dir_all(project.root().join(".invar")).unwrap();
-    fs::write(project.root().join(".invar/decisions"), "").unwrap();
-
-    project.done(&["SHOP-214", "-m", "x"]).failure();
-
-    assert!(project.root().join(".invar/out/SHOP-214-pr.md").is_file());
-    assert!(project.root().join(PLAN_DIR).exists());
-}
-
-#[cfg(unix)]
-#[test]
-fn a_plan_that_cannot_be_removed_still_has_its_entry_on_record() {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
-
-    let is_root = {
-        let probe = tempfile::NamedTempFile::new().unwrap();
-        probe.as_file().metadata().unwrap().uid() == 0
-    };
-    if is_root {
-        eprintln!("skipped: running as root, permissions are not enforced");
-        return;
-    }
-
-    let project = Project::new(&approved_plan());
-    let plans_dir = project.root().join(".invar/plans");
-    fs::set_permissions(&plans_dir, fs::Permissions::from_mode(0o500)).unwrap();
-
-    let result = project.done(&["SHOP-214", "-m", "x"]);
-
-    fs::set_permissions(&plans_dir, fs::Permissions::from_mode(0o700)).unwrap();
-
-    result
+    project
+        .done(&["SHOP-214", "-m", "x"])
         .failure()
-        .stderr(contains("could not be removed"))
-        .stderr(contains("not fully closed"));
-    assert_eq!(
-        project.decisions(),
-        ["2026-10-06-163712-orders-cancel-unpaid-order.md"]
-    );
-    assert!(project.root().join(PLAN_DIR).exists());
-}
-
-// --- uncommitted changes: warn, never refuse ------------------------------------
-
-#[test]
-fn warns_but_does_not_refuse_on_uncommitted_changes_outside_invar() {
-    let project = Project::new(&approved_plan());
-    project.git(&["init", "-q"]);
-    project.git(&["add", "-A"]);
-    project.git(&["commit", "-q", "-m", "initial"]);
-    fs::write(project.root().join("app.php"), "<?php // uncommitted\n").unwrap();
-
-    project
-        .done(&["SHOP-214", "-m", "Shipped."])
-        .success()
-        .stderr(contains("warning:"))
-        .stderr(contains("app.php"));
-
-    assert!(!project.root().join(SPEC).exists());
+        .stderr(contains("Usage"));
+    assert!(project.exists(SPEC));
 }
 
 #[test]
-fn outside_a_git_repository_the_check_is_silent() {
-    // No `git init`: `git status` fails, and the warning is simply skipped.
-    let project = Project::new(&approved_plan());
-    project
-        .done(&["SHOP-214", "-m", "Shipped."])
+fn the_help_says_what_done_does_and_does_not_do() {
+    Command::cargo_bin("invar")
+        .unwrap()
+        .args(["done", "--help"])
+        .assert()
         .success()
-        .stderr("");
+        .stdout(contains("stage the deletion"))
+        .stdout(contains("/invar:log-approve"))
+        .stdout(contains("Writes no"));
 }

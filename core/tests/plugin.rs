@@ -429,6 +429,8 @@ fn the_pre_tool_use_hook_also_answers_for_a_bash_call() {
             "invar decision record --ticket SHOP-214 --type failed -m x",
             "/invar:log SHOP-214",
         ),
+        // And closing the cycle, which deletes the approved Plan.
+        ("invar done SHOP-214", "cycle is ready to close"),
     ] {
         Command::cargo_bin("invar")
             .unwrap()
