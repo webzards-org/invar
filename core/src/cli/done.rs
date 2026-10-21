@@ -1,8 +1,9 @@
-//! `invar done [TICKET | PATH]`: delete the Plan, and stage the deletion.
+//! `invar done [TICKET | PATH] [--commit <MESSAGE>]`: delete the Plan, stage
+//! the deletion, and commit it when asked.
 
 use anyhow::{Context as _, Result};
 
-use crate::done::{self, DoneError, Staged};
+use crate::done::{self, Committed, DoneError, Staged};
 use crate::fs;
 use crate::gate::check::CheckError;
 use crate::git;
@@ -18,6 +19,16 @@ pub struct Args {
     /// Anything containing `/`, ending in `.md`, or `.`/`..` is a path;
     /// everything else is looked up as a ticket under `.invar/plans/`.
     pub target: Option<String>,
+
+    /// Also commit the deletion, alone, with this message:
+    /// `--commit "chore: remove the Plan of PROJ-412"`.
+    ///
+    /// Only the Plan directory goes into the commit; anything else that is
+    /// staged stays staged. The project's hooks, signing and identity apply.
+    /// Nothing is pushed. Without it, the deletion is staged and the commit is
+    /// yours.
+    #[arg(long, value_name = "MESSAGE")]
+    pub commit: Option<String>,
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -33,7 +44,7 @@ pub fn run(args: Args) -> Result<()> {
     };
     let mode = super::mode(&root)?;
 
-    let closed = match done::close(&root, &spec, mode) {
+    let closed = match done::close(&root, &spec, mode, args.commit.as_deref()) {
         Ok(closed) => closed,
         // The refusal for a Plan that is not valid in form says "fix every
         // problem listed above"; here is the list it points at.
@@ -45,11 +56,17 @@ pub fn run(args: Args) -> Result<()> {
     };
 
     let shown = target::shown(&closed.plan_dir, &cwd);
-    match closed.staged {
-        Staged::Yes => {
+    match (&closed.staged, &closed.committed) {
+        (_, Committed::Yes(message)) => {
+            println!("removed: {shown} (committed: {message})");
+        }
+        (_, Committed::NothingTracked) => {
+            println!("removed: {shown} (git never tracked it, so there was nothing to commit)");
+        }
+        (Staged::Yes, Committed::NotAsked) => {
             println!("removed: {shown} (staged; commit it with the rest of the branch)");
         }
-        Staged::NotARepository(said) => {
+        (Staged::NotARepository(said), Committed::NotAsked) => {
             println!("removed: {shown}");
             eprintln!("warning: not staged — the project is not in a git work tree ({said})");
         }
