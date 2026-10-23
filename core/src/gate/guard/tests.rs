@@ -281,20 +281,19 @@ fn running_plan_approve_is_denied_and_the_agent_is_told_what_to_do() {
         "{reason}"
     );
     assert!(reason.contains("Do not run it"), "{reason}");
-    assert!(
-        reason.contains("they run `invar plan approve SHOP-214` themselves"),
-        "{reason}"
-    );
-    assert!(reason.contains("their own terminal"), "{reason}");
+    // The developer approves in the same session, through the skill.
+    assert!(reason.contains("`/invar:approve SHOP-214`"), "{reason}");
+    assert!(reason.contains("starts Phase 2"), "{reason}");
+    assert!(!reason.contains("terminal"), "{reason}");
     assert!(reason.contains("--reapprove"), "{reason}");
 }
 
 #[test]
 fn the_reason_names_the_ticket_wherever_it_stands_and_a_placeholder_otherwise() {
     assert!(
-        denied("invar plan approve --reapprove SHOP-214").contains("`invar plan approve SHOP-214`")
+        denied("invar plan approve --reapprove SHOP-214").contains("`/invar:approve SHOP-214`")
     );
-    assert!(denied("invar plan approve").contains("`invar plan approve <ticket>`"));
+    assert!(denied("invar plan approve").contains("`/invar:approve <ticket>`"));
 }
 
 #[test]
@@ -429,9 +428,7 @@ fn the_ticket_of_decision_record_is_read_from_its_flag() {
         denied("invar decision record --type note --ticket SHOP-9").contains("`/invar:log SHOP-9`")
     );
     // Plan approve is unchanged: its ticket is its first argument.
-    assert!(
-        denied("invar plan approve --reapprove SHOP-9").contains("`invar plan approve SHOP-9`")
-    );
+    assert!(denied("invar plan approve --reapprove SHOP-9").contains("`/invar:approve SHOP-9`"));
     assert!(denied("invar decision approve").contains("`/invar:log-approve <ticket>`"));
 }
 
@@ -468,11 +465,9 @@ fn running_done_is_denied_and_the_agent_is_told_the_cycle_is_ready() {
         "{reason}"
     );
     assert!(reason.contains("cycle is ready to close"), "{reason}");
-    assert!(
-        reason.contains("they run `invar done SHOP-214` themselves"),
-        "{reason}"
-    );
-    assert!(denied("invar done").contains("`invar done <ticket>`"));
+    assert!(reason.contains("`/invar:done SHOP-214`"), "{reason}");
+    assert!(!reason.contains("terminal"), "{reason}");
+    assert!(denied("invar done").contains("`/invar:done <ticket>`"));
 }
 
 #[test]

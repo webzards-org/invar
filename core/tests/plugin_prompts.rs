@@ -310,7 +310,10 @@ fn the_skill_runs_the_cycle_as_a_dispatcher() {
     assert!(flat.contains("do not weaken a criterion"));
     assert!(flat.contains("**Never edit the approved Plan**"));
     // The developer closes the cycle; the main session says it is ready.
-    assert!(flat.contains("**tell the developer the cycle is ready to close**, and stop"));
+    assert!(flat.contains(
+        "**tell the developer the cycle is ready to close** — *\"Ready to close: run \
+         `/invar:done`.\"* — and stop"
+    ));
     assert!(flat.contains("Never run `invar done` yourself"));
     assert!(
         !flat.contains("`invar done <TICKET> -m"),
@@ -813,9 +816,8 @@ fn the_protocol_skill_offers_the_review_before_done_and_never_runs_it() {
 
 #[cfg(unix)]
 #[test]
-fn review_resolves_the_ticket_like_approve_does() {
-    // The same block, with its own last line: it names the ticket instead of
-    // approving it.
+fn review_resolves_the_ticket_in_its_block() {
+    // It names the ticket, and the reviewer is started from that line.
     let block = |file: &str| {
         let (_, body) = frontmatter(file);
         body.split_once("```!\n")
@@ -870,135 +872,133 @@ fn approve_cannot_be_invoked_by_the_model() {
     assert!(body.contains("Do not run `invar plan approve` yourself"));
 }
 
-#[test]
-fn approve_runs_the_cli_and_lists_the_plans_instead_of_guessing() {
-    let (_, body) = frontmatter("skills/approve/SKILL.md");
+// --- the developer's skills: one command, allowed by name ------------------------------------
 
-    assert!(body.contains("invar plan approve \"$t\""));
-    assert!(body.contains("Plans are waiting; say which: /invar:approve <ticket>"));
-    assert!(body.contains("there is no Plan in .invar/plans/ to approve"));
+/// The skills whose command records the developer's decision, and the command:
+/// the model cannot run any of them (`plan guard` denies it), so each runs
+/// before the model sees the skill, in its ```! block.
+const DEVELOPER_SKILLS: [(&str, &str); 3] = [
+    ("skills/approve/SKILL.md", "invar plan approve"),
+    ("skills/log-approve/SKILL.md", "invar decision approve"),
+    ("skills/done/SKILL.md", "invar done"),
+];
+
+/// The ```! block of a skill.
+fn shell_block(file: &str) -> String {
+    let (_, body) = frontmatter(file);
+    body.split_once("```!\n")
+        .unwrap_or_else(|| panic!("{file}: the command runs before the model, in a ```! block"))
+        .1
+        .split_once("\n```")
+        .unwrap()
+        .0
+        .to_owned()
+}
+
+#[test]
+fn each_developer_skill_runs_one_command_that_its_frontmatter_allows() {
+    // Claude Code checks a skill's command against the permission rules before
+    // it runs it. A command no rule allows does not run: outside auto mode the
+    // invocation aborts, in auto mode the model is asked to run it instead —
+    // and the model may not, so the approval silently never happens (the
+    // VPK-7 session, plugin/NOTES.md §15). So the block is one simple command,
+    // with no shell syntax a permission check could balk at, and the skill's
+    // `allowed-tools` names exactly that command.
+    for (file, command) in DEVELOPER_SKILLS {
+        let (meta, body) = frontmatter(file);
+        let block = shell_block(file);
+
+        assert_eq!(
+            block,
+            format!("{command} --skill $ARGUMENTS"),
+            "{file}: the block is the command and nothing else"
+        );
+        assert_eq!(
+            meta["allowed-tools"],
+            format!("Bash({command} *)"),
+            "{file}: allowed-tools must name the block's command"
+        );
+        assert_eq!(meta["disable-model-invocation"], "true", "{file}");
+        assert!(
+            !meta.contains_key("user-invocable"),
+            "{file}: it must stay in the / menu"
+        );
+        // A refusal comes back as `error: …`, and an empty result is said, not
+        // worked around.
+        assert!(body.contains("A line starting `error:`"), "{file}");
+        assert!(body.contains("If there is no output at all"), "{file}");
+        assert!(
+            body.contains(&format!("Do not run `{command}` yourself")),
+            "{file}"
+        );
+    }
 }
 
 #[cfg(unix)]
-mod approve_block {
-    use super::*;
+#[test]
+fn each_developer_skills_block_reports_a_refusal_as_output_and_exits_0() {
+    // The block run as Claude Code runs it, through `sh`, with the real binary:
+    // a command that exits non-zero would abort the skill and drop the reason
+    // with it.
+    let binary = assert_cmd::cargo::cargo_bin("invar");
+    let bin = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(&binary, bin.path().join("invar")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("invar.yaml"), "").unwrap();
+    fs::create_dir_all(dir.path().join(".invar/plans")).unwrap();
 
-    /// The shell block of the skill, with `$ARGUMENTS` replaced, run in `dir`
-    /// with a stand-in `invar` that records what it was asked to approve.
-    fn run(dir: &Path, arguments: &str) -> String {
-        use std::os::unix::fs::PermissionsExt as _;
-        let (_, body) = frontmatter("skills/approve/SKILL.md");
-        let block = body
-            .split_once("```!\n")
-            .unwrap()
-            .1
-            .split_once("\n```")
-            .unwrap()
-            .0
-            .replace("$ARGUMENTS", arguments);
-        let bin = dir.join("fakebin");
-        fs::create_dir_all(&bin).unwrap();
-        fs::write(bin.join("invar"), "#!/bin/sh\necho \"approved: $3\"\n").unwrap();
-        fs::set_permissions(bin.join("invar"), fs::Permissions::from_mode(0o755)).unwrap();
+    for (file, _) in DEVELOPER_SKILLS {
         let out = std::process::Command::new("sh")
             .arg("-c")
-            .arg(&block)
-            .current_dir(dir)
+            .arg(shell_block(file).replace("$ARGUMENTS", "SHOP-999"))
+            .current_dir(dir.path())
             .env(
                 "PATH",
-                format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+                format!(
+                    "{}:{}",
+                    bin.path().display(),
+                    std::env::var("PATH").unwrap()
+                ),
             )
             .output()
             .unwrap();
-        String::from_utf8(out.stdout).unwrap()
+        let stdout = String::from_utf8(out.stdout).unwrap();
+        assert!(out.status.success(), "{file}: exit {:?}", out.status);
+        assert!(stdout.starts_with("error: "), "{file}: {stdout}");
+        assert!(stdout.contains("SHOP-999"), "{file}: {stdout}");
     }
+}
 
-    fn plan(dir: &Path, name: &str) {
-        let p = dir.join(".invar/plans").join(name);
-        fs::create_dir_all(&p).unwrap();
-        fs::write(p.join("spec.md"), "").unwrap();
-    }
+#[test]
+fn done_is_the_developers_and_the_protocol_skill_points_at_it() {
+    let (meta, body) = frontmatter("skills/done/SKILL.md");
+    assert_eq!(meta["name"], "done");
+    assert_eq!(meta["argument-hint"], "[ticket] [--commit <message>]");
+    assert!(body.contains("A line starting `removed:` means the cycle is closed"));
+    let words = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(words.contains("never delete the Plan another way"));
 
-    #[test]
-    fn one_plan_needs_no_argument() {
-        let dir = tempfile::tempdir().unwrap();
-        plan(dir.path(), "SHOP-214-cancel-unpaid-order");
-        assert_eq!(
-            run(dir.path(), ""),
-            "approved: SHOP-214-cancel-unpaid-order\n"
-        );
-    }
+    let flat = skill().1.replace('\n', " ");
+    assert!(flat.contains("*\"Ready to close: run `/invar:done`.\"*"));
+    assert!(flat.contains("| `/invar:done` | the developer's:"));
+}
 
-    #[test]
-    fn several_plans_are_listed_and_nothing_is_approved() {
-        let dir = tempfile::tempdir().unwrap();
-        plan(dir.path(), "SHOP-214-cancel-unpaid-order");
-        plan(dir.path(), "SHOP-300-refunds");
-        let out = run(dir.path(), "");
-        assert!(out.contains("2 Plans are waiting"), "{out}");
-        assert!(out.contains("  SHOP-214-cancel-unpaid-order\n"), "{out}");
-        assert!(out.contains("  SHOP-300-refunds\n"), "{out}");
-        assert!(!out.contains("approved:"), "{out}");
-    }
-
-    #[test]
-    fn a_ticket_is_passed_through_and_shell_syntax_is_refused() {
-        let dir = tempfile::tempdir().unwrap();
-        plan(dir.path(), "SHOP-214-a");
-        plan(dir.path(), "SHOP-300-b");
-        assert_eq!(run(dir.path(), "SHOP-300"), "approved: SHOP-300\n");
-        let out = run(dir.path(), "x; touch pwned");
-        assert!(out.contains("is not a ticket"), "{out}");
-        assert!(!dir.path().join("pwned").exists());
-    }
-
-    #[test]
-    fn no_plan_is_said_plainly() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(run(dir.path(), "").contains("no Plan in .invar/plans/"));
-    }
-
-    #[test]
-    fn no_start_still_approves_and_says_phase_2_is_not_started() {
-        let dir = tempfile::tempdir().unwrap();
-        plan(dir.path(), "SHOP-214-a");
-        plan(dir.path(), "SHOP-300-b");
-        assert_eq!(
-            run(dir.path(), "SHOP-300 --no-start"),
-            "approved: SHOP-300\nPhase 2: not started (--no-start)\n"
-        );
-        // Either order.
-        assert_eq!(
-            run(dir.path(), "--no-start SHOP-214"),
-            "approved: SHOP-214\nPhase 2: not started (--no-start)\n"
-        );
-        // Without it, no such line.
-        assert_eq!(run(dir.path(), "SHOP-300"), "approved: SHOP-300\n");
-    }
-
-    #[test]
-    fn no_start_works_without_a_ticket_too() {
-        let dir = tempfile::tempdir().unwrap();
-        plan(dir.path(), "SHOP-214-cancel-unpaid-order");
-        assert_eq!(
-            run(dir.path(), "--no-start"),
-            "approved: SHOP-214-cancel-unpaid-order\nPhase 2: not started (--no-start)\n"
-        );
-    }
-
-    #[test]
-    fn another_option_or_a_second_ticket_approves_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        plan(dir.path(), "SHOP-214-a");
-        let unknown = run(dir.path(), "SHOP-214 --reapprove");
+#[test]
+fn no_skill_sends_the_developer_to_another_terminal() {
+    // The whole cycle runs in Claude Code: every step that is the developer's
+    // has a skill. A prompt that says "from their own terminal" sends them out
+    // of the session for nothing.
+    for skill in fs::read_dir(plugin_dir().join("skills")).unwrap() {
+        let path = skill.unwrap().path().join("SKILL.md");
+        if !path.is_file() {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap().replace('\n', " ");
         assert!(
-            unknown.contains("the one option is --no-start"),
-            "{unknown}"
+            !text.contains("own terminal"),
+            "{} sends the developer to their own terminal",
+            path.display()
         );
-        assert!(!unknown.contains("approved:"), "{unknown}");
-        let two = run(dir.path(), "SHOP-214 SHOP-300");
-        assert!(two.contains("give one ticket"), "{two}");
-        assert!(!two.contains("approved:"), "{two}");
     }
 }
 
@@ -1028,8 +1028,6 @@ fn approve_starts_phase_2_only_on_the_recorded_line() {
     assert!(flat.contains("run `invar plan check <TICKET>` first"));
     assert!(flat.contains("with the ticket line and nothing else"));
     assert!(flat.contains("never by your own reading"));
-    // The block prints the --no-start line the condition names.
-    assert!(body.contains("echo \"Phase 2: not started (--no-start)\""));
     // And still never runs the approval itself.
     assert!(body.contains("Do not run `invar plan approve` yourself"));
 
@@ -1247,9 +1245,10 @@ fn the_protocol_skill_tells_the_developer_the_cycle_is_ready_and_never_closes_it
     let pr = flat.find("Render the PR description**").unwrap();
     let ready = flat.find("the cycle is ready to close**").unwrap();
     assert!(pr < ready);
-    // Closing is the developer's, from a terminal or CI; a draft entry blocks it.
-    assert!(flat.contains("Closing is theirs"));
-    assert!(flat.contains("or CI runs it for them"));
+    // Closing is the developer's, through `/invar:done` or CI; a draft entry
+    // blocks it.
+    assert!(flat.contains("**6. Closing is the developer's.**"));
+    assert!(flat.contains("CI can run it instead"));
     assert!(flat.contains("never delete the Plan another way"));
     assert!(flat.contains("It refuses while a draft entry is still beside the Plan"));
     assert!(flat.contains("- run `invar plan approve` or `invar done`;"));
@@ -1285,7 +1284,7 @@ fn the_skill_ends_a_cycle_in_the_new_order() {
     // The order, stated once, as the developer will live it.
     assert!(flat.contains(
         "**commit → `/invar:review` (optional) → push → PR review → `/invar:log` and \
-         `/invar:log-approve` (if an entry is wanted) → `invar done`**"
+         `/invar:log-approve` (if an entry is wanted) → `/invar:done`**"
     ));
     // And the steps in that order.
     let steps: Vec<usize> = [
@@ -1294,7 +1293,7 @@ fn the_skill_ends_a_cycle_in_the_new_order() {
         "**3. Render the PR description**",
         "**4. Push, and the PR is reviewed**",
         "**5. Offer to draft the decision entry**",
-        "**6. `invar done` is the developer's.**",
+        "**6. Closing is the developer's.**",
     ]
     .iter()
     .map(|step| flat.find(step).unwrap_or_else(|| panic!("no {step:?}")))
@@ -1388,86 +1387,6 @@ fn log_approve_cannot_be_invoked_by_the_model() {
 }
 
 #[test]
-fn log_approve_runs_the_cli_through_shell_injection() {
-    let (_, body) = frontmatter("skills/log-approve/SKILL.md");
-    let block = body
-        .split_once("```!\n")
-        .expect("the command runs before the model, in a ```! block")
-        .1
-        .split_once("\n```")
-        .unwrap()
-        .0;
-
-    // The same guard on `$ARGUMENTS` as /invar:approve, and the command last.
-    assert!(block.contains("*[!A-Za-z0-9._/-]*)"));
-    assert!(
-        block.ends_with("invar decision approve \"$t\" 2>&1"),
-        "{block}"
-    );
-    assert!(body.contains("Show the output above to the developer exactly as it is, and stop."));
-}
-
-#[cfg(unix)]
-#[test]
-fn log_approve_finds_the_one_draft_and_lists_several() {
-    use std::os::unix::fs::PermissionsExt as _;
-    let (_, body) = frontmatter("skills/log-approve/SKILL.md");
-    let block = body
-        .split_once("```!\n")
-        .unwrap()
-        .1
-        .split_once("\n```")
-        .unwrap()
-        .0
-        .to_owned();
-    let dir = tempfile::tempdir().unwrap();
-    let bin = dir.path().join("fakebin");
-    fs::create_dir_all(&bin).unwrap();
-    fs::write(bin.join("invar"), "#!/bin/sh\necho \"$1 $2: $3\"\n").unwrap();
-    fs::set_permissions(bin.join("invar"), fs::Permissions::from_mode(0o755)).unwrap();
-    let run = |arguments: &str| {
-        let out = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(block.replace("$ARGUMENTS", arguments))
-            .current_dir(dir.path())
-            .env(
-                "PATH",
-                format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
-            )
-            .output()
-            .unwrap();
-        String::from_utf8(out.stdout).unwrap()
-    };
-    let plan = |name: &str, draft: bool| {
-        let p = dir.path().join(".invar/plans").join(name);
-        fs::create_dir_all(&p).unwrap();
-        fs::write(p.join("spec.md"), "").unwrap();
-        if draft {
-            fs::write(p.join("decision.md"), "").unwrap();
-        }
-    };
-
-    // A Plan without a draft has nothing to record.
-    plan("SHOP-100-no-draft", false);
-    let none = run("");
-    assert!(none.contains("no draft entry"), "{none}");
-    assert!(none.contains("/invar:log"), "{none}");
-    // The one draft is found by itself, whatever other Plans exist.
-    plan("SHOP-214-a", true);
-    assert_eq!(run(""), "decision approve: SHOP-214-a\n");
-    // Several are listed, and nothing is recorded.
-    plan("SHOP-300-b", true);
-    let several = run("");
-    assert!(several.contains("2 drafts are waiting"), "{several}");
-    assert!(several.contains("  SHOP-300-b\n"), "{several}");
-    assert!(!several.contains("decision approve:"), "{several}");
-    // A ticket is passed through; shell syntax is refused.
-    assert_eq!(run("SHOP-300"), "decision approve: SHOP-300\n");
-    assert!(run("x; touch pwned").contains("is not a ticket"));
-    assert!(!dir.path().join("pwned").exists());
-}
-
-#[test]
 fn log_approve_is_offered_by_log_and_by_the_protocol_skill() {
     let log = frontmatter("skills/log/SKILL.md").1.replace('\n', " ");
     assert!(log.contains("record it with `/invar:log-approve <TICKET>`"));
@@ -1506,7 +1425,9 @@ fn no_prompt_tells_an_agent_to_record_a_decision_entry() {
                 in_fence = !in_fence;
                 continue;
             }
+            // `allowed-tools` names the command so the ```! block may run it.
             if in_fence
+                || line.starts_with("allowed-tools: ")
                 || !(line.contains("invar decision approve")
                     || line.contains("invar decision record"))
             {

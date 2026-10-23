@@ -706,3 +706,65 @@ fn the_help_says_approve_is_the_developers_gate() {
         .stdout(contains("/invar:log-approve"))
         .stdout(contains("deletes `decision.md`"));
 }
+
+// --- approve without a ticket, and --skill (what /invar:log-approve runs) --------------
+
+#[test]
+fn approve_without_a_ticket_records_the_one_draft() {
+    let project = Project::new(Some(&approved_plan()));
+    project.draft(VALID_DRAFT);
+    project
+        .invar(&["decision", "approve"])
+        .assert()
+        .success()
+        .stdout(contains(format!("removed: {DRAFT}")));
+    assert_eq!(project.entries().len(), 1);
+}
+
+#[test]
+fn approve_without_a_ticket_lists_several_drafts_and_records_none() {
+    let project = Project::new(Some(&approved_plan()));
+    project.draft(VALID_DRAFT);
+    let other = project.root().join(".invar/plans/SHOP-300-refunds");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("spec.md"), "").unwrap();
+    fs::write(other.join("decision.md"), "").unwrap();
+    project
+        .invar(&["decision", "approve"])
+        .assert()
+        .failure()
+        .stderr(contains("2 drafts are waiting"))
+        .stderr(contains("  SHOP-300-refunds"))
+        .stderr(contains("/invar:log-approve <ticket>"));
+    assert!(project.entries().is_empty());
+}
+
+#[test]
+fn approve_without_a_ticket_and_without_a_draft_says_how_to_write_one() {
+    let project = Project::new(Some(&approved_plan()));
+    project
+        .invar(&["decision", "approve"])
+        .assert()
+        .failure()
+        .stderr(contains(
+            "there is no draft entry in .invar/plans/ to record",
+        ))
+        .stderr(contains("/invar:log"));
+}
+
+#[test]
+fn approve_skill_reports_an_invalid_draft_on_stdout_and_exits_0() {
+    let project = Project::new(Some(&approved_plan()));
+    project.draft("---\nticket: SHOP-214\n---\n");
+    project
+        .invar(&["decision", "approve", "--skill", "SHOP-214"])
+        .assert()
+        .success()
+        .stdout(contains(format!(
+            "{DRAFT}: the front matter has no `module`"
+        )))
+        .stdout(contains("error: the draft is not valid"))
+        .stderr(predicate::str::is_empty());
+    assert!(project.entries().is_empty());
+    assert!(project.exists(DRAFT));
+}

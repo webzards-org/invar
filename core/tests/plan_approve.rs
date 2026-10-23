@@ -369,3 +369,101 @@ fn a_name_that_cannot_be_recorded_is_refused_before_the_criteria_are_shown() {
         .stderr(contains("cannot record the approval"));
     assert_eq!(project.read_spec(), draft);
 }
+
+// --- without a ticket, --no-start, --skill (what /invar:approve runs) -------------------
+
+#[test]
+fn without_a_ticket_the_one_plan_is_approved() {
+    let project = Project::new(Some("Rade"));
+    project
+        .approve(&[])
+        .success()
+        .stdout(contains("approved PROJ-412 checksum sha256:"));
+    assert!(project.read_spec().contains("Status: approved"));
+}
+
+#[test]
+fn without_a_ticket_several_plans_are_listed_and_none_is_approved() {
+    let project = Project::new(Some("Rade"));
+    let other = project.root().join(".invar/plans/PROJ-500-refunds");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("spec.md"), plan_text("PROJ-500")).unwrap();
+    // A directory without a Plan is not one of them.
+    fs::create_dir_all(project.root().join(".invar/plans/PROJ-600-empty")).unwrap();
+
+    project
+        .approve(&[])
+        .failure()
+        .stderr(contains("2 Plans are waiting"))
+        .stderr(contains("  PROJ-412-reserve-stock\n"))
+        .stderr(contains("  PROJ-500-refunds"))
+        .stderr(contains("PROJ-600").not())
+        .stderr(contains("/invar:approve <ticket>"));
+    assert!(project.read_spec().contains("Status: draft"));
+}
+
+#[test]
+fn without_a_ticket_and_without_a_plan_it_says_so() {
+    let project = Project::new(Some("Rade"));
+    fs::remove_dir_all(project.root().join(".invar/plans/PROJ-412-reserve-stock")).unwrap();
+    project
+        .approve(&[])
+        .failure()
+        .stderr(contains("there is no Plan in .invar/plans/ to approve"));
+}
+
+#[test]
+fn no_start_approves_the_same_and_says_phase_2_is_not_started() {
+    let project = Project::new(Some("Rade"));
+    let assert = project.approve(&["PROJ-412", "--no-start"]).success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+    // The recorded line is still there, and the --no-start line follows it.
+    assert!(lines[lines.len() - 2].starts_with("approved PROJ-412 checksum sha256:"));
+    assert_eq!(lines[lines.len() - 1], "Phase 2: not started (--no-start)");
+    assert!(project.read_spec().contains("Status: approved"));
+    // Without the flag there is no such line.
+    let again = Project::new(Some("Rade"));
+    again
+        .approve(&["PROJ-412"])
+        .success()
+        .stdout(contains("Phase 2").not());
+}
+
+#[test]
+fn no_start_after_a_refusal_says_nothing_about_phase_2() {
+    let project = Project::new(None);
+    project
+        .approve(&["PROJ-412", "--no-start", "--skill"])
+        .success()
+        .stdout(contains("error: "))
+        .stdout(contains("Phase 2").not());
+}
+
+#[test]
+fn skill_reports_a_refusal_on_stdout_and_exits_0() {
+    // No `user.name`: refused, and nothing written.
+    let project = Project::new(None);
+    let before = project.read_spec();
+    project
+        .approve(&["--skill", "PROJ-412"])
+        .success()
+        .stdout(contains("error: "))
+        .stdout(contains("approved PROJ-412 checksum").not())
+        .stderr(predicate::str::is_empty());
+    assert_eq!(project.read_spec(), before);
+    // Without --skill the same refusal is an error, as before.
+    project
+        .approve(&["PROJ-412"])
+        .failure()
+        .stderr(contains("error: "));
+}
+
+#[test]
+fn skill_changes_nothing_about_a_successful_approval() {
+    let project = Project::new(Some("Rade"));
+    project
+        .approve(&["--skill"])
+        .success()
+        .stdout(contains("approved PROJ-412 checksum sha256:"));
+}

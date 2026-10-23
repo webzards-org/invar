@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
+use predicates::prelude::*;
 use predicates::str::contains;
 use tempfile::TempDir;
 
@@ -409,4 +410,30 @@ fn the_help_says_what_done_does_and_does_not_do() {
         .stdout(contains("--commit <MESSAGE>"))
         .stdout(contains("/invar:log-approve"))
         .stdout(contains("Writes no"));
+}
+
+// --- --skill (what /invar:done runs) ------------------------------------------------
+
+#[test]
+fn skill_reports_a_refusal_on_stdout_exits_0_and_deletes_nothing() {
+    let project = Project::in_git(&draft_plan(), "feat/SHOP-214-cancel");
+    project
+        .done(&["--skill", "SHOP-214"])
+        .success()
+        .stdout(contains("error: "))
+        .stdout(contains("removed:").not())
+        .stderr("");
+    assert!(project.exists(PLAN_DIR));
+    // Without --skill the same refusal is an error.
+    project.done(&["SHOP-214"]).failure();
+}
+
+#[test]
+fn skill_closes_an_approved_plan_as_without_it() {
+    let project = Project::in_git(&approved_plan(), "feat/SHOP-214-cancel");
+    project
+        .done(&["--skill"])
+        .success()
+        .stdout(contains(format!("removed: {PLAN_DIR} (staged")));
+    assert!(!project.exists(PLAN_DIR));
 }

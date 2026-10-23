@@ -160,11 +160,10 @@ fn running_plan_approve_from_a_shell_is_denied() {
     assert_eq!(decision["hookEventName"], "PreToolUse");
     assert_eq!(decision["permissionDecision"], "deny");
     let reason = decision["permissionDecisionReason"].as_str().unwrap();
-    assert!(
-        reason.contains("they run `invar plan approve SHOP-214` themselves"),
-        "{reason}"
-    );
-    assert!(reason.contains("their own terminal"), "{reason}");
+    // The developer is sent to the skill, in the same session — not out of it.
+    assert!(reason.contains("`/invar:approve SHOP-214`"), "{reason}");
+    assert!(reason.contains("starts Phase 2"), "{reason}");
+    assert!(!reason.contains("terminal"), "{reason}");
 }
 
 #[test]
