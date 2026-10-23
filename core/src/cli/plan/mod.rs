@@ -42,6 +42,10 @@ pub enum Command {
     ///
     /// An approved Plan whose body changed since is refused unless
     /// `--reapprove` is given; one that is unchanged is left as it is.
+    ///
+    /// Without a ticket, approves the one Plan under `.invar/plans/`. The
+    /// developer's command — through `/invar:approve` in Claude Code, which
+    /// then starts Phase 2, or from a terminal. No agent runs it.
     Approve(approve::Args),
 
     /// Check that a Plan is approved and unchanged since: the gate before any
