@@ -74,8 +74,7 @@ its rules still bind.
 ## The developer approves
 
 Approval is the developer's one manual step, and it is theirs alone: they run
-`/invar:approve` (or `invar plan approve <TICKET>` in their own terminal). It
-records who read the Plan and when.
+`/invar:approve`, here in Claude Code. It records who read the Plan and when.
 
 **Stop and wait.** Never run `invar plan approve` yourself: a hook denies it, and you
 must not look for another way to record an approval.
@@ -85,7 +84,8 @@ approves with `/invar:approve` and the output ends with the line
 `approved <TICKET> checksum sha256:…`, that skill tells you to begin Phase 2 at
 once — do. Without that line (a refusal, `already approved`), or with
 `Phase 2: not started (--no-start)`, Phase 2 waits until the developer asks for
-it. When they approved in their own terminal, they tell you, and you go on.
+it. If they approved some other way (`! invar plan approve <TICKET>` in the
+prompt, or a terminal), they tell you, and you go on.
 
 ## Phase 2 — the coder implements
 
@@ -149,7 +149,7 @@ After `DONE`, the cycle ends in this order. Most of it is the developer's; your
 part is to offer each step once, at its moment, and to say where things stand.
 
 **commit → `/invar:review` (optional) → push → PR review → `/invar:log` and
-`/invar:log-approve` (if an entry is wanted) → `invar done`**
+`/invar:log-approve` (if an entry is wanted) → `/invar:done`**
 
 **1. Commit.** The change is committed on the branch, the way this project
 commits — by the developer, or by you when they ask. The review reads only what
@@ -181,12 +181,12 @@ line, and leave the choice to the developer. Do not draft it yourself without
 `/invar:log`, and do not offer again if they decline. **The developer records the
 draft** with `/invar:log-approve`, after the review; never record it yourself.
 
-**6. `invar done` is the developer's.** When the review is over, **tell the
-developer the cycle is ready to close**, and stop. Closing is theirs: `invar done`
-checks the Plan once more, deletes it and stages the deletion, so it goes into
-the same PR as the code. They run it from their own terminal, or CI runs it for
-them (on the pull request's approval, say). Never run `invar done` yourself — a
-hook denies it — and never delete the Plan another way. It refuses while a draft
+**6. Closing is the developer's.** When the review is over, **tell the
+developer the cycle is ready to close** — *"Ready to close: run `/invar:done`."*
+— and stop. `/invar:done` runs `invar done`, which checks the Plan once more,
+deletes it and stages the deletion, so it goes into the same PR as the code; CI
+can run it instead (on the pull request's approval, say). Never run `invar done`
+yourself — a hook denies it — and never delete the Plan another way. It refuses while a draft
 entry is still beside the Plan: the developer records it with
 `/invar:log-approve` or deletes it first.
 
@@ -235,11 +235,11 @@ implementing it.
 |---|---|
 | `invar plan check <TICKET>` | before you start the coder; refuses draft, changed and unrecorded approvals |
 | `invar plan validate <TICKET>` | form of a draft Plan (the planner runs it) |
-| `/invar:approve` | the developer's; starts Phase 2 when the approval is recorded, unless `--no-start`. `invar plan approve <TICKET>` from their own terminal does not |
+| `/invar:approve` | the developer's; starts Phase 2 when the approval is recorded, unless `--no-start` |
 | `/invar:review` | the developer's, before `done`, unless `review.offer: false` |
 | `/invar:log` | the developer's: drafts the decision entry, at the end of Phase 2 or after `BLOCKED` |
 | `invar decision validate <TICKET>` | form of a draft entry (`/invar:log` runs it) |
 | `/invar:log-approve` | the developer's: records the draft and removes it; a `failed` one returns the Plan to `draft` |
 | `invar pr-body <TICKET> --out .invar/out/<TICKET>-pr.md` | the PR description, before the Plan is deleted |
-| `invar done` | the developer's: deletes the Plan and stages it; you tell them the cycle is ready to close |
+| `/invar:done` | the developer's: runs `invar done`, which deletes the Plan and stages it; you tell them the cycle is ready to close |
 | `invar context show --binding` | the binding context, which you already have |
