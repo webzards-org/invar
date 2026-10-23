@@ -1702,8 +1702,8 @@ main session to start Phase 2 for that ticket at once (§13c). The trigger is
 that line, not the model's reading of the output: a refusal, or a Plan that was
 already approved, prints no such line, and the session stops. `/invar:approve
 <ticket> --no-start` approves and starts nothing, for a developer who implements
-later or elsewhere; an approval made in the developer's own terminal starts
-nothing either. Automating the start is safe because it renders no verdict: the
+later or elsewhere; an approval made outside the skill (`! invar plan approve`
+in the prompt, or a terminal) starts nothing either. Automating the start is safe because it renders no verdict: the
 coder begins with `invar plan check`, which still refuses a Plan that is not
 approved or whose checksum no longer matches.
 
@@ -1718,15 +1718,15 @@ same `PreToolUse` guard that keeps `Write` and `Edit` off an approved Plan
 (`plan guard`) also reads a `Bash` call's command line, and denies one that
 runs `invar plan approve` — and, once `.feature` files exist, `scenario
 confirm`. The reason it gives tells the agent to say the Plan is ready and
-wait: the developer approves from their own terminal. It denies
+wait: the developer approves with `/invar:approve`. It denies
 `invar decision approve` and `invar decision record` the same way: the first
 is the developer's approval of a draft entry, the second would write an entry
 past the draft altogether. Each reason names what to do instead — tell the
 developer the draft is ready, and they record it with `/invar:log-approve`.
 `decision record` stays, for the developer's own entries written by hand. And it
 denies `invar done`, which deletes the approved Plan: the agent tells the
-developer the cycle is ready to close, and they close it, from a terminal or CI
-(§12).
+developer the cycle is ready to close, and they close it with `/invar:done`, or
+CI does (§12).
 
 This costs the developer nothing, which is why it is preferred to making the
 command ask for confirmation: a prompt in every approval would be paid for by
@@ -1742,7 +1742,16 @@ the developer never read — not anything in the hook.
 
 What a person or the main session invokes by name. A skill the model may not
 invoke (`disable-model-invocation: true`) is one whose step belongs to the
-developer: the main session offers it and waits.
+developer: the main session offers it and waits. The whole cycle runs inside
+Claude Code: every step that is the developer's has one, and none of them sends
+the developer to another terminal.
+
+A skill that records the developer's decision runs its command before the model
+sees the skill, in a `` ```! `` block of exactly one command —
+`invar plan approve --skill $ARGUMENTS` — that its `allowed-tools` names, so
+Claude Code's permission check lets it run. `--skill` turns a refusal into
+output (`error: …`, exit 0), because a failing block would drop the reason. The
+model still cannot run the command itself: the `PreToolUse` guard denies it.
 
 | Skill | What it does | Invoked by |
 |---|---|---|
@@ -1751,6 +1760,7 @@ developer: the main session offers it and waits.
 | `/invar:review` | Starts the reviewer on the approved Plan; advisory (§13c) | The developer only, on the protocol's offer before `done` |
 | `/invar:log` | Drafts the decision entry at `.invar/plans/<TICKET>-<slug>/decision.md` and runs `invar decision validate`; records nothing (§7) | The developer only, on the protocol's offer at the end of Phase 2 and after `BLOCKED` |
 | `/invar:log-approve` | Runs `invar decision approve` before the model sees it: records the draft as it is now and deletes it; a `failed` draft returns the Plan to `draft` (§7) | The developer only, after reading the draft |
+| `/invar:done` | Runs `invar done` before the model sees it: checks the Plan once more, deletes it and stages the deletion (§12) | The developer only, when the main session says the cycle is ready to close |
 
 **The largest gain is the return path, not the enforcement.** Today the
 developer copies command output back to the agent by hand. A hook puts lint and
@@ -1837,8 +1847,8 @@ in MVP.
 
 **Who starts the coder, and when: the main session.** At once, when
 `/invar:approve` has just recorded the approval (§13, "What follows the gate") —
-no second prompt from the developer; after an approval made in the developer's
-own terminal, or with `--no-start`, when the developer asks.
+no second prompt from the developer; after an approval made outside the skill,
+or with `--no-start`, when the developer asks.
 
 **Phase 2 runs in its own sub-agent, as Phase 1 does.** The main session
 starts it after the gate with the ticket id — and, when the Plan declares work
