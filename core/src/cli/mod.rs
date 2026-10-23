@@ -87,8 +87,9 @@ pub enum Command {
     /// The only command that deletes a Plan. A Plan that reached the main
     /// branch without it is removed with `git rm -r`.
     ///
-    /// The developer's command — from a terminal, or from CI (for example a
-    /// workflow on pull-request approval). No agent runs it.
+    /// The developer's command — through `/invar:done` in Claude Code, from a
+    /// terminal, or from CI (for example a workflow on pull-request approval).
+    /// No agent runs it.
     ///
     /// Without a ticket, closes the Plan whose ticket the current branch's
     /// name contains. Refuses, changing nothing, on a draft or changed Plan,
@@ -169,6 +170,26 @@ fn config(root: &ProjectRoot) -> Result<config::Config> {
 /// from it.
 fn mode(root: &ProjectRoot) -> Result<Mode> {
     Ok(Mode::of(&config(root)?))
+}
+
+/// `result`, as a command run with `--skill` reports it: a failure is printed
+/// on stdout as `error: …` and the command still exits 0.
+///
+/// A skill's shell block (`/invar:approve`, `/invar:log-approve`,
+/// `/invar:done`) is run by Claude Code before the model sees the skill, and a
+/// block that exits non-zero aborts the whole invocation: the developer gets a
+/// bare failure and the model never sees the refusal it is meant to show. So a
+/// refusal has to come back as output, with the reason in it, on the stream
+/// Claude Code injects. Without `--skill`, nothing changes: the error goes to
+/// stderr and the exit code is non-zero, for a terminal and for CI.
+fn for_skill(skill: bool, result: Result<()>) -> Result<()> {
+    match result {
+        Err(err) if skill => {
+            println!("error: {err:#}");
+            Ok(())
+        }
+        other => other,
+    }
 }
 
 /// A path relative to the current directory when it is under it, so the paths

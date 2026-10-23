@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 
 use crate::fs::plans::SPEC_FILE;
 use crate::fs::{self, ProjectRoot};
@@ -21,6 +21,33 @@ pub fn resolve(target: &str, cwd: &Path) -> Result<(ProjectRoot, PathBuf)> {
         let root = fs::project_root()?;
         let spec = validate::spec_for(&root, target)?;
         Ok((root, spec))
+    }
+}
+
+/// The one Plan directory under `.invar/plans/` that holds `file`, by name,
+/// for a command run without a ticket.
+///
+/// Never a guess: with none it fails with `nothing`, with several it fails
+/// with `several` (a sentence that follows the count, such as "Plans are
+/// waiting; name one: …") and the names, one per line. The name is then looked
+/// up like a ticket, so everything after this is what an explicit ticket gets.
+pub fn only(root: &ProjectRoot, file: &str, nothing: &str, several: &str) -> Result<String> {
+    let names: Vec<String> = crate::fs::plans::list(root)?
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|name| root.plans_dir().join(name).join(file).is_file())
+        .collect();
+    match names.as_slice() {
+        [] => bail!("{nothing}"),
+        [one] => Ok(one.clone()),
+        many => bail!(
+            "{} {several}\n{}",
+            many.len(),
+            many.iter()
+                .map(|name| format!("  {name}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
     }
 }
 

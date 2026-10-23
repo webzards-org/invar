@@ -1,5 +1,6 @@
-//! `invar done [TICKET | PATH] [--commit <MESSAGE>]`: delete the Plan, stage
-//! the deletion, and commit it when asked.
+//! `invar done [TICKET | PATH] [--commit <MESSAGE>] [--skill]`: delete the
+//! Plan, stage the deletion, and commit it when asked. `--skill` is for
+//! `/invar:done`, whose shell block is this one command.
 
 use anyhow::{Context as _, Result};
 
@@ -29,9 +30,22 @@ pub struct Args {
     /// yours.
     #[arg(long, value_name = "MESSAGE")]
     pub commit: Option<String>,
+
+    /// Report as `/invar:done` needs it: a refusal is printed on stdout as
+    /// `error: …`, and the exit code is 0.
+    ///
+    /// A skill's shell block that exits non-zero is dropped by Claude Code
+    /// with its output, so the refusal would never reach the session.
+    #[arg(long)]
+    pub skill: bool,
 }
 
 pub fn run(args: Args) -> Result<()> {
+    let skill = args.skill;
+    super::for_skill(skill, close(args))
+}
+
+fn close(args: Args) -> Result<()> {
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
     let (root, spec) = match &args.target {
         Some(target) => target::resolve(target, &cwd)?,
