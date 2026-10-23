@@ -217,7 +217,7 @@ struct HumanOnly {
 /// `decision record` stays for the notes they write by hand.
 ///
 /// `done` deletes the approved Plan and closes the cycle: the developer runs it,
-/// from a terminal or from CI, when they judge the work finished.
+/// with `/invar:done` or from a terminal, or CI does, when the work is finished.
 const HUMAN_ONLY: &[HumanOnly] = &[
     HumanOnly {
         words: &["plan", "approve"],
@@ -250,9 +250,10 @@ fn plan_approve_reason(target: &str) -> String {
         "`invar plan approve` is the developer's decision, not yours: it records that a \
          person read the Plan and accepted it, and every later check relies on that. Do \
          not run it, and do not look for another way to record the same thing. Tell the \
-         developer the Plan is ready and wait: they run `invar plan approve {target}` \
-         themselves, from their own terminal (with `--reapprove` if the Plan was \
-         approved before and has changed), and you carry on once they have. {}",
+         developer the Plan is ready and wait: they approve it themselves, with \
+         `/invar:approve {target}`, which starts Phase 2 once the approval is recorded (a \
+         Plan approved before and changed since takes `invar plan approve {target} \
+         --reapprove`). {}",
         mention("plan approve")
     )
 }
@@ -277,7 +278,7 @@ fn decision_record_reason(target: &str) -> String {
          record the same thing. If an entry is worth keeping, say so and wait: the \
          developer has it drafted with `/invar:log {target}`, reads the draft, and \
          records it with `/invar:log-approve {target}`. `invar decision record` stays \
-         for the notes the developer writes by hand, from their own terminal. {}",
+         for the notes the developer writes by hand. {}",
         mention("decision record")
     )
 }
@@ -287,8 +288,8 @@ fn done_reason(target: &str) -> String {
         "`invar done` is the developer's decision, not yours: it closes the cycle by \
          deleting the approved Plan. Do not run it, and do not look for another way to do \
          the same thing — do not delete the Plan directory either. Tell the developer the \
-         cycle is ready to close and wait: they run `invar done {target}` themselves, from \
-         their own terminal or from CI. {}",
+         cycle is ready to close and wait: they close it themselves, with `/invar:done \
+         {target}`, or CI does. {}",
         mention("done")
     )
 }
