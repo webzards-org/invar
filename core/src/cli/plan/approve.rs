@@ -1,4 +1,8 @@
-//! `invar plan approve <TICKET | PATH> [--reapprove]`.
+//! `invar plan approve [TICKET | PATH] [--reapprove] [--no-start] [--skill]`.
+//!
+//! Without a ticket, the one Plan under `.invar/plans/`; with several, it
+//! names them and approves none. `--no-start` and `--skill` are for
+//! `/invar:approve`, whose shell block is this one command.
 //!
 //! Order matters: validate, read who is approving and today's date from git,
 //! check that those values can be written, print the acceptance criteria, and
@@ -13,17 +17,20 @@ use crate::gate::approval::Prior;
 use crate::gate::approve::{self, ApproveError, Decision};
 use crate::git;
 
+use crate::fs::{self, plans::SPEC_FILE};
+
 use super::target;
 use super::validate::print_report;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
     /// A ticket id (`PROJ-412`), or the path of a Plan: its `spec.md` or its
-    /// directory.
+    /// directory. Without it, the one Plan under `.invar/plans/`; when there
+    /// are several, they are listed and none is approved.
     ///
     /// Anything containing `/`, ending in `.md`, or `.`/`..` is a path;
     /// everything else is looked up as a ticket under `.invar/plans/`.
-    pub target: String,
+    pub target: Option<String>,
 
     /// Approve a Plan that is already approved but whose body changed since
     /// (or whose approval values are missing), replacing that approval.
@@ -33,11 +40,47 @@ pub struct Args {
     /// (plan-header.md D-12).
     #[arg(long)]
     pub reapprove: bool,
+
+    /// Approve without starting Phase 2: ends the output with `Phase 2: not
+    /// started (--no-start)`.
+    ///
+    /// For `/invar:approve`, which starts the coder once an approval is
+    /// recorded; with this the developer implements later, or elsewhere.
+    /// What is recorded is the same either way.
+    #[arg(long)]
+    pub no_start: bool,
+
+    /// Report as `/invar:approve` needs it: a refusal is printed on stdout as
+    /// `error: …`, and the exit code is 0.
+    ///
+    /// A skill's shell block that exits non-zero is dropped by Claude Code
+    /// with its output, so the refusal would never reach the session.
+    #[arg(long)]
+    pub skill: bool,
 }
 
 pub fn run(args: Args) -> Result<()> {
+    let (skill, no_start) = (args.skill, args.no_start);
+    let result = approve(args);
+    if no_start && result.is_ok() {
+        println!("Phase 2: not started (--no-start)");
+    }
+    crate::cli::for_skill(skill, result)
+}
+
+fn approve(args: Args) -> Result<()> {
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
-    let (root, spec) = target::resolve(&args.target, &cwd)?;
+    let query = match args.target {
+        Some(target) => target,
+        None => target::only(
+            &fs::project_root()?,
+            SPEC_FILE,
+            "there is no Plan in .invar/plans/ to approve",
+            "Plans are waiting; name the one to approve: `invar plan approve <ticket>` \
+             (in Claude Code, `/invar:approve <ticket>`)",
+        )?,
+    };
+    let (root, spec) = target::resolve(&query, &cwd)?;
     let mode = super::mode(&root)?;
 
     let pending = match approve::prepare(&root, &spec, mode, args.reapprove) {

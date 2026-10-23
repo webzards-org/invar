@@ -1,5 +1,9 @@
-//! `invar decision approve <TICKET | PATH>`: record the draft entry the
-//! developer has read (decision-entry.md §8.1), and remove the draft.
+//! `invar decision approve [TICKET | PATH] [--skill]`: record the draft entry
+//! the developer has read (decision-entry.md §8.1), and remove the draft.
+//!
+//! Without a ticket, the one draft under `.invar/plans/`; with several, it
+//! names them and records none. `--skill` is for `/invar:log-approve`, whose
+//! shell block is this one command.
 //!
 //! The developer's gate on the decision log. It is run by `/invar:log-approve`,
 //! a skill the model cannot invoke, and `plan guard` denies it to the agent.
@@ -15,18 +19,45 @@ use anyhow::{Context as _, Result, bail};
 
 use crate::cli::shown;
 use crate::decision::draft::{self, ApproveError};
+use crate::format::decision::DRAFT_FILE;
+use crate::fs;
 use crate::git;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
     /// A ticket id (`PROJ-412`), or the path of a draft: its `decision.md`, or
-    /// the Plan directory that holds it.
-    pub target: String,
+    /// the Plan directory that holds it. Without it, the one draft under
+    /// `.invar/plans/`; when there are several, they are listed and none is
+    /// recorded.
+    pub target: Option<String>,
+
+    /// Report as `/invar:log-approve` needs it: a refusal is printed on stdout
+    /// as `error: …`, and the exit code is 0.
+    ///
+    /// A skill's shell block that exits non-zero is dropped by Claude Code
+    /// with its output, so the refusal would never reach the session.
+    #[arg(long)]
+    pub skill: bool,
 }
 
 pub fn run(args: Args) -> Result<()> {
+    let skill = args.skill;
+    crate::cli::for_skill(skill, approve(args))
+}
+
+fn approve(args: Args) -> Result<()> {
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
-    let (root, path) = super::validate::resolve(&args.target, &cwd)?;
+    let query = match args.target {
+        Some(target) => target,
+        None => crate::cli::plan::target::only(
+            &fs::project_root()?,
+            DRAFT_FILE,
+            "there is no draft entry in .invar/plans/ to record; draft one with `/invar:log`",
+            "drafts are waiting; name the one to record: `invar decision approve <ticket>` \
+             (in Claude Code, `/invar:log-approve <ticket>`)",
+        )?,
+    };
+    let (root, path) = super::validate::resolve(&query, &cwd)?;
     let mode = crate::cli::mode(&root)?;
     let now = git::now(root.path())?;
 
