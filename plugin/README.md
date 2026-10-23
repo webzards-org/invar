@@ -23,6 +23,7 @@ plugin/
 ├── skills/review/SKILL.md       /invar:review — the advisory review
 ├── skills/log/SKILL.md          /invar:log — drafts the decision entry
 ├── skills/log-approve/SKILL.md  /invar:log-approve — the developer records it
+├── skills/done/SKILL.md         /invar:done — the developer closes the cycle
 ├── bin/invar                    the launcher: picks invar-<os>-<arch> and runs it
 ├── marketplace.json             what the `dist` branch lists (release.yml)
 ├── NOTES.md

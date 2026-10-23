@@ -984,10 +984,10 @@ allow capitals. Not done yet.
 **Why not let the model run it.** The guard would deny it, correctly. The
 injection is what makes the developer the one who runs it.
 
-**No ticket.** The block counts `.invar/plans/*/spec.md`: one Plan is approved;
-several are listed and nothing is approved; none says so. The ticket is checked
-against `[A-Za-z0-9._/-]` before it reaches the shell. (Better placed in the CLI,
-so a terminal behaves the same: `plan approve` without a ticket.)
+**No ticket.** One Plan under `.invar/plans/` is approved; several are listed
+and nothing is approved; none says so. Since 2026-10-23 the CLI does this
+(`plan approve` without a ticket), not the block; see "One command, allowed by
+name" below.
 
 **Output.** The block ends every path with `exit 0` and runs the CLI with `2>&1`,
 because an injection that fails aborts the invocation and the developer would
@@ -1035,6 +1035,63 @@ guard — is unchanged.
       second prompt, beginning with `invar plan check`
 - [ ] After a refused approval, and after `--no-start`, it starts nothing and
       writes no code
+
+### One command, allowed by name (2026-10-23)
+
+**Observed.** VPK-7, in `veripkg`: the developer ran `/invar:approve VPK-7`.
+The model got the skill but no command output, ran `invar plan check VPK-7`
+(still a draft) and asked the developer to type `! invar plan approve VPK-7`.
+The approval had never run. The day before, the same skill with a simpler
+block had recorded an approval.
+
+**Why, as far as the docs say it.** Claude Code checks each injected command
+against the permission rules before it runs it, and never prompts. Outside auto
+mode, anything but *allow* aborts the invocation; in auto mode, the skill loads
+with an instruction for the model to run the command itself. The model may not
+run `invar plan approve` (the guard denies it, the skill forbids it), so it
+stopped: the second path. The block had become a script — a `for` over an
+unquoted `$a`, nested `case`, `-*` patterns — that no rule allowed, and the
+project's settings allow nothing for `invar`. Not reproduced outside a session;
+the change below removes the cause whichever path it was.
+
+**Changed.**
+- The block of each skill that records the developer's decision is one
+  command, `invar plan approve --skill $ARGUMENTS` (and
+  `invar decision approve --skill …`, `invar done --skill …`), and the skill's
+  frontmatter allows exactly it: `allowed-tools: Bash(invar plan approve *)`.
+  The guard is unchanged and still what stops the model: `allowed-tools` lets
+  the command run, the `PreToolUse` hook still denies it to the model.
+- What the block did moved into the CLI, so a terminal behaves the same:
+  `plan approve` and `decision approve` take no ticket and find the one Plan or
+  draft (several are listed, none approved); `plan approve --no-start` prints
+  `Phase 2: not started (--no-start)` after a successful run.
+- `--skill` prints a refusal on stdout as `error: …` and exits 0: a block that
+  exits non-zero aborts the skill, and the reason with it. Without it nothing
+  changes.
+- The `[A-Za-z0-9._/-]` check on `$ARGUMENTS` is gone with the script. Shell
+  syntax in the arguments makes the line a compound command that the allow
+  rule does not cover, so it does not run.
+- **`/invar:done`**, the same construction, so closing does not need a
+  terminal either. The guard's reasons and the protocol skill now send the
+  developer to `/invar:approve` and `/invar:done`, never "their own terminal";
+  `plugin_prompts.rs` fails on a skill that says "own terminal".
+- Each skill says what to do with no output at all: report that the command
+  did not run, and stop — never run it.
+
+`plugin_prompts.rs` holds, for all three skills: the block is the one command,
+`allowed-tools` names it, and the block run through `sh` with the real binary
+turns a refusal into `error: …` on stdout with exit 0.
+
+#### Not exercised (needs a real Claude Code session)
+
+- [ ] `/invar:approve VPK-7` records the approval, in auto mode and outside it,
+      with no `invar` rule in the project's settings
+- [ ] It then starts Phase 2 without a second prompt
+- [ ] `/invar:approve` with a stale Plan shows `error: …` and starts nothing
+- [ ] `/invar:done` closes the cycle; refused (a draft entry beside the Plan),
+      it shows why
+- [ ] Asked to approve or close, the model still does not run either command,
+      though the skill allows it (the guard denies it)
 
 ### `/invar:log-approve` — the same gate, on the decision log
 
