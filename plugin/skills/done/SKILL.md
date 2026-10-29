@@ -1,7 +1,7 @@
 ---
 name: done
-description: The developer's close of an invar cycle, from inside Claude Code. Runs invar done, which checks the approved Plan once more, deletes it and stages the deletion. Only the developer can run it.
-argument-hint: [ticket] [--commit <message>]
+description: The developer's close of an invar cycle, from inside Claude Code. Runs invar done, which checks the approved Plan once more, deletes it and stages the deletion, or commits it when asked. Only the developer can run it.
+argument-hint: [ticket] [--commit <message> | --no-commit]
 disable-model-invocation: true
 allowed-tools: Bash(invar done *)
 ---
@@ -17,8 +17,9 @@ invar done --skill $ARGUMENTS
 Show the output above to the developer exactly as it is, and stop.
 
 - A line starting `removed:` means the cycle is closed: the Plan directory is
-  deleted, and the deletion is staged (or committed, with `--commit`). Remind the
-  developer, in one line, that it belongs in the same PR as the code.
+  deleted, and the deletion is staged — or committed, with `--commit` or when
+  the project's `invar.yaml` sets `done.commit: true`. Remind the developer, in
+  one line, that it belongs in the same PR as the code.
 - A line starting `error:` is a refusal, and it says why; nothing was deleted. A
   draft entry still beside the Plan is recorded with `/invar:log-approve`, or
   deleted, first.

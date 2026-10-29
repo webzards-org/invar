@@ -35,6 +35,24 @@
   pushed. For CI: `invar done <TICKET> --commit "chore: remove the Plan of
   <TICKET>" && git push`.
 
+- **`done.commit` in `invar.yaml`** (contract 2.1.0) makes `invar done` and
+  `/invar:done` commit the deletion without `--commit`, under
+  `done.commit_message` — default `Remove plan {ticket}`, the ticket id put in;
+  set it to a message your commit-message hook accepts:
+
+  ```yaml
+  done:
+    commit: true
+    commit_message: "chore: remove the Plan of {ticket}"
+  ```
+
+  `--commit <MESSAGE>` still wins, and the new `--no-commit` only stages. Absent,
+  nothing is committed unless asked, as before.
+
+- **The planner finds every caller before it changes a signature**, and reads
+  the source of the framework or library functions the Plan relies on, instead
+  of assuming their defaults. What it found goes into Scope.
+
 ### Changed
 
 - **`invar done [TICKET]` only deletes the Plan.** It checks that the Plan is

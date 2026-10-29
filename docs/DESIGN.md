@@ -1257,12 +1257,15 @@ invar decision approve <ticket> # the developer's gate on the log: records
                                   # without a valid draft; `failed` resets
                                   # the Plan. Run by /invar:log-approve;
                                   # `plan guard` denies it to the agent
-invar done [ticket] [--commit <message>]
+invar done [ticket] [--commit <message> | --no-commit]
                                   # closes the cycle: plan check, then deletes
                                   # .invar/plans/<TICKET>-<slug>/ and stages
                                   # the deletion; --commit also commits it,
                                   # alone, under the message (never pushes,
-                                  # never bypasses hooks). Without a ticket, the Plan
+                                  # never bypasses hooks), and so does
+                                  # done.commit: true in invar.yaml, under
+                                  # done.commit_message; --no-commit only
+                                  # stages. Without a ticket, the Plan
                                   # the current branch names. Refuses while an
                                   # unapproved decision.md is there. Writes no
                                   # decision entry. The developer's, from a
@@ -1584,6 +1587,16 @@ It is checked before anything is deleted — an empty message, or a project outs
 git, refuses with the Plan in place. Without `--commit`, the deletion is staged
 and the commit is the developer's, so it can go into a commit of their own or be
 amended into the last one.
+
+**A project can ask once, in `invar.yaml`.** By the time `done` runs the code is
+committed and reviewed, and the deletion is simply the last commit of the PR, so
+typing a message at the end of every cycle is a step with no decision in it.
+`done.commit: true` makes `done` commit as `--commit` would, under
+`done.commit_message` — default `Remove plan {ticket}`, with the ticket id put
+in — which a project with a commit-message hook sets to a message its hook
+accepts. The command line still wins: `--commit <message>` uses its own message,
+and `--no-commit` only stages. Absent, the key is `false` and nothing is
+committed unless asked (invar-yaml.md §3.5, D-9).
 
 **It writes no decision entry and requires none** (§7). Entries are approved
 from drafts, with `/invar:log-approve`, before the cycle closes. The one thing

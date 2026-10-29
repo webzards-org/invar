@@ -9,8 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{
-    Config, ConfigError, Context, DEFAULT_BINDING_LIMIT, FILE_NAME, Git, Loaded, Review, Warning,
-    load, load_for_command, parse, parse_bytes,
+    Config, ConfigError, Context, DEFAULT_BINDING_LIMIT, DEFAULT_DONE_COMMIT_MESSAGE, Done,
+    FILE_NAME, Git, Loaded, Review, Warning, load, load_for_command, parse, parse_bytes,
 };
 use crate::fs::ProjectRoot;
 
@@ -72,6 +72,10 @@ fn contract_10_1_light_mode_project() {
             context: Context {
                 binding_limit: 8000
             },
+            done: Done {
+                commit: true,
+                commit_message: "chore: remove the Plan of {ticket}".to_owned(),
+            },
         }
     );
     assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
@@ -128,6 +132,10 @@ fn defaults_are_the_documented_values() {
     assert_eq!(config.git.base_branch, None);
     assert_eq!(config.context.binding_limit, 9000);
     assert_eq!(DEFAULT_BINDING_LIMIT, 9000);
+    // invar makes no commit unless asked (§3.5).
+    assert!(!config.done.commit);
+    assert_eq!(config.done.commit_message, "Remove plan {ticket}");
+    assert_eq!(DEFAULT_DONE_COMMIT_MESSAGE, "Remove plan {ticket}");
 }
 
 #[test]
@@ -170,6 +178,68 @@ fn each_key_is_read_on_its_own() {
             .binding_limit,
         1
     );
+}
+
+// --- done ---------------------------------------------------------------------
+
+#[test]
+fn done_commit_and_its_message_are_read() {
+    let done = read("done:\n  commit: true\n").config.done;
+    assert!(done.commit);
+    assert_eq!(done.message_for("SHOP-214"), "Remove plan SHOP-214");
+
+    let done = read("done:\n  commit: true\n  commit_message: \"chore({ticket}): remove the Plan\"\n")
+        .config
+        .done;
+    assert_eq!(
+        done.message_for("SHOP-214"),
+        "chore(SHOP-214): remove the Plan"
+    );
+
+    // A message without the placeholder is taken as it is.
+    let done = read("done:\n  commit_message: Close the cycle\n").config.done;
+    assert!(!done.commit);
+    assert_eq!(done.message_for("SHOP-214"), "Close the cycle");
+}
+
+#[test]
+fn an_empty_done_section_means_absent() {
+    let loaded = read("done:\n");
+    assert_eq!(loaded.config, Config::default());
+    let loaded = read("done:\n  commit:\n  commit_message: ~\n");
+    assert_eq!(loaded.config, Config::default());
+}
+
+#[test]
+fn done_commit_is_a_strict_boolean() {
+    for rejected in ["yes", "on", "1"] {
+        let message = reject(&format!("done:\n  commit: {rejected}\n"));
+        assert!(message.contains("invalid boolean"), "{rejected}: {message}");
+    }
+}
+
+#[test]
+fn done_commit_message_is_one_non_empty_line() {
+    for value in ["\"\"", "\"   \"", "\"first\\nsecond\"", "|\n    first\n    second"] {
+        let message = reject(&format!("done:\n  commit_message: {value}\n"));
+        assert!(message.contains("`done.commit_message`"), "{value}: {message}");
+        assert!(message.contains("one non-empty line"), "{value}: {message}");
+    }
+    // Surrounding whitespace is not part of the message.
+    assert_eq!(
+        read("done:\n  commit_message: \"  Remove {ticket}  \"\n")
+            .config
+            .done
+            .commit_message,
+        "Remove {ticket}"
+    );
+}
+
+#[test]
+fn an_unknown_key_under_done_warns() {
+    let loaded = read("done:\n  comit: true\n");
+    assert!(!loaded.config.done.commit);
+    assert_eq!(warned_keys(&loaded), ["done.comit"]);
 }
 
 // --- unknown and ignored keys ----------------------------------------------

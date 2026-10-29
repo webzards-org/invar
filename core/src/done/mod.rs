@@ -10,10 +10,12 @@
 //! 3. delete the Plan directory.
 //! 4. stage the deletion (`git rm -r --cached`), so it goes into the same
 //!    commit — and the same PR — as the code.
-//! 5. with `--commit <MESSAGE>`, commit the deletion alone, under that
+//! 5. with `--commit <MESSAGE>` — or `done.commit: true` in `invar.yaml`,
+//!    under `done.commit_message` — commit the deletion alone, under that
 //!    message (`git commit --only`): anything else that is staged stays
 //!    staged. invar makes no commit unless asked; the project's hooks, signing
-//!    and identity apply, and are never bypassed.
+//!    and identity apply, and are never bypassed. The CLI picks the message
+//!    (`cli/done.rs`); this module only receives it.
 //!
 //! **No decision entry is read or written** (decision-entry.md 1.3.0, D-12).
 //! Entries are the developer's, approved from drafts with
@@ -263,7 +265,8 @@ impl fmt::Display for DoneError {
             Self::CommitOutsideRepository { said } => write!(
                 f,
                 "`--commit` needs a git repository, and the project is not in one ({said}); \
-                 nothing was changed. Run `invar done` without `--commit`"
+                 nothing was changed. Run `invar done` without `--commit` — with \
+                 `--no-commit` when `invar.yaml` sets `done.commit: true`"
             ),
             Self::Git { source } => write!(f, "{source}; nothing was changed"),
             Self::Commit {

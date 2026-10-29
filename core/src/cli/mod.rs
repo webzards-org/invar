@@ -96,6 +96,10 @@ pub enum Command {
     /// and while a draft decision entry (`decision.md`) is still in the Plan
     /// directory: approve it with /invar:log-approve, or delete it. Writes no
     /// decision entry and requires none.
+    ///
+    /// Commits the deletion, alone, with `--commit <MESSAGE>`, or when
+    /// `invar.yaml` sets `done.commit: true` (under `done.commit_message`,
+    /// default "Remove plan {ticket}"); `--no-commit` only stages it.
     Done(done::Args),
     /// Print the context the agents read: `AI_CONTEXT.md`,
     /// `BUSINESS_CONTEXT.md` and the decision log (§5, §5c, §7).

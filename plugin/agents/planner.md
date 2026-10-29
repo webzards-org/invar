@@ -83,7 +83,24 @@ Read what the ticket touches and nothing else. **Never a full scan.**
    to.
 3. `Read` those files, and the interfaces they depend on. Read the existing
    tests for the behavior you will change: they show how this project tests.
-4. Stop when you can list every file the change would touch. A handful to a
+4. **Find every caller of what you change.** When the Plan changes a function's
+   or a constructor's signature, adds a required argument, renames or removes a
+   route, a method or a column, or changes what something returns, `Grep` for
+   every place it is called or built: routers and their dependency chains,
+   wiring and factory modules, jobs and listeners, fixtures and tests. Name each
+   of those files in Scope. A caller you did not find is a file the coder must
+   either leave broken or touch outside Scope — and it will stop and come back.
+5. **Read the framework code you rely on, not your memory of it.** When the Plan
+   depends on how a framework or library function behaves — its defaults, what
+   it serializes, whether it commits, what it raises, which arguments it takes —
+   open that one function or class in the installed dependency
+   (`.venv/…/site-packages/`, `vendor/`, `node_modules/`) and read it. This is
+   the one exception to the rule below: one definition, found by name, never
+   the directory. A Plan that assumes a default the installed version does not
+   have sends the coder into a wall.
+6. For a schema migration, name the migration it follows: the current head, read
+   from the migrations directory, not guessed.
+7. Stop when you can list every file the change would touch. A handful to a
    dozen files is typical. Do not read directories wholesale, `vendor/`,
    `node_modules/`, or generated code, and do not run a search whose output is a
    big part of the repository.
@@ -225,7 +242,8 @@ analysis, architecture rules): they are not behavior.
 
 Before you validate, check the list against the Plan: is there an invariant in
 Implementation context without its criterion? A question answered in Open
-questions that no criterion reflects? A criterion nobody could test?
+questions that no criterion reflects? A criterion nobody could test? A changed
+signature whose callers are not all in Scope?
 
 ### Example of a complete Plan
 

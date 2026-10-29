@@ -53,7 +53,13 @@ impl Project {
 
     /// The project as a repository: everything committed on `branch`.
     fn in_git(plan: &str, branch: &str) -> Self {
+        Self::in_git_with_config(plan, branch, "")
+    }
+
+    /// As [`Self::in_git`], with `config` as `invar.yaml`.
+    fn in_git_with_config(plan: &str, branch: &str, config: &str) -> Self {
         let project = Self::new(plan);
+        fs::write(project.root().join("invar.yaml"), config).unwrap();
         project.git(&["init", "-q", "-b", branch]);
         project.git(&["add", "-A"]);
         project.git(&["commit", "-q", "-m", "initial"]);
@@ -399,6 +405,128 @@ fn a_commit_a_hook_refuses_leaves_the_deletion_staged_and_says_how_to_finish() {
     );
 }
 
+// --- done.commit in invar.yaml --------------------------------------------------
+
+#[test]
+fn done_commit_in_the_config_commits_under_the_default_message() {
+    let project = Project::in_git_with_config(
+        &approved_plan(),
+        "feat/SHOP-214-cancel",
+        "done:\n  commit: true\n",
+    );
+    // Something else is staged; it must stay out of the commit.
+    fs::write(project.root().join("app.php"), "<?php\n").unwrap();
+    project.git(&["add", "app.php"]);
+
+    project
+        .done(&["SHOP-214"])
+        .success()
+        .stdout(contains(format!(
+            "removed: {PLAN_DIR} (committed: Remove plan SHOP-214)"
+        )))
+        .stderr("");
+
+    assert_eq!(
+        project.git(&["log", "-1", "--format=%s"]),
+        "Remove plan SHOP-214\n"
+    );
+    assert_eq!(
+        project.git(&["diff", "--name-status", "HEAD~1", "HEAD"]),
+        format!("D\t{SPEC}\n")
+    );
+    assert_eq!(
+        project.git(&["diff", "--cached", "--name-status"]),
+        "A\tapp.php\n"
+    );
+}
+
+#[test]
+fn done_commit_message_in_the_config_names_the_ticket() {
+    let project = Project::in_git_with_config(
+        &approved_plan(),
+        "feat/SHOP-214-cancel",
+        "done:\n  commit: true\n  commit_message: \"chore({ticket}): remove the Plan\"\n",
+    );
+
+    // Without a ticket, the branch names the Plan; the message still names it.
+    project.done(&[]).success();
+
+    assert_eq!(
+        project.git(&["log", "-1", "--format=%s"]),
+        "chore(SHOP-214): remove the Plan\n"
+    );
+}
+
+#[test]
+fn the_command_line_wins_over_done_commit() {
+    let config = "done:\n  commit: true\n";
+
+    // --commit <MESSAGE>: that message, not the configured one.
+    let project = Project::in_git_with_config(&approved_plan(), "feat/SHOP-214-cancel", config);
+    project
+        .done(&["SHOP-214", "--commit", "chore: close SHOP-214"])
+        .success();
+    assert_eq!(
+        project.git(&["log", "-1", "--format=%s"]),
+        "chore: close SHOP-214\n"
+    );
+
+    // --no-commit: staged only, no commit.
+    let project = Project::in_git_with_config(&approved_plan(), "feat/SHOP-214-cancel", config);
+    let before = project.git(&["rev-parse", "HEAD"]);
+    project
+        .done(&["SHOP-214", "--no-commit"])
+        .success()
+        .stdout(contains(format!("removed: {PLAN_DIR} (staged")));
+    assert_eq!(project.git(&["rev-parse", "HEAD"]), before);
+    assert_eq!(
+        project.git(&["diff", "--cached", "--name-status"]),
+        format!("D\t{SPEC}\n")
+    );
+}
+
+#[test]
+fn without_done_commit_nothing_is_committed() {
+    // An absent key is the previous behavior: staged, the commit is yours.
+    let project = Project::in_git_with_config(
+        &approved_plan(),
+        "feat/SHOP-214-cancel",
+        "done:\n  commit_message: Remove plan {ticket}\n",
+    );
+    let before = project.git(&["rev-parse", "HEAD"]);
+    project
+        .done(&["SHOP-214"])
+        .success()
+        .stdout(contains(format!("removed: {PLAN_DIR} (staged")));
+    assert_eq!(project.git(&["rev-parse", "HEAD"]), before);
+}
+
+#[test]
+fn commit_and_no_commit_together_are_refused() {
+    let project = Project::new(&approved_plan());
+    project
+        .done(&["SHOP-214", "--commit", "x", "--no-commit"])
+        .failure()
+        .stderr(contains("cannot be used with"));
+    assert!(project.exists(SPEC));
+}
+
+#[test]
+fn done_commit_outside_a_repository_refuses_and_says_how_to_only_delete() {
+    let project = Project::new(&approved_plan());
+    fs::write(project.root().join("invar.yaml"), "done:\n  commit: true\n").unwrap();
+
+    project
+        .done(&["SHOP-214"])
+        .failure()
+        .stderr(contains("needs a git repository"))
+        .stderr(contains("--no-commit"));
+    assert!(project.exists(SPEC));
+
+    project.done(&["SHOP-214", "--no-commit"]).success();
+    assert!(!project.exists(PLAN_DIR));
+}
+
 #[test]
 fn the_help_says_what_done_does_and_does_not_do() {
     Command::cargo_bin("invar")
@@ -408,6 +536,8 @@ fn the_help_says_what_done_does_and_does_not_do() {
         .success()
         .stdout(contains("stage the deletion"))
         .stdout(contains("--commit <MESSAGE>"))
+        .stdout(contains("--no-commit"))
+        .stdout(contains("done.commit"))
         .stdout(contains("/invar:log-approve"))
         .stdout(contains("Writes no"));
 }

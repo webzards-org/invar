@@ -1,10 +1,11 @@
 //! `invar.yaml` — the project config (§6).
 //!
-//! Implements `contracts/formats/invar-yaml.md` v2.0.1. The contract is the
+//! Implements `contracts/formats/invar-yaml.md` v2.1.0. The contract is the
 //! authority; section numbers below (`§3.4`, `D-2`) point into it.
 //!
-//! Light mode reads four keys: `scenarios`, `review.offer`,
-//! `git.base_branch` and `context.binding_limit`. Everything else in a config
+//! Light mode reads six keys: `scenarios`, `review.offer`,
+//! `git.base_branch`, `context.binding_limit`, `done.commit` and
+//! `done.commit_message`. Everything else in a config
 //! is either a key of a later milestone, ignored silently (contract §5), or an
 //! unknown key, which produces a [`Warning`] and never a failure (§6) — a
 //! config written by a newer `invar` must not break an older one.
@@ -41,6 +42,13 @@ pub const DEFAULT_BINDING_LIMIT: usize = 9_000;
 /// (§3.4, D-5).
 pub const MAX_BINDING_LIMIT: usize = 10_000;
 
+/// Default for `done.commit_message` (§3.5). `{ticket}` is replaced by the
+/// Plan's ticket id.
+pub const DEFAULT_DONE_COMMIT_MESSAGE: &str = "Remove plan {ticket}";
+
+/// The placeholder `done.commit_message` may contain (§3.5).
+pub const TICKET_PLACEHOLDER: &str = "{ticket}";
+
 /// Top-level keys of §6 that belong to later milestones (§5). Ignored
 /// silently, together with everything under them.
 const IGNORED_TOP_LEVEL: &[&str] = &[
@@ -65,6 +73,7 @@ pub struct Config {
     pub review: Review,
     pub git: Git,
     pub context: Context,
+    pub done: Done,
 }
 
 /// The `review` section (§3.2).
@@ -103,6 +112,35 @@ impl Default for Context {
     }
 }
 
+/// The `done` section (§3.5): what `invar done` does with the deletion when
+/// the command line does not say.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Done {
+    /// `done.commit` — commit the deletion, alone, as `--commit` would.
+    /// `false` unless the project says otherwise: invar makes no commit unless
+    /// asked, and this key is how a project asks once for every cycle.
+    pub commit: bool,
+    /// `done.commit_message` — the message of that commit, with `{ticket}`
+    /// replaced by the Plan's ticket id. One non-empty line.
+    pub commit_message: String,
+}
+
+impl Done {
+    /// The commit message for the Plan of `ticket`.
+    pub fn message_for(&self, ticket: &str) -> String {
+        self.commit_message.replace(TICKET_PLACEHOLDER, ticket)
+    }
+}
+
+impl Default for Done {
+    fn default() -> Self {
+        Self {
+            commit: false,
+            commit_message: DEFAULT_DONE_COMMIT_MESSAGE.to_owned(),
+        }
+    }
+}
+
 impl Default for Config {
     /// What an empty `invar.yaml` means (§2, example 10.2).
     fn default() -> Self {
@@ -111,6 +149,7 @@ impl Default for Config {
             review: Review::default(),
             git: Git::default(),
             context: Context::default(),
+            done: Done::default(),
         }
     }
 }
@@ -313,6 +352,25 @@ pub fn parse(text: &str, path: &Path) -> Result<Loaded, ConfigError> {
         },
     };
 
+    let done = raw.done.unwrap_or_default();
+    unknown_keys(&done.other, "done.", &[], &mut warnings);
+    let commit_message = match done.commit_message {
+        None => DEFAULT_DONE_COMMIT_MESSAGE.to_owned(),
+        Some(message) => {
+            let trimmed = message.trim();
+            if trimmed.is_empty() || trimmed.contains(['\n', '\r']) {
+                problems.push(format!(
+                    "`done.commit_message` must be one non-empty line, found {message:?}; \
+                     `{TICKET_PLACEHOLDER}` stands for the ticket id. Remove the key for \
+                     the default, {DEFAULT_DONE_COMMIT_MESSAGE:?}"
+                ));
+                DEFAULT_DONE_COMMIT_MESSAGE.to_owned()
+            } else {
+                trimmed.to_owned()
+            }
+        }
+    };
+
     // Every value problem in one message, so one edit fixes the file (§7).
     if !problems.is_empty() {
         return Err(invalid(problems.join("; ")));
@@ -329,6 +387,10 @@ pub fn parse(text: &str, path: &Path) -> Result<Loaded, ConfigError> {
                 base_branch: git.base_branch,
             },
             context: Context { binding_limit },
+            done: Done {
+                commit: done.commit.unwrap_or(false),
+                commit_message,
+            },
         },
         warnings,
     })
@@ -378,6 +440,15 @@ struct RawConfig {
     review: Option<RawReview>,
     git: Option<RawGit>,
     context: Option<RawContext>,
+    done: Option<RawDone>,
+    #[serde(flatten)]
+    other: BTreeMap<String, IgnoredAny>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawDone {
+    commit: Option<bool>,
+    commit_message: Option<String>,
     #[serde(flatten)]
     other: BTreeMap<String, IgnoredAny>,
 }

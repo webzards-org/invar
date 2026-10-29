@@ -146,6 +146,11 @@ fn the_planners_prompt_has_each_part_the_pilot_depends_on() {
         "PLAN .invar/plans/",
         // Reading is narrow.
         "Never a full scan",
+        // ...and complete where it matters: every caller of a changed
+        // signature, and the installed framework code, not a memory of it.
+        "Find every caller of what you change",
+        "Read the framework code you rely on, not your memory of it",
+        "A changed\nsignature whose callers are not all in Scope?",
         // The mandatory question, and its single exception.
         "asking is\nmandatory",
         "stated in the ticket",
@@ -973,7 +978,19 @@ fn each_developer_skills_block_reports_a_refusal_as_output_and_exits_0() {
 fn done_is_the_developers_and_the_protocol_skill_points_at_it() {
     let (meta, body) = frontmatter("skills/done/SKILL.md");
     assert_eq!(meta["name"], "done");
-    assert_eq!(meta["argument-hint"], "[ticket] [--commit <message>]");
+    assert_eq!(
+        meta["argument-hint"],
+        "[ticket] [--commit <message> | --no-commit]"
+    );
+    // Both flags exist on the command the skill runs.
+    let help = Command::cargo_bin("invar")
+        .unwrap()
+        .args(["done", "--help"])
+        .assert()
+        .success();
+    let help = String::from_utf8(help.get_output().stdout.clone()).unwrap();
+    assert!(help.contains("--commit <MESSAGE>"), "{help}");
+    assert!(help.contains("--no-commit"), "{help}");
     assert!(body.contains("A line starting `removed:` means the cycle is closed"));
     let words = body.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(words.contains("never delete the Plan another way"));

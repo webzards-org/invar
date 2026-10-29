@@ -1,10 +1,10 @@
 # Contract: `invar.yaml`
 
-**Version:** 2.0.1 — `git.base_branch` serves the review diff only; see §11
+**Version:** 2.1.0 — `done.commit` and `done.commit_message`; see §11
 **Status:** stable
 **Implements:** §6 (Config file), §13c (the review's base branch), §14.3; light
 mode L-2 and L-7 (`docs/TASKS-M1.md`)
-**Read by:** the core (`format/config`), the protocol skill (`review.offer`,
+**Read by:** the core (`format/config`; `invar done` for `done.*`), the protocol skill (`review.offer`,
 M1-18), any later reimplementation
 
 > Changing this file is a **public-contract change** (§14.3). It is made
@@ -27,7 +27,8 @@ round trip.
 
 §6 of the design document describes the full key set the finished system will
 read. Version 1.0.0 of this contract covers **light mode** (M1), which reads
-four keys (unchanged in 2.0.0). The rest of §6 is listed in §5 below so that a config written for a
+four keys (unchanged in 2.0.0); 2.1.0 adds the two keys of the `done` section.
+The rest of §6 is listed in §5 below so that a config written for a
 later milestone is read by this one without failing and without noise.
 
 ## 2. Encoding and document shape
@@ -49,6 +50,8 @@ later milestone is read by this one without failing and without noise.
 | `review.offer` | bool | `true` (since 2.0.0; `false` before) | Whether the protocol skill offers `/invar:review` before `invar done` (L-7, D-8) |
 | `git.base_branch` | string | detected, see §3.3 | Base branch for the review diff |
 | `context.binding_limit` | integer | `9000` | Character ceiling for `invar context show --binding` (M1-14) |
+| `done.commit` | bool | `false` | Whether `invar done` commits the deletion of the Plan without being given `--commit`; see §3.5 |
+| `done.commit_message` | string | `Remove plan {ticket}` | The message of that commit; `{ticket}` is replaced by the Plan's ticket id |
 
 A dotted key is a key inside a section: `review.offer` is written as
 
@@ -57,8 +60,9 @@ review:
   offer: true
 ```
 
-The sections `review`, `git` and `context` must be mappings when present. An
-empty section (`review:` with nothing under it) is the same as an absent one.
+The sections `review`, `git`, `context` and `done` must be mappings when
+present. An empty section (`review:` with nothing under it) is the same as an
+absent one.
 
 ### 3.1 `scenarios`
 
@@ -114,6 +118,32 @@ to read it (`plugin/NOTES.md` §5). Binding context is delivered by a
 stop reaching the agent — the exact failure the limit exists to prevent. The
 default of 9,000 leaves room for the origin labels the command adds (D-5).
 
+### 3.5 `done.commit` and `done.commit_message`
+
+Read by `invar done`. The Plan is deleted at the very end of a cycle, when the
+code is already committed and reviewed, so the deletion is a commit of its own
+that nobody has to think about. `done.commit: true` makes `invar done` commit
+it, alone, as `--commit <MESSAGE>` would — under `done.commit_message`, with
+`{ticket}` replaced by the Plan's ticket id (`Remove plan SHOP-214`).
+
+What the command line says wins:
+
+1. `--commit <MESSAGE>` commits under that message, whatever the config says;
+2. `--no-commit` only stages the deletion, whatever the config says;
+3. otherwise `done.commit` decides. Absent, it is `false`: the deletion is
+   staged and the commit is the developer's — the behavior before the key
+   existed.
+
+The commit is the same one `--commit` makes: only the Plan directory goes into
+it, anything else that is staged stays staged, the project's hooks, signing and
+identity apply and are never bypassed, and nothing is pushed.
+
+`done.commit_message` valid values: one line, non-empty once surrounding
+whitespace is removed (it is removed). `{ticket}` may appear any number of
+times, or not at all. A message that starts with a YAML indicator or contains
+`: ` must be quoted: `commit_message: "chore: remove the Plan of {ticket}"`.
+The key applies only when a commit is made; set alone, it changes nothing.
+
 ## 4. Value rules
 
 These apply to every key in §3.
@@ -163,8 +193,8 @@ version of `invar` must not break an older one.
 
 - The warning names the key by its full dotted path (`review.ofer`,
   `senarios`), so a typo is easy to find.
-- Unknown keys are reported at the top level and inside the three sections M1
-  reads. Keys inside an ignored subtree (`lint.rules.…`) are never reported;
+- Unknown keys are reported at the top level and inside the four sections
+  this version reads. Keys inside an ignored subtree (`lint.rules.…`) are never reported;
   that subtree belongs to a later milestone as a whole.
 - The value of an unknown key is not validated. It may be any YAML.
 
@@ -259,6 +289,17 @@ This is the one place the contract's own compatibility rule — *an absent key
 means the previous behavior* — is broken on purpose, which is why the version is
 a major one (§11).
 
+**D-9 — `done.commit` is a project setting, and defaults to `false`** (2.1.0).
+By the time `invar done` runs, the code is committed and reviewed, and the
+Plan's deletion should be the last commit of the PR, alone. Typing
+`--commit "…"` at the end of every cycle is a step with no decision in it, so a
+project can make it once, here. The default stays `false` because invar makes
+no commit unless asked (§12 of the design document), and an absent key must
+mean the previous behavior. The message is configurable because many projects
+run a commit-message hook (Conventional Commits and the like) that would refuse
+the default; `invar done` never bypasses it, so the project chooses a message
+its own hook accepts.
+
 ## 9. Open questions
 
 **OQ-1 — JSON Schema.** `contracts/README.md` lists a JSON Schema for
@@ -287,10 +328,15 @@ git:
 
 context:
   binding_limit: 8000
+
+done:
+  commit: true
+  commit_message: "chore: remove the Plan of {ticket}"
 ```
 
 Reads as: light mode, the review is offered, `develop` is the base branch,
-and binding context may be at most 8,000 characters. No warnings.
+binding context may be at most 8,000 characters, and `invar done` commits the
+Plan's deletion as `chore: remove the Plan of SHOP-214`. No warnings.
 
 ### 10.2 Valid — empty
 
@@ -300,7 +346,7 @@ and binding context may be at most 8,000 characters. No warnings.
 ```
 
 Reads as: `scenarios: false`, `review.offer: true` (D-8), base branch
-detected, `binding_limit: 9000`.
+detected, `binding_limit: 9000`, `done.commit: false`.
 
 ### 10.3 Valid — written for a later milestone
 
@@ -375,6 +421,19 @@ growing `BUSINESS_CONTEXT.md` would stop delivering its invariants and not
 notice. The fix is to trim or split the context files, not to raise the limit.
 
 ## 11. Version history
+
+**2.1.0 — `done.commit` and `done.commit_message`.**
+
+- §3, new §3.5: `invar done` commits the Plan's deletion when
+  `done.commit: true`, under `done.commit_message` (default
+  `Remove plan {ticket}`). `--commit <MESSAGE>` and the new `--no-commit`
+  override it. New D-9; example 10.1 sets both keys.
+- §6: unknown keys are reported inside `done` too.
+
+**Compatibility:** new optional keys only. Absent, `done.commit` is `false`,
+which is the previous behavior, so no file that was valid becomes invalid and
+no command's behavior changes. A config that sets `done` is read by an older
+`invar` with a warning for the unknown key `done`, and nothing is committed.
 
 **2.0.1 — `invar clean-spec` is gone.**
 

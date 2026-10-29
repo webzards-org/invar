@@ -1,11 +1,15 @@
-//! `invar done [TICKET | PATH] [--commit <MESSAGE>] [--skill]`: delete the
-//! Plan, stage the deletion, and commit it when asked. `--skill` is for
+//! `invar done [TICKET | PATH] [--commit <MESSAGE> | --no-commit] [--skill]`:
+//! delete the Plan, stage the deletion, and commit it when asked — by
+//! `--commit`, or by `done.commit: true` in `invar.yaml`. `--skill` is for
 //! `/invar:done`, whose shell block is this one command.
 
 use anyhow::{Context as _, Result};
 
 use crate::done::{self, Committed, DoneError, Staged};
+use crate::format::config::Done as DoneConfig;
+use crate::format::plan::Mode;
 use crate::fs;
+use crate::fs::plans::parse_dir_name;
 use crate::gate::check::CheckError;
 use crate::git;
 
@@ -27,9 +31,15 @@ pub struct Args {
     /// Only the Plan directory goes into the commit; anything else that is
     /// staged stays staged. The project's hooks, signing and identity apply.
     /// Nothing is pushed. Without it, the deletion is staged and the commit is
-    /// yours.
-    #[arg(long, value_name = "MESSAGE")]
+    /// yours — unless `invar.yaml` sets `done.commit: true`, which commits
+    /// under `done.commit_message` (default "Remove plan {ticket}").
+    #[arg(long, value_name = "MESSAGE", conflicts_with = "no_commit")]
     pub commit: Option<String>,
+
+    /// Only stage the deletion, even when `invar.yaml` sets `done.commit:
+    /// true`.
+    #[arg(long)]
+    pub no_commit: bool,
 
     /// Report as `/invar:done` needs it: a refusal is printed on stdout as
     /// `error: …`, and the exit code is 0.
@@ -56,9 +66,11 @@ fn close(args: Args) -> Result<()> {
             (root, spec)
         }
     };
-    let mode = super::mode(&root)?;
+    let config = super::config(&root)?;
+    let mode = Mode::of(&config);
+    let commit = commit_message(&args, &config.done, &spec);
 
-    let closed = match done::close(&root, &spec, mode, args.commit.as_deref()) {
+    let closed = match done::close(&root, &spec, mode, commit.as_deref()) {
         Ok(closed) => closed,
         // The refusal for a Plan that is not valid in form says "fix every
         // problem listed above"; here is the list it points at.
@@ -86,4 +98,29 @@ fn close(args: Args) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The message to commit the deletion under, or `None` to only stage it.
+///
+/// `--commit <MESSAGE>` wins, then `--no-commit`, then `done.commit` in
+/// `invar.yaml` with its `done.commit_message` (invar-yaml.md §3.5). Absent
+/// all three, nothing is committed — the behavior before the key existed.
+fn commit_message(args: &Args, config: &DoneConfig, spec: &std::path::Path) -> Option<String> {
+    if let Some(message) = &args.commit {
+        return Some(message.clone());
+    }
+    if args.no_commit || !config.commit {
+        return None;
+    }
+    // The ticket from the directory name: `SHOP-214-cancel-unpaid-order`. A
+    // Plan always lives in one of that shape; the name itself is the fallback.
+    let dir_name = spec
+        .parent()
+        .and_then(|dir| dir.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ticket = parse_dir_name(&dir_name)
+        .map(|(ticket, _)| ticket.to_owned())
+        .unwrap_or(dir_name);
+    Some(config.message_for(&ticket))
 }
