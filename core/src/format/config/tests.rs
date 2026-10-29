@@ -188,16 +188,19 @@ fn done_commit_and_its_message_are_read() {
     assert!(done.commit);
     assert_eq!(done.message_for("SHOP-214"), "Remove plan SHOP-214");
 
-    let done = read("done:\n  commit: true\n  commit_message: \"chore({ticket}): remove the Plan\"\n")
-        .config
-        .done;
+    let done =
+        read("done:\n  commit: true\n  commit_message: \"chore({ticket}): remove the Plan\"\n")
+            .config
+            .done;
     assert_eq!(
         done.message_for("SHOP-214"),
         "chore(SHOP-214): remove the Plan"
     );
 
     // A message without the placeholder is taken as it is.
-    let done = read("done:\n  commit_message: Close the cycle\n").config.done;
+    let done = read("done:\n  commit_message: Close the cycle\n")
+        .config
+        .done;
     assert!(!done.commit);
     assert_eq!(done.message_for("SHOP-214"), "Close the cycle");
 }
@@ -220,9 +223,17 @@ fn done_commit_is_a_strict_boolean() {
 
 #[test]
 fn done_commit_message_is_one_non_empty_line() {
-    for value in ["\"\"", "\"   \"", "\"first\\nsecond\"", "|\n    first\n    second"] {
+    for value in [
+        "\"\"",
+        "\"   \"",
+        "\"first\\nsecond\"",
+        "|\n    first\n    second",
+    ] {
         let message = reject(&format!("done:\n  commit_message: {value}\n"));
-        assert!(message.contains("`done.commit_message`"), "{value}: {message}");
+        assert!(
+            message.contains("`done.commit_message`"),
+            "{value}: {message}"
+        );
         assert!(message.contains("one non-empty line"), "{value}: {message}");
     }
     // Surrounding whitespace is not part of the message.
