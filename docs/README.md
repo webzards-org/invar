@@ -8,6 +8,8 @@ Project documentation.
   section references in this repository (§4d, §13a, …) point into it.
 - [`TASKS-M1.md`](TASKS-M1.md) — the M1 milestone broken into issues, with the
   decisions each one must close.
+- [`TASKS-AT.md`](TASKS-AT.md) — the test-writer feature broken into issues.
+  Until v4, its decisions override DESIGN v3.1 and L-3 in `TASKS-M1.md`.
 
 ## Belongs here
 
