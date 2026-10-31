@@ -1,0 +1,456 @@
+//! Tests for the `invar-lock:` line (`contracts/formats/acceptance-lock.md`).
+//!
+//! The first group runs every file of `contracts/fixtures/acceptance/` against
+//! `locks.json`, the expectation shared with any other implementation. The rest
+//! pin down single rules, so a failure names the rule that broke.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde_json::Value;
+
+use super::{LockError, LockLine, read};
+use crate::digest::{canonicalize, digest};
+
+const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+fn fixtures_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/fixtures/acceptance")
+}
+
+fn manifest() -> Value {
+    let raw = fs::read_to_string(fixtures_dir().join("locks.json")).unwrap();
+    serde_json::from_str(&raw).unwrap()
+}
+
+fn lock(text: &str) -> LockLine {
+    read(text.as_bytes()).unwrap().unwrap()
+}
+
+fn lock_error(text: &str) -> LockError {
+    read(text.as_bytes()).unwrap_err()
+}
+
+// --- fixtures ---------------------------------------------------------------
+
+#[test]
+fn every_fixture_reads_as_locks_json_says() {
+    let manifest = manifest();
+    let fixtures = manifest["fixtures"].as_array().unwrap();
+    assert!(!fixtures.is_empty());
+
+    for fixture in fixtures {
+        let path = fixture["path"].as_str().unwrap();
+        // Bytes, never a line-oriented reader: it would make CRLF and LF the same.
+        let bytes = fs::read(fixtures_dir().join(path)).unwrap();
+        assert_eq!(
+            bytes.len() as u64,
+            fixture["bytes"].as_u64().unwrap(),
+            "{path}: something rewrote this fixture (check .gitattributes and your editor)"
+        );
+
+        let number = |field: &str| fixture[field].as_u64().unwrap() as usize;
+        let text = |field: &str| fixture[field].as_str().unwrap();
+        match (fixture["result"].as_str().unwrap(), read(&bytes)) {
+            ("none", Ok(None)) => {}
+            ("pending", Ok(Some(lock))) => {
+                assert_eq!(lock.ticket, text("ticket"), "{path}");
+                assert_eq!(lock.line, number("line"), "{path}");
+                assert_eq!(lock.recorded, None, "{path}");
+                assert_eq!(lock.digest, text("digest"), "{path}");
+                assert!(!lock.matches(), "{path}");
+            }
+            ("locked", Ok(Some(lock))) => {
+                assert_eq!(lock.ticket, text("ticket"), "{path}");
+                assert_eq!(lock.line, number("line"), "{path}");
+                assert_eq!(lock.recorded.as_deref(), Some(text("recorded")), "{path}");
+                assert_eq!(lock.digest, text("digest"), "{path}");
+                assert_eq!(
+                    lock.matches(),
+                    fixture["matches"].as_bool().unwrap(),
+                    "{path}"
+                );
+            }
+            ("error", Err(err)) => {
+                let lines = |field: &[usize]| {
+                    let expected: Vec<usize> = fixture["lines"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|line| line.as_u64().unwrap() as usize)
+                        .collect();
+                    assert_eq!(field, expected, "{path}");
+                };
+                let kind = text("kind");
+                match &err {
+                    LockError::InvalidUtf8(invalid) => {
+                        assert_eq!(kind, "invalid-utf8", "{path}");
+                        assert_eq!(invalid.offset, number("offset"), "{path}");
+                    }
+                    LockError::MoreThanOne { lines: found } => {
+                        assert_eq!(kind, "more-than-one", "{path}");
+                        lines(found);
+                    }
+                    LockError::AfterWindow { line } => {
+                        assert_eq!(kind, "after-window", "{path}");
+                        lines(&[*line]);
+                    }
+                    LockError::Ticket { line, .. } => {
+                        assert_eq!(kind, "ticket", "{path}: {err}");
+                        lines(&[*line]);
+                    }
+                    LockError::Digest { line, .. } => {
+                        assert_eq!(kind, "digest", "{path}: {err}");
+                        lines(&[*line]);
+                    }
+                }
+            }
+            (expected, got) => panic!("{path}: expected {expected}, got {got:?}"),
+        }
+    }
+}
+
+#[test]
+fn the_fixtures_cover_every_kind_of_result() {
+    let manifest = manifest();
+    let fixtures = manifest["fixtures"].as_array().unwrap();
+    for result in ["none", "pending", "locked", "error"] {
+        assert!(fixtures.iter().any(|f| f["result"] == result), "{result}");
+    }
+    for kind in [
+        "more-than-one",
+        "after-window",
+        "ticket",
+        "digest",
+        "invalid-utf8",
+    ] {
+        assert!(fixtures.iter().any(|f| f["kind"] == kind), "{kind}");
+    }
+}
+
+#[test]
+fn the_files_listed_together_share_one_digest() {
+    let manifest = manifest();
+    let groups = manifest["same_digest"].as_array().unwrap();
+    assert!(!groups.is_empty());
+    for group in groups {
+        let digests: Vec<String> = group
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|path| {
+                let bytes = fs::read(fixtures_dir().join(path.as_str().unwrap())).unwrap();
+                read(&bytes).unwrap().unwrap().digest
+            })
+            .collect();
+        assert!(digests.windows(2).all(|pair| pair[0] == pair[1]), "{group}");
+    }
+}
+
+// --- the contract's worked example -------------------------------------------
+
+#[test]
+fn the_contract_states_the_digest_it_says_it_does() {
+    let body = "def test_ac1():\n    assert False\n";
+    let expected = digest(body);
+    let file = format!("# invar-lock: SHOP-214 {expected}\n{body}");
+    let line = lock(&file);
+    assert_eq!(line.digest, expected);
+    assert!(line.matches());
+    assert!(lock(&file.replace('\n', "\r\n")).matches());
+
+    let contract =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/acceptance-lock.md");
+    let contract = fs::read_to_string(contract).unwrap();
+    assert!(
+        contract.contains(&format!("# invar-lock: SHOP-214 {expected}\n{body}")),
+        "example 8.2 does not show {expected}"
+    );
+}
+
+// --- the line -----------------------------------------------------------------
+
+#[test]
+fn anything_before_the_marker_is_ignored() {
+    for prefix in [
+        "",
+        "// ",
+        "# ",
+        "-- ",
+        "/* ",
+        "<!-- ",
+        " * ",
+        "prefix-text",
+        "%% %",
+    ] {
+        let line = lock(&format!("{prefix}invar-lock: SHOP-214\nx\n"));
+        assert_eq!(line.ticket, "SHOP-214", "{prefix:?}");
+        assert_eq!(line.recorded, None, "{prefix:?}");
+    }
+}
+
+#[test]
+fn the_first_marker_on_a_line_is_the_one_read() {
+    let line = lock("invar-lock: SHOP-214 invar-lock: OTHER-1\n");
+    assert_eq!(line.ticket, "SHOP-214");
+}
+
+#[test]
+fn the_ticket_rule_is_the_plan_headers() {
+    for ticket in ["A-1", "SHOP-214", "S1-2", "AB9C-0007"] {
+        assert_eq!(lock(&format!("# invar-lock: {ticket}\n")).ticket, ticket);
+    }
+    for ticket in [
+        "shop-214", "1A-2", "SHOP", "SHOP-", "-214", "SHOP-2-1", "Shop-1",
+    ] {
+        assert!(
+            matches!(
+                lock_error(&format!("# invar-lock: {ticket}\n")),
+                LockError::Ticket { line: 1, .. }
+            ),
+            "{ticket}"
+        );
+    }
+}
+
+#[test]
+fn only_spaces_separate_the_fields() {
+    for line in [
+        "# invar-lock:\tSHOP-214\n",
+        "# invar-lock: \tSHOP-214\n",
+        "# invar-lock:\u{00A0}SHOP-214\n",
+        "# invar-lock:SHOP-214\n",
+    ] {
+        assert!(
+            matches!(lock_error(line), LockError::Ticket { .. }),
+            "{line:?}"
+        );
+    }
+    let tabbed = format!("# invar-lock: SHOP-214\t{DIGEST}\n");
+    assert!(matches!(lock_error(&tabbed), LockError::Digest { .. }));
+    assert_eq!(
+        lock(&format!("# invar-lock:   SHOP-214   {DIGEST}\n"))
+            .recorded
+            .as_deref(),
+        Some(DIGEST)
+    );
+}
+
+#[test]
+fn trailing_text_follows_any_whitespace_and_is_ignored() {
+    for rest in [" */", "\t*/", " -->", " anything at all", "\u{00A0}x"] {
+        assert_eq!(
+            lock(&format!("/* invar-lock: SHOP-214{rest}\n")).recorded,
+            None
+        );
+        assert_eq!(
+            lock(&format!("/* invar-lock: SHOP-214 {DIGEST}{rest}\n"))
+                .recorded
+                .as_deref(),
+            Some(DIGEST),
+            "{rest:?}"
+        );
+    }
+}
+
+#[test]
+fn a_field_that_starts_with_sha256_is_never_trailing_text() {
+    let upper = format!("sha256:{}", "A".repeat(64));
+    let long = format!("{DIGEST}0");
+    let short = &DIGEST[..DIGEST.len() - 1];
+    for field in [
+        "sha256:",
+        "sha256:abc",
+        short,
+        long.as_str(),
+        upper.as_str(),
+    ] {
+        for line in [
+            format!("# invar-lock: SHOP-214 {field}\n"),
+            format!("# invar-lock: SHOP-214 by-hand {field}\n"),
+            format!("# invar-lock: SHOP-214 {DIGEST} {field}\n"),
+        ] {
+            match lock_error(&line) {
+                LockError::Digest { line: 1, found } => assert_eq!(found, field),
+                other => panic!("{line:?}: {other:?}"),
+            }
+        }
+    }
+    // A digest out of place, even a well-formed one.
+    for line in [
+        format!("# invar-lock: SHOP-214 by-hand {DIGEST}\n"),
+        format!("# invar-lock: SHOP-214 {DIGEST} {DIGEST}\n"),
+    ] {
+        assert!(
+            matches!(lock_error(&line), LockError::Digest { .. }),
+            "{line:?}"
+        );
+    }
+    // A word that only contains it is ordinary text.
+    assert_eq!(
+        lock("# invar-lock: SHOP-214 not-sha256:abc\n").recorded,
+        None
+    );
+}
+
+// --- where ------------------------------------------------------------------
+
+fn at_line(number: usize) -> String {
+    format!("{}# invar-lock: SHOP-214\nx\n", "y\n".repeat(number - 1))
+}
+
+#[test]
+fn the_window_is_ten_lines() {
+    assert_eq!(lock(&at_line(1)).line, 1);
+    assert_eq!(lock(&at_line(10)).line, 10);
+    assert_eq!(
+        lock_error(&at_line(11)),
+        LockError::AfterWindow { line: 11 }
+    );
+}
+
+#[test]
+fn line_endings_and_a_bom_do_not_move_the_line() {
+    let lf = at_line(10);
+    for text in [
+        lf.replace('\n', "\r\n"),
+        lf.replace('\n', "\r"),
+        format!("\u{FEFF}{lf}"),
+    ] {
+        assert_eq!(lock(&text).line, 10, "{text:?}");
+    }
+    assert_eq!(
+        lock_error(&format!("\u{FEFF}{}", at_line(11).replace('\n', "\r\n"))),
+        LockError::AfterWindow { line: 11 }
+    );
+    // Only line endings end a line: U+2028 is content.
+    assert_eq!(lock("a\u{2028}b\n# invar-lock: SHOP-214\n").line, 2);
+}
+
+#[test]
+fn more_than_one_line_is_an_error_anywhere_in_the_file() {
+    let far = format!(
+        "# invar-lock: SHOP-214\n{}# invar-lock: SHOP-215\n",
+        "x\n".repeat(98)
+    );
+    assert_eq!(
+        lock_error(&far),
+        LockError::MoreThanOne {
+            lines: vec![1, 100]
+        }
+    );
+    // It comes before the checks of a single line, whatever those would say.
+    assert_eq!(
+        lock_error("invar-lock:\ninvar-lock:\ninvar-lock:\n"),
+        LockError::MoreThanOne {
+            lines: vec![1, 2, 3]
+        }
+    );
+}
+
+#[test]
+fn no_marker_is_no_lock_and_not_an_error() {
+    for text in [
+        "",
+        "\n\n",
+        "x\n",
+        "INVAR-LOCK: SHOP-214\n",
+        "invar-lock SHOP-214\n",
+    ] {
+        assert_eq!(read(text.as_bytes()).unwrap(), None, "{text:?}");
+    }
+}
+
+#[test]
+fn invalid_utf8_is_canonicalizations_own_error() {
+    match read(b"# invar-lock: SHOP-214\n\xE9\n").unwrap_err() {
+        LockError::InvalidUtf8(err) => assert_eq!(err.offset, 23),
+        other => panic!("{other:?}"),
+    }
+}
+
+// --- the digest ---------------------------------------------------------------
+
+#[test]
+fn the_digest_excludes_the_line_and_nothing_else() {
+    let base = lock("# invar-lock: SHOP-214\nalpha\n * AC1: text\n").digest;
+    assert_eq!(base, digest("alpha\n * AC1: text\n"));
+    for same in [
+        "// invar-lock: SHOP-214\nalpha\n * AC1: text\n".to_owned(),
+        "# invar-lock: OTHER-9\nalpha\n * AC1: text\n".to_owned(),
+        format!("# invar-lock: SHOP-214 {DIGEST}\nalpha\n * AC1: text\n"),
+        "# invar-lock: SHOP-214 anything\nalpha\n * AC1: text\n".to_owned(),
+        "alpha\n# invar-lock: SHOP-214\n * AC1: text\n".to_owned(),
+        "alpha\n * AC1: text\n# invar-lock: SHOP-214\n".to_owned(),
+        "# invar-lock: SHOP-214\r\nalpha  \r\n * AC1: text\r\n\r\n".to_owned(),
+    ] {
+        assert_eq!(lock(&same).digest, base, "{same:?}");
+    }
+    // A character of the criterion's text is covered (D-4).
+    for different in [
+        "# invar-lock: SHOP-214\nalpha\n * AC1: test\n",
+        "# invar-lock: SHOP-214\nalpha\n\n * AC1: text\n",
+        "\n# invar-lock: SHOP-214\nalpha\n * AC1: text\n",
+    ] {
+        assert_ne!(lock(different).digest, base, "{different:?}");
+    }
+}
+
+#[test]
+fn removing_the_line_strips_the_blank_lines_it_leaves_at_the_end() {
+    assert_eq!(
+        lock("alpha\n\n\n# invar-lock: SHOP-214\n").digest,
+        digest("alpha\n")
+    );
+    assert_eq!(lock("# invar-lock: SHOP-214\n").digest, digest(""));
+    assert_eq!(lock("\n\n# invar-lock: SHOP-214\n\n").digest, digest(""));
+}
+
+#[test]
+fn the_file_is_not_canonicalized_twice() {
+    // D-7: a second pass would strip this U+FEFF as a BOM, and give two different
+    // files one digest.
+    let with = lock("# invar-lock: SHOP-214\n\u{FEFF}alpha\n").digest;
+    assert_eq!(with, digest("\u{FEFF}alpha\n"));
+    assert_ne!(with, lock("# invar-lock: SHOP-214\nalpha\n").digest);
+}
+
+#[test]
+fn matches_needs_a_recorded_digest_equal_to_the_files() {
+    let body = "alpha\n";
+    let right = digest(&canonicalize(body));
+    assert!(lock(&format!("# invar-lock: SHOP-214 {right}\n{body}")).matches());
+    assert!(!lock(&format!("# invar-lock: SHOP-214 {DIGEST}\n{body}")).matches());
+    assert!(!lock(&format!("# invar-lock: SHOP-214\n{body}")).matches());
+    let edited = format!("# invar-lock: SHOP-214 {right}\nalphb\n");
+    assert!(!lock(&edited).matches());
+}
+
+// --- messages -----------------------------------------------------------------
+
+#[test]
+fn every_error_names_its_line_and_what_to_do() {
+    for (error, expected) in [
+        (
+            lock_error("invar-lock: A-1\ninvar-lock: A-2\n"),
+            &["lines 1, 2", "more than one", "remove the others"][..],
+        ),
+        (
+            lock_error(&at_line(11)),
+            &["line 11", "first 10 lines", "move it back up"],
+        ),
+        (
+            lock_error("invar-lock: shop\n"),
+            &["line 1", "`PROJ-412`", "found `shop`"],
+        ),
+        (
+            lock_error("invar-lock: A-1 sha256:abc\n"),
+            &["line 1", "`sha256:abc`", "64 lowercase hex"],
+        ),
+    ] {
+        let message = error.to_string();
+        for part in expected {
+            assert!(message.contains(part), "{part}: {message}");
+        }
+    }
+}

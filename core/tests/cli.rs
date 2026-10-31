@@ -9,6 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt as _;
 use predicates::str::{contains, diff};
 
 fn invar() -> Command {
@@ -36,6 +37,50 @@ fn no_arguments_is_a_usage_error() {
 }
 
 // --- invar hash -------------------------------------------------------------
+
+/// `invar hash --lock` on a file holding `text`.
+fn hash_lock(text: &str) -> assert_cmd::assert::Assert {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.py");
+    std::fs::write(&file, text).unwrap();
+    Command::cargo_bin("invar")
+        .unwrap()
+        .args(["hash", "--lock"])
+        .arg(&file)
+        .assert()
+}
+
+/// The digest of the contract's worked example (acceptance-lock.md §8.2).
+const LOCK_DIGEST: &str = "sha256:5d5da6ccd3116bee608b2a6c15d4c9f0d20f32b17b220cc13a643169ab874e07";
+
+#[test]
+fn hash_lock_prints_the_digest_alone_and_says_what_the_line_records() {
+    let body = "def test_ac1():\n    assert False\n";
+    hash_lock(&format!("# invar-lock: SHOP-214\n{body}"))
+        .success()
+        .stdout(format!("{LOCK_DIGEST}\n"))
+        .stderr(predicates::str::contains(":1: SHOP-214: pending"));
+    hash_lock(&format!("# invar-lock: SHOP-214 {LOCK_DIGEST}\r\n{body}"))
+        .success()
+        .stdout(format!("{LOCK_DIGEST}\n"))
+        .stderr(predicates::str::contains("the digest matches"));
+    hash_lock(&format!("# invar-lock: SHOP-214 {LOCK_DIGEST}\n{body}x\n"))
+        .success()
+        .stderr(predicates::str::contains("no longer matches"))
+        .stdout(predicates::str::contains(LOCK_DIGEST).not());
+}
+
+#[test]
+fn hash_lock_refuses_a_file_with_no_line_or_a_malformed_one() {
+    hash_lock("x\n")
+        .failure()
+        .stdout("")
+        .stderr(predicates::str::contains("no `invar-lock:` line"));
+    hash_lock("# invar-lock: SHOP-214 sha256:abc\n")
+        .failure()
+        .stdout("")
+        .stderr(predicates::str::contains("line 1"));
+}
 
 #[test]
 fn hash_prints_the_digest_of_a_file() {
