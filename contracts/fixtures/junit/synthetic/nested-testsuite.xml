@@ -1,0 +1,11 @@
+<testsuite name="root">
+  <testcase name="AC1 at the root" file="tests/A.php"/>
+  <testsuite name="one">
+    <testsuites>
+      <testsuite name="three">
+        <testcase name="AC2 deep" file="tests/B.php"><failure>x</failure></testcase>
+      </testsuite>
+    </testsuites>
+  </testsuite>
+  <testcase name="AC3 after" file="tests/C.php"><error>x</error></testcase>
+</testsuite>

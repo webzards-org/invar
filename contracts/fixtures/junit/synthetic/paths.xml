@@ -1,0 +1,14 @@
+<testsuite>
+  <testcase name="absolute" file="/project/tests/A.php"/>
+  <testcase name="relative" file="tests/A.php"/>
+  <testcase name="dot" file="./tests/A.php"/>
+  <testcase name="dotdot inside" file="tests/x/../A.php"/>
+  <testcase name="absolute dotdot inside" file="/project/tests/x/../A.php"/>
+  <testcase name="double slash" file="tests//A.php"/>
+  <testcase name="backslashes" file="tests\Win\A.php"/>
+  <testcase name="pest suffix" file="tests/A.php::pest suffix"/>
+  <testcase name="absolute with suffix" file="/project/tests/A.php::absolute with suffix"/>
+  <testcase name="name :: with colons" file="tests/A.php::name :: with colons"/>
+  <testcase name="another suffix" file="tests/A.php::something else"/>
+  <testcase name="spaces in path" file="tests/my dir/A.php"/>
+</testsuite>

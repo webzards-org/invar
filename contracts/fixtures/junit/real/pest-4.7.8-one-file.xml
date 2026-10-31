@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Acceptance\CancelOrderTest" file="tests/Acceptance/CancelOrderTest.php" tests="2" assertions="2" errors="0" failures="1" skipped="0" time="0.008380">
+    <testcase name="it vacuum and ACME are not tokens" file="tests/Acceptance/CancelOrderTest.php::it vacuum and ACME are not tokens" class="Tests\Acceptance\CancelOrderTest" classname="Tests.Acceptance.CancelOrderTest" assertions="1" time="0.004191"/>
+    <testcase name="it AC1 ünïcödé &amp; ampersand" file="tests/Acceptance/CancelOrderTest.php::it AC1 ünïcödé &amp; ampersand" class="Tests\Acceptance\CancelOrderTest" classname="Tests.Acceptance.CancelOrderTest" assertions="1" time="0.004189">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">it AC1 ünïcödé &amp; ampersandFailed asserting that true is false.
+at tests/Acceptance/CancelOrderTest.php:10</failure>
+    </testcase>
+  </testsuite>
+</testsuites>

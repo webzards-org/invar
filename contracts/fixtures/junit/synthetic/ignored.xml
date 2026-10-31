@@ -1,0 +1,13 @@
+<testsuites unknown="x" tests="99">
+  <properties><property name="p" value="v"/><testcase name="in properties" file="x"/></properties>
+  <testsuite name="s" errors="9" failures="9">
+    <unknown><testcase name="in unknown" file="x"/></unknown>
+    <testcase name="AC1 has a wrapped failure" file="tests/A.php" time="abc" extra="y">
+      <wrapper><failure/><error/></wrapper>
+      <warning>not an outcome</warning>
+      <system-out>x</system-out>
+      <system-err>y</system-err>
+    </testcase>
+    <system-out>z</system-out>
+  </testsuite>
+</testsuites>

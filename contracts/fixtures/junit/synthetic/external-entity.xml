@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<!DOCTYPE testsuite [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<testsuite>
+  <testcase name="&xxe;" file="tests/A.php"/>
+</testsuite>

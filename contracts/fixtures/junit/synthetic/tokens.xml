@@ -1,0 +1,29 @@
+<testsuite>
+  <testcase name="AC1" file="tests/A.php"/>
+  <testcase name="ac1" file="tests/A.php"/>
+  <testcase name="Ac_1" file="tests/A.php"/>
+  <testcase name="aC-12" file="tests/A.php"/>
+  <testcase name="it('AC3: rejects')" file="tests/A.php"/>
+  <testcase name="test_ac3_rejects" file="tests/A.php"/>
+  <testcase name="[AC3]" file="tests/A.php"/>
+  <testcase name="x.ac2,y" file="tests/A.php"/>
+  <testcase name="AC10" file="tests/A.php"/>
+  <testcase name="AC-3-4" file="tests/A.php"/>
+  <testcase name="AC3_4" file="tests/A.php"/>
+  <testcase name="ACME" file="tests/A.php"/>
+  <testcase name="vac3" file="tests/A.php"/>
+  <testcase name="AC3x" file="tests/A.php"/>
+  <testcase name="AC03" file="tests/A.php"/>
+  <testcase name="AC0" file="tests/A.php"/>
+  <testcase name="AC" file="tests/A.php"/>
+  <testcase name="AC_" file="tests/A.php"/>
+  <testcase name="AC__3" file="tests/A.php"/>
+  <testcase name="AC 3" file="tests/A.php"/>
+  <testcase name="AC_-3" file="tests/A.php"/>
+  <testcase name="éac3" file="tests/A.php"/>
+  <testcase name="aC3é" file="tests/A.php"/>
+  <testcase name="ac1ac2" file="tests/A.php"/>
+  <testcase name="AC3 and ac_3" file="tests/A.php"/>
+  <testcase name="AC3 and AC4" file="tests/A.php"/>
+  <testcase name="AC4 AC3 ac-4" file="tests/A.php"/>
+</testsuite>
