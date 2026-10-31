@@ -389,6 +389,8 @@ JUnit XML the core relies on:
   `test_ac3_…`). **Ticket from the file's lock line** (AT-5), never from the name.
 - A testcase with no criterion token, or with two, is reported, not guessed.
 - A missing or unparsable report is an error; the command's exit code is not read.
+- `file` is normalised: Pest's `::<test name>` suffix is removed, an absolute path is
+  made relative to the project root, and one outside the root is an error.
 
 Fixtures: real reports produced by Pest and PHPUnit on a small sample, checked in.
 
