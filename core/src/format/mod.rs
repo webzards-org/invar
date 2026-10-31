@@ -1,6 +1,6 @@
 //! Reading and writing the on-disk formats (§14.3).
 //!
-//! Five artifacts are the system's public contract, and this module is where
+//! Six artifacts are the system's public contract, and this module is where
 //! the core reads them:
 //!
 //! - `invar.yaml` (§6)                           — M1-3, [`config`]
@@ -8,6 +8,7 @@
 //! - decision entries (§7)                       — M1-11, [`decision`]
 //! - the `.feature` metadata block (§4)          — the feature-tests milestone
 //! - the `invar-lock:` line (§4d)                — AT-5, [`lock`]
+//! - JUnit XML test results (§14.2)              — AT-6, [`junit`]
 //!
 //! The specifications live in `contracts/formats/`; this module implements
 //! them and must not drift from them. A change here that changes what a file
@@ -25,6 +26,7 @@
 
 pub mod config;
 pub mod decision;
+pub mod junit;
 pub mod lock;
 pub mod plan;
 pub mod values;
