@@ -7,6 +7,10 @@
 //! the person's to judge at the gate. A path in `## Acceptance tests to change`
 //! is only a token here; whether the file exists and is locked is another
 //! command's question.
+//!
+//! Reading the criteria ([`parse_criteria`]) and checking their ids
+//! ([`check_ids`]) see each line through the same functions, so they cannot
+//! disagree about what a criterion is.
 
 use std::collections::BTreeMap;
 
@@ -14,6 +18,15 @@ use crate::diagnostics::Diagnostics;
 use crate::format::values::without_comments;
 
 use super::sections::{is_placeholder, strip_checkbox, strip_list_marker};
+
+/// One acceptance criterion: its id and its text, with a wrapped criterion as one
+/// line (§6.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Criterion {
+    /// `AC<n>`.
+    pub id: String,
+    pub text: String,
+}
 
 /// A list item's text, read for an id.
 enum Id<'a> {
@@ -115,6 +128,48 @@ pub(super) fn without_id(text: &str) -> &str {
     }
 }
 
+/// Whether a line is a list item, and its text without the marker and any checkbox.
+fn read_line(visible: &str) -> (bool, &str) {
+    let trimmed = visible.trim();
+    let after_marker = strip_list_marker(trimmed);
+    (
+        after_marker.len() != trimmed.len(),
+        strip_checkbox(after_marker),
+    )
+}
+
+/// The criteria in `## Acceptance criteria`, in order. Empty when they have no ids
+/// (D-16). Meant for a section that passed [`check_ids`].
+///
+/// An indented line belongs to the criterion above it, as for [`check_ids`], and is
+/// joined to it with one space. It is kept as written, list marker and all, and so
+/// is one that holds no words: what was approved is not this function's to shorten.
+pub(super) fn parse_criteria(content: &str) -> Vec<Criterion> {
+    let mut criteria: Vec<Criterion> = Vec::new();
+    let mut in_comment = false;
+    for (raw, _) in super::split_lines(content) {
+        let visible = without_comments(raw, &mut in_comment);
+        let (is_item, text) = read_line(&visible);
+        match parse_id(text) {
+            Id::Valid { number, rest } if is_item => criteria.push(Criterion {
+                id: format!("AC{number}"),
+                text: rest.to_owned(),
+            }),
+            _ => {
+                let wrapped = visible.trim();
+                if let Some(last) = criteria.last_mut()
+                    && is_indented(&visible)
+                    && !wrapped.is_empty()
+                {
+                    last.text.push(' ');
+                    last.text.push_str(wrapped);
+                }
+            }
+        }
+    }
+    criteria
+}
+
 /// Check the ids in `## Acceptance criteria`, whose `content` starts at line
 /// `first_line` of the file. The caller has established that the section holds
 /// a criterion.
@@ -139,10 +194,7 @@ pub(super) fn check_ids(
     for (index, (raw, _)) in super::split_lines(content).into_iter().enumerate() {
         let line = first_line + index;
         let visible = without_comments(raw, &mut in_comment);
-        let trimmed = visible.trim();
-        let after_marker = strip_list_marker(trimmed);
-        let is_item = after_marker.len() != trimmed.len();
-        let text = strip_checkbox(after_marker);
+        let (is_item, text) = read_line(&visible);
         if !text.chars().any(char::is_alphanumeric) || is_placeholder(text) {
             continue;
         }

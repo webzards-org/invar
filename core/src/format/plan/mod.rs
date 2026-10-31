@@ -46,6 +46,7 @@ use std::fs::{self, File};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
+pub use criteria::Criterion;
 pub use header::{Acceptance, Header, Status};
 pub use sections::{ACCEPTANCE_TESTS_TO_CHANGE, Section};
 
@@ -229,6 +230,16 @@ impl Plan {
     /// (M1-9).
     pub fn acceptance_criteria(&self) -> Option<&str> {
         self.section(sections::ACCEPTANCE_CRITERIA)
+    }
+
+    /// The criteria with their ids, in order, read by the rules `plan validate`
+    /// checks them with (§6.4). Empty when they have no ids, which only an approval
+    /// from before ids existed can be (D-16).
+    // `invar acceptance spec` is the first caller, in the next commit.
+    #[allow(dead_code)]
+    pub fn criteria(&self) -> Vec<Criterion> {
+        self.acceptance_criteria()
+            .map_or_else(Vec::new, criteria::parse_criteria)
     }
 
     /// `## Acceptance tests to change`, when this Plan declares any (§6.5):
