@@ -148,6 +148,24 @@ fn invar_yaml_states_light_mode_outright_and_the_core_reads_it_cleanly() {
     let loaded = config::load_for_command(&root).unwrap();
     assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
     assert!(matches!(Mode::of(&loaded.config), Mode::Light));
+    // The section depends on the project, so it stays commented out (D-12).
+    assert_eq!(loaded.config.acceptance, None);
+}
+
+#[test]
+fn the_commented_acceptance_section_is_valid_once_uncommented() {
+    let (_, section) = INVAR_YAML.split_once("# acceptance:").unwrap();
+    let uncommented = format!("# acceptance:{section}")
+        .lines()
+        .map(|line| line.strip_prefix("# ").unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let loaded = config::parse(&uncommented, Path::new("invar.yaml")).unwrap();
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+    let acceptance = loaded.config.acceptance.unwrap();
+    assert!(acceptance.required);
+    assert_eq!(acceptance.dir, "tests/Acceptance");
+    assert_eq!(acceptance.fakes_allowed.len(), 4);
 }
 
 #[test]

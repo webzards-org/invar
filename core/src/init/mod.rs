@@ -95,6 +95,16 @@ scenarios: false
 #
 # context:
 #   binding_limit: 9000     # characters, at most 10000: what a SessionStart hook may deliver
+
+# Acceptance tests written by the test-writer before the coder starts, and locked so the
+# coder cannot change them. Uncomment to turn on; every ticket then needs them unless
+# approved with --no-acceptance.
+#
+# acceptance:
+#   required: true          # default true: the default for `plan approve`
+#   dir: tests/Acceptance
+#   run: [\"vendor/bin/pest\", \"--log-junit\", \"{report}\", \"{files}\"]
+#   fakes_allowed: [http, mail, queue, notification]
 ";
 
 /// `AI_CONTEXT.md`: this project's own conventions (§5a). The marker and the

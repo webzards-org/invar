@@ -216,12 +216,19 @@ In order:
    is being replaced, and before anything is printed. In this order: `--acceptance`
    (`required`) or `--no-acceptance` (`skipped`), which exclude each other; the value
    of the approval being replaced, as far as D-20 allows; `acceptance.required` from
-   `invar.yaml`, once that key exists (AT-4); `skipped`. A draft replaces no approval,
+   `invar.yaml` (`invar-yaml.md` §3.6); `skipped`. A draft replaces no approval,
    whatever its key holds (§5.1), so a draft reset by a `failed` entry goes on to
    `invar.yaml`. So does an approval with no value, such as one from before 1.7.0,
    and one with approval values missing, which no command recorded (example 9.3).
    With no flag, a value changed since approval while the body stayed the same is
    **refused** here, naming both values and both flags (D-20).
+
+   **`--acceptance` is refused when `invar.yaml` has no `acceptance:` section**,
+   whatever state the Plan is in, because there is no command to run the tests with.
+   The message names the section and shows the minimal form to add.
+   `--no-acceptance` needs no section. A recorded `required` kept with no section is
+   not refused: the recorded value comes before the config. One warning line says that
+   no tests can be run for it until a section is added.
 3. **Read the approver and the date from git**, before anything is shown:
    - `Approved-by` is `git config user.name`, run in the project root, with
      surrounding whitespace trimmed. Unset or empty is an error, never an
@@ -237,9 +244,11 @@ In order:
    `Acceptance: skipped (from --no-acceptance)`,
    `Acceptance: required (kept from the earlier approval)`,
    `Acceptance: required (from the header; the earlier approval cannot confirm it)`,
-   `Acceptance: required (from invar.yaml)` or `Acceptance: skipped (default)`. When
-   the header holds a value the approval did not cover, the line says so:
-   ``Acceptance: skipped (default; the `required` in the header was not part of the approval)``.
+   `Acceptance: required (from invar.yaml)`, `Acceptance: skipped (from invar.yaml)`
+   or `Acceptance: skipped (default)`. When the header holds a value the approval did
+   not cover, the line says so:
+   ``Acceptance: skipped (default; the `required` in the header was not part of the approval)``,
+   and the same after `from invar.yaml`.
 5. **Write.** `Status` becomes `approved`; `Approved-by`, `Approved-at`,
    `Approved-checksum` and `Acceptance` get their values. If the header has no
    `Acceptance` key, it is added right after `Approved-checksum`, with that line's
