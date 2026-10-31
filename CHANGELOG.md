@@ -25,8 +25,8 @@
 
 - **`Acceptance: required | skipped`**, a new Plan header field (Plan contract
   1.7.0) that records whether a ticket needs acceptance tests. `plan approve`
-  writes it: `--acceptance` or `--no-acceptance` if given, otherwise `skipped`
-  (`invar.yaml` joins that order with its `acceptance:` section). The value is
+  writes it: `--acceptance` or `--no-acceptance` if given, otherwise
+  `acceptance.required` from `invar.yaml`, otherwise `skipped`. The value is
   printed with the criteria. `--reapprove` keeps the value in the header unless a
   flag names another, and labels it by what the checksum shows: if the body is
   unchanged and the value is not the approved one, it refuses until a flag chooses,
@@ -34,6 +34,16 @@
   the value. On a Plan already approved and unchanged, a flag changes
   nothing unless `--reapprove` is given too. The planner does not write the field,
   and a `failed` entry clears it. Nothing acts on the value yet.
+
+- **The `acceptance:` section in `invar.yaml`** (contract 2.2.0): `dir` and `run`
+  are required, `required` defaults to `true` and is the default for `plan approve`,
+  `style` is `integration` (`gherkin` is reserved), and `fakes_allowed` is passed on
+  as it is. `run` is a list run without a shell, with `{report}` and `{files}` each
+  exactly once as a whole element. Nothing runs it yet. **Configs without the section
+  behave as before.** `plan approve --acceptance` needs the section and is refused
+  without it, and a recorded `required` kept by `--reapprove` with no section prints a
+  warning. `invar init` writes the section commented out, because its values depend
+  on the project.
 
 - **`plan check` prints one more line** on success: `acceptance: required` or
   `acceptance: skipped`. Every existing line stays as it was.

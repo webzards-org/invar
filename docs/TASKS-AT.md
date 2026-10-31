@@ -44,7 +44,7 @@ Red-before-green needs a test result, and JUnit XML is the one format every
 relevant runner already writes, so no adapter is needed to get one. This does
 not contradict `CONTRIBUTING.md` ("running pytest belongs in an adapter"): that
 rule keeps language-specific work out of the core, and the core here runs a
-command string it does not understand and reads a language-neutral report. It
+command it does not understand and reads a language-neutral report. It
 never parses PHP or knows Pest.
 
 **A-3 — Locks live in the test file, not in a manifest.** One line,
@@ -285,19 +285,22 @@ by construction, since only the developer runs `plan approve` (L-8).
 
 ```yaml
 acceptance:
-  required: true                 # default for `plan approve`
+  required: true                 # default for `plan approve`; true when the section is present
   style: integration             # integration | gherkin (reserved: an error for now)
-  dir: tests/Acceptance          # where acceptance tests live
-  run: "vendor/bin/pest --log-junit {report} {files}"
+  dir: tests/Acceptance          # where acceptance tests live; required
+  run: ["vendor/bin/pest", "--log-junit", "{report}", "{files}"]   # required
   fakes_allowed: [http, mail, queue, notification]
 ```
 
-- **Absent section = previous behavior**: `required: false`, no test-writer (§14.3).
-  `invar init` writes the section with `required: true`, so new projects get it
-  by default.
-- `run` is split into arguments without a shell; `{report}` expands to one path
-  the core chooses, `{files}` to the test files as separate arguments. The exit
-  code is ignored; the report is the result (AT-6).
+- **Absent section = previous behavior**: `plan approve` defaults to `skipped`, no
+  test-writer (§14.3). `invar init` writes the section **commented out**, because
+  `run` and `dir` depend on the project (`invar-yaml.md` D-12).
+- `run` is a list run without a shell (D-11): element 0 is the program. `{report}`
+  expands to one path the core chooses, `{files}` to the test files as separate
+  arguments, and each appears exactly once as a whole element. The exit code is
+  ignored; the report is the result (AT-6).
+- `plan approve --acceptance` is refused with no section, naming what to add, and a
+  recorded `required` kept with no section warns (`plan-header.md` §5.3).
 - `fakes_allowed` is not interpreted by the core; it is passed to the test-writer
   through `invar acceptance spec` (AT-7).
 - Reader and errors follow the existing contract style (unknown keys warn, YAML 1.1
@@ -315,8 +318,8 @@ upgrade to `style: gherkin` without touching the core's checks.
 - [ ] The reader accepts the example above and an absent section
 - [ ] `run` without `{report}` is an error; `style: gherkin` is an error naming the
       reserved value; an unknown `fakes_allowed` value is accepted as-is
-- [ ] `invar init` writes the section with `required: true`; existing configs are
-      not rewritten
+- [ ] `invar init` writes the section commented out; existing configs are not
+      rewritten
 
 ---
 
