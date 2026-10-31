@@ -22,7 +22,7 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::format::plan::{Mode, Plan};
+use crate::format::plan::{Acceptance, Mode, Plan};
 use crate::fs::ProjectRoot;
 
 use super::approval::{self, Prior, classify};
@@ -39,6 +39,8 @@ pub struct Approved {
     pub by: String,
     pub at: String,
     pub checksum: String,
+    /// What the approval decided; no value reads as `skipped` (§5.1).
+    pub acceptance: Acceptance,
 }
 
 /// Check that the Plan at `spec` is approved and unchanged since.
@@ -63,6 +65,7 @@ pub fn check(root: &ProjectRoot, spec: &Path, mode: Mode) -> Result<Approved, Ch
     let current = approval::current_digest(&plan);
     let spec = spec.to_owned();
     let ticket = plan.header().ticket.clone();
+    let acceptance = plan.header().recorded_acceptance();
     match classify(plan.header(), &current) {
         Prior::Current { by, at } => Ok(Approved {
             spec,
@@ -70,6 +73,7 @@ pub fn check(root: &ProjectRoot, spec: &Path, mode: Mode) -> Result<Approved, Ch
             by,
             at,
             checksum: current,
+            acceptance,
         }),
         Prior::Draft => Err(CheckError::Draft { spec, ticket }),
         Prior::Changed { by, at, recorded } => Err(CheckError::Changed(Box::new(Stale {

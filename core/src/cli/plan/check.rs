@@ -1,7 +1,8 @@
 //! `invar plan check <TICKET | PATH>`.
 //!
-//! `ok: <path> — …` on stdout when the approval holds; otherwise one error on
-//! stderr that says what happened and what to do, and a non-zero exit.
+//! `ok: <path> — …` and `acceptance: required|skipped` on stdout when the
+//! approval holds; otherwise one error on stderr that says what happened and
+//! what to do, and a non-zero exit.
 
 use anyhow::{Context as _, Result};
 
@@ -34,6 +35,9 @@ pub fn run(args: Args) -> Result<()> {
                 approved.at,
                 approved.checksum
             );
+            // Fixed and parseable: the dispatcher reads the decision from here
+            // (plan-header.md §5.3).
+            println!("acceptance: {}", approved.acceptance.as_str());
             Ok(())
         }
         Err(CheckError::Invalid(report)) => {

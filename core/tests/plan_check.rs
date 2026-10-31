@@ -70,7 +70,8 @@ fn an_approved_unchanged_plan_passes() {
         .check()
         .success()
         .stdout(format!(
-            "ok: {SPEC} — approved by rade on 2026-10-05, unchanged since ({CHECKSUM})\n"
+            "ok: {SPEC} — approved by rade on 2026-10-05, unchanged since ({CHECKSUM})\n\
+             acceptance: skipped\n"
         ))
         .stderr("");
 }
@@ -254,6 +255,44 @@ fn a_plan_approved_under_the_previous_contract_still_passes() {
 #[test]
 fn an_approval_with_a_value_passes() {
     Project::new(&in_full("9.10")).check().success().stderr("");
+}
+
+#[test]
+fn it_prints_the_acceptance_line_for_both_values() {
+    for (number, line) in [
+        ("9.10", "acceptance: required\n"),
+        ("9.2", "acceptance: skipped\n"),
+    ] {
+        Project::new(&in_full(number))
+            .check()
+            .success()
+            .stdout(contains(format!("\n{line}")))
+            .stderr("");
+    }
+}
+
+#[test]
+fn an_absent_or_empty_field_prints_skipped() {
+    let absent = in_full("9.12");
+    let empty = absent.replace(
+        &format!("Approved-checksum: {CHECKSUM_1_6_0}\n"),
+        &format!("Approved-checksum: {CHECKSUM_1_6_0}\nAcceptance:\n"),
+    );
+    assert_ne!(empty, absent);
+    for text in [absent, empty] {
+        Project::new(&text)
+            .check()
+            .success()
+            .stdout(contains("\nacceptance: skipped\n"));
+    }
+}
+
+#[test]
+fn a_refusal_prints_no_acceptance_line() {
+    Project::new(&contract_example("9.1"))
+        .check()
+        .failure()
+        .stdout(contains("acceptance:").not());
 }
 
 #[test]

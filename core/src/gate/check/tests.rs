@@ -7,7 +7,7 @@ use tempfile::TempDir;
 
 use super::{CheckError, check};
 use crate::digest::{canonicalize, digest};
-use crate::format::plan::Mode;
+use crate::format::plan::{Acceptance, Mode};
 use crate::fs::ProjectRoot;
 use crate::gate::approve::{Decision, choose_acceptance, prepare};
 
@@ -248,6 +248,19 @@ fn without_a_value_the_digest_is_that_of_the_body() {
     let (_dir, root, spec) = project(&in_full("9.12"));
     let approved = check(&root, &spec, Mode::Light).unwrap();
     assert_eq!(approved.checksum, digest(&canonical_body()));
+}
+
+#[test]
+fn the_decision_on_record_comes_back_with_the_approval() {
+    for (number, expected) in [
+        ("9.10", Acceptance::Required),
+        ("9.2", Acceptance::Skipped),
+        ("9.12", Acceptance::Skipped),
+    ] {
+        let (_dir, root, spec) = project(&in_full(number));
+        let approved = check(&root, &spec, Mode::Light).unwrap();
+        assert_eq!(approved.acceptance, expected, "{number}");
+    }
 }
 
 #[test]
