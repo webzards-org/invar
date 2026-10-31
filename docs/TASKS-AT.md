@@ -433,8 +433,13 @@ its first command after `plan check`:
 - `## Implementation context` and `## Scope` of the Plan
 
 Refuses when the Plan is not approved, changed after approval, or
-`Acceptance: skipped`. Output stays under the hook's 10,000-character cap with the
-same check `context show --binding` uses.
+`Acceptance: skipped`; when `invar.yaml` has no `acceptance:` section; and when the
+criteria have no ids.
+
+**No size cap.** The hook's 10,000-character cap was dropped from this task: the
+test-writer runs this command through Bash, so no hook delivers its output and the cap
+does not apply, and cutting Implementation context to fit would hide approved text from
+the agent that must test it. Everything is printed.
 
 ### Purpose
 
@@ -448,7 +453,7 @@ Gherkin later is a change to this command, not to the agent.
 - [ ] Refusals for draft, changed and `skipped` Plans, each with its message
 - [ ] No text of `BUSINESS_CONTEXT.md` beyond what the Plan quotes, and nothing
       from `.invar/decisions/`
-- [ ] Size check enforced and tested
+- [ ] Nothing is cut for size, and that is tested with a large Plan
 
 ---
 

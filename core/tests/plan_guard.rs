@@ -195,6 +195,16 @@ fn every_other_shell_command_passes_silently() {
     }
 }
 
+#[test]
+fn the_test_writers_command_passes_silently() {
+    // The agent's command, and so not on `HUMAN_ONLY`.
+    let project = Project::new(APPROVED);
+    guard(bash(&project.root(), "invar acceptance spec SHOP-214"))
+        .code(0)
+        .stdout("")
+        .stderr("");
+}
+
 // --- allow ----------------------------------------------------------------------
 
 #[test]

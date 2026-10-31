@@ -23,6 +23,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::diagnostics::Diagnostics;
+use crate::format::config::ACCEPTANCE_SECTION_EXAMPLE;
 use crate::format::plan::{Acceptance, Approval, Mode, Plan, Status};
 use crate::fs::ProjectRoot;
 
@@ -454,9 +455,7 @@ impl fmt::Display for ApproveError {
                 "`--acceptance` needs an `acceptance:` section in invar.yaml, and it has \
                  none, so there is no command to run the tests with. Add one, with your \
                  own directory and test command:\n\n\
-                 acceptance:\n  \
-                 dir: tests/Acceptance\n  \
-                 run: [\"vendor/bin/pest\", \"--log-junit\", \"{{report}}\", \"{{files}}\"]\n\n\
+                 {ACCEPTANCE_SECTION_EXAMPLE}\n\n\
                  or approve with `--no-acceptance`"
             ),
             Self::Invalid(report) => {

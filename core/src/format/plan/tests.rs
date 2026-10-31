@@ -1787,3 +1787,98 @@ fn the_tests_to_change_are_ignored_with_scenarios() {
     let plan = Plan::parse(&text, Mode::Scenarios).unwrap();
     assert_eq!(plan.acceptance_tests_to_change(), None);
 }
+
+// --- the criteria with their ids (§6.4) ---------------------------------------------
+
+fn parse_criteria_of(criteria: &str) -> Plan {
+    parse(&with_criteria(criteria))
+}
+
+fn ids_and_texts(plan: &Plan) -> Vec<(String, String)> {
+    plan.criteria()
+        .into_iter()
+        .map(|criterion| (criterion.id, criterion.text))
+        .collect()
+}
+
+fn pairs(expected: &[(&str, &str)]) -> Vec<(String, String)> {
+    expected
+        .iter()
+        .map(|(id, text)| ((*id).to_owned(), (*text).to_owned()))
+        .collect()
+}
+
+#[test]
+fn the_criteria_come_with_their_ids_in_order() {
+    let plan = parse_criteria_of("- AC1: Given a, then b.\n- AC2: Given c, then d.");
+    assert_eq!(
+        ids_and_texts(&plan),
+        pairs(&[("AC1", "Given a, then b."), ("AC2", "Given c, then d.")])
+    );
+}
+
+#[test]
+fn a_wrapped_criterion_is_one_text() {
+    let plan = parse_criteria_of(
+        "- AC1: Given a,\n  when b,\n\tthen c.\n\n  still AC1.\n- AC2: Given d,\n  - and e\n  ...\n  TBD",
+    );
+    assert_eq!(
+        ids_and_texts(&plan),
+        pairs(&[
+            ("AC1", "Given a, when b, then c. still AC1."),
+            // Nothing approved is dropped: not a marker, nor a line with no words.
+            ("AC2", "Given d, - and e ... TBD"),
+        ])
+    );
+}
+
+#[test]
+fn the_criteria_read_every_form_validate_accepts() {
+    for (criteria, expected) in [
+        ("* AC1: a", "a"),
+        ("+ AC1: a", "a"),
+        ("1. AC1: a", "a"),
+        ("- [ ] AC1: a", "a"),
+        ("- [x] AC1: a", "a"),
+        ("- AC1:   a  ", "a"),
+        ("- AC1: a <!-- not this -->", "a"),
+        ("- AC1: a\r\n  b", "a b"),
+    ] {
+        assert_eq!(
+            ids_and_texts(&parse_criteria_of(criteria)),
+            pairs(&[("AC1", expected)]),
+            "{criteria:?}"
+        );
+    }
+}
+
+#[test]
+fn text_above_the_first_id_and_in_a_comment_is_no_criterion() {
+    let plan = parse_criteria_of("<!-- - AC9: not this\n  nor this -->\n- AC1: a");
+    assert_eq!(ids_and_texts(&plan), pairs(&[("AC1", "a")]));
+}
+
+#[test]
+fn criteria_with_no_ids_give_an_empty_list() {
+    // D-16: valid only under the approval that accepted them, so this reads the
+    // section with no gate in the way.
+    assert!(
+        super::criteria::parse_criteria(
+            "- Given a, then b.
+- Given c.
+"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn the_contracts_example_has_the_criteria_it_shows() {
+    let plan = parse(&valid());
+    let criteria = plan.criteria();
+    assert!(!criteria.is_empty());
+    for (index, criterion) in criteria.iter().enumerate() {
+        assert_eq!(criterion.id, format!("AC{}", index + 1));
+        assert!(!criterion.text.is_empty());
+    }
+}

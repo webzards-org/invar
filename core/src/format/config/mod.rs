@@ -55,6 +55,11 @@ pub const REPORT_PLACEHOLDER: &str = "{report}";
 /// The placeholder in `acceptance.run` for the test files (§3.6).
 pub const FILES_PLACEHOLDER: &str = "{files}";
 
+/// The smallest `acceptance` section, for a message that says what to add (§3.6).
+pub const ACCEPTANCE_SECTION_EXAMPLE: &str = "acceptance:\n  \
+     dir: tests/Acceptance\n  \
+     run: [\"vendor/bin/pest\", \"--log-junit\", \"{report}\", \"{files}\"]";
+
 /// Top-level keys of §6 that belong to later milestones (§5). Ignored
 /// silently, together with everything under them.
 const IGNORED_TOP_LEVEL: &[&str] = &[
@@ -171,6 +176,15 @@ pub struct AcceptanceConfig {
 pub enum AcceptanceStyle {
     #[default]
     Integration,
+}
+
+impl AcceptanceStyle {
+    /// As it is written in `invar.yaml`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Integration => "integration",
+        }
+    }
 }
 
 impl Default for Config {

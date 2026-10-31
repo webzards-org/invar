@@ -58,6 +58,14 @@
   the ticket comes from the file's lock line, never from a name. Nothing runs tests
   yet.
 
+- **`invar acceptance spec <TICKET>`** prints everything the test-writer needs: the
+  style, `acceptance.dir`, the `run` command, `fakes_allowed`, the conventions of the
+  style, every criterion with its id, and the Plan's Scope and Implementation context.
+  The same Plan and config print the same bytes, and nothing is cut for size. It
+  refuses what `plan check` refuses, a ticket approved as `skipped`, an `invar.yaml`
+  with no `acceptance:` section, and criteria with no ids. Never the decision log, or
+  `BUSINESS_CONTEXT.md` beyond what the Plan quotes. No agent uses it yet.
+
 - **`plan check` prints one more line** on success: `acceptance: required` or
   `acceptance: skipped`. Every existing line stays as it was.
 
