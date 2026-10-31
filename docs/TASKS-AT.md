@@ -651,6 +651,17 @@ whether this ticket gets locked tests. The dispatcher never chooses on its own.
       `/invar:approve T --no-acceptance` starts the coder directly
 - [ ] A `BLOCKED` from the test-writer starts no coder
 
+**Note from AT-3 (#97).** `invar plan approve --acceptance --no-acceptance` is
+refused by clap, which exits 1 before `--skill` is handled. A skill's shell
+block that exits non-zero loses its output, so `/invar:approve T --acceptance
+--no-acceptance` lands in the skill's "no output at all" path instead of
+showing an `error:` line. Either check the conflict in code, so `--skill`
+formats it, or have the skill's argument check refuse the pair before the
+shell block runs.
+
+- [ ] `/invar:approve T --acceptance --no-acceptance` shows an `error:` line
+      naming both flags, not the "no output at all" message
+
 ---
 
 ## AT-13 — `BLOCKED-TEST` and `/invar:relock`
@@ -712,6 +723,10 @@ a person's decision, exactly as approval is, so a weakening is never automatic.
   helpers used by a locked test and modified on the branch.
 - With `Acceptance: skipped`: a heading listing criteria no test covers, as
   information, not a defect.
+- `agents/reviewer.md` learns `## Acceptance tests to change` (Plan contract
+  1.6.0, AT-2): `review-input` already shows it after the criteria. A change to
+  a locked test that the Plan declares there is not reported as outside Scope;
+  a change to another ticket's locked test that it does **not** declare is.
 - Seeded branch in `eval/review-seeds.sh`: a locked test whose assertion is weaker
   than its criterion.
 
@@ -727,6 +742,8 @@ as always (L-7).
       `.invar/decisions/`
 - [ ] The weak-test seed is reported as `weaker` with `file:line`
 - [ ] A factory change on a locked test's path is reported under its heading
+- [ ] `plugin_prompts.rs`: the reviewer prompt names `## Acceptance tests to change`
+      and says how declared changes are treated
 - [ ] `tests/review_input.rs`: `done` still neither calls nor waits for the review
 
 ---
