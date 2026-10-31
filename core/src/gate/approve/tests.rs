@@ -8,7 +8,7 @@ use tempfile::TempDir;
 
 use super::{ApproveError, Decision, Pending, Prior, choose_acceptance, classify, prepare};
 use crate::digest::{canonicalize, digest};
-use crate::format::plan::{Header, Mode, Status};
+use crate::format::plan::{Acceptance, Header, Mode, Status};
 use crate::fs::ProjectRoot;
 
 // --- fixtures ---------------------------------------------------------------
@@ -42,7 +42,7 @@ fn project(text: &str) -> (TempDir, ProjectRoot, PathBuf) {
 }
 
 fn pending(root: &ProjectRoot, spec: &Path, reapprove: bool) -> Pending {
-    match prepare(root, spec, Mode::Light, reapprove, choose_acceptance(None)) {
+    match prepare(root, spec, Mode::Light, reapprove, None) {
         Ok(Decision::Approve(pending)) => *pending,
         Ok(other) => panic!("expected an approval, got {other:?}"),
         Err(err) => panic!("expected an approval, got: {err}"),
@@ -56,7 +56,7 @@ fn approve(root: &ProjectRoot, spec: &Path, reapprove: bool) {
 }
 
 fn refusal(root: &ProjectRoot, spec: &Path, reapprove: bool) -> ApproveError {
-    match prepare(root, spec, Mode::Light, reapprove, choose_acceptance(None)) {
+    match prepare(root, spec, Mode::Light, reapprove, None) {
         Err(err) => err,
         Ok(decision) => panic!("expected a refusal, got {decision:?}"),
     }
@@ -324,15 +324,7 @@ fn an_approved_plan_whose_body_is_unchanged_is_left_alone() {
     approve(&root, &spec, false);
     let approved = fs::read_to_string(&spec).unwrap();
     for reapprove in [false, true] {
-        match prepare(
-            &root,
-            &spec,
-            Mode::Light,
-            reapprove,
-            choose_acceptance(None),
-        )
-        .unwrap()
-        {
+        match prepare(&root, &spec, Mode::Light, reapprove, None).unwrap() {
             Decision::AlreadyApproved { by, at, .. } => {
                 assert_eq!((by.as_str(), at.as_str()), ("rade", "2026-10-05"));
             }
@@ -539,5 +531,76 @@ fn classify_covers_every_state() {
         Prior::Unrecorded {
             missing: vec!["Approved-by", "Approved-checksum"]
         }
+    );
+}
+
+// --- where `Acceptance` comes from (plan-header.md §5.3, D-20) -----------------------
+
+#[test]
+fn the_value_comes_from_the_flag_then_the_earlier_approval_then_the_default() {
+    use Acceptance::{Required, Skipped};
+    for (flag, recorded, value, shown) in [
+        (
+            Some(Skipped),
+            Some(Required),
+            Skipped,
+            "skipped (from --no-acceptance)",
+        ),
+        (
+            Some(Required),
+            Some(Skipped),
+            Required,
+            "required (from --acceptance)",
+        ),
+        (
+            Some(Required),
+            None,
+            Required,
+            "required (from --acceptance)",
+        ),
+        (
+            None,
+            Some(Required),
+            Required,
+            "required (kept from the earlier approval)",
+        ),
+        (
+            None,
+            Some(Skipped),
+            Skipped,
+            "skipped (kept from the earlier approval)",
+        ),
+        (None, None, Skipped, "skipped (default)"),
+    ] {
+        let chosen = choose_acceptance(flag, recorded);
+        assert_eq!(chosen.value, value);
+        assert_eq!(chosen.to_string(), shown);
+    }
+}
+
+/// `text` with its `Acceptance` key, if any, holding `line` instead.
+fn with_acceptance(text: &str, line: &str) -> String {
+    with_empty_acceptance(text).replace("Acceptance:\n", &format!("{line}\n"))
+}
+
+#[test]
+fn a_value_left_in_a_draft_is_not_kept() {
+    let draft = with_acceptance(&contract_example("9.1"), "Acceptance: required");
+    let (_dir, root, spec) = project(&draft);
+    assert_eq!(
+        pending(&root, &spec, false).acceptance().to_string(),
+        "skipped (default)"
+    );
+}
+
+#[test]
+fn a_value_on_an_approval_nobody_recorded_is_not_kept() {
+    // Example 9.3: no command recorded this approval, so neither its value.
+    let unrecorded = with_acceptance(&contract_example("9.1"), "Acceptance: required")
+        .replace("Status: draft", "Status: approved");
+    let (_dir, root, spec) = project(&unrecorded);
+    assert_eq!(
+        pending(&root, &spec, true).acceptance().to_string(),
+        "skipped (default)"
     );
 }

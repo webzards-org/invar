@@ -192,13 +192,7 @@ on every routine rebase.
 
 `invar plan approve <TICKET | PATH>` is the human gate (§4a).
 
-**The value of `Acceptance` is decided first**, before anything is printed. It is
-`--acceptance` (`required`) or `--no-acceptance` (`skipped`) if one is given; they
-exclude each other. Otherwise it is `acceptance.required` from `invar.yaml`, once
-that key exists (AT-4), and otherwise `skipped`. `--reapprove` takes the value the
-same way, and does not inherit the old one.
-
-Then, in order:
+In order:
 
 1. **Validate.** A Plan that `plan validate` rejects is refused, with the same
    list of problems. A new approval must have numbered criteria (§6.4), so
@@ -217,6 +211,15 @@ Then, in order:
      or any of the three approval values is empty — **refused**, unless
      `--reapprove` is given; with it, approve as for a draft, replacing the
      earlier values.
+
+   **The value of `Acceptance` is decided here**, once it is known which approval
+   is being replaced, and before anything is printed. In this order: `--acceptance`
+   (`required`) or `--no-acceptance` (`skipped`), which exclude each other; the value
+   of the approval being replaced; `acceptance.required` from `invar.yaml`, once that
+   key exists (AT-4); `skipped`. A draft replaces no approval, whatever its key holds
+   (§5.1), so a draft reset by a `failed` entry goes on to `invar.yaml`. So does an
+   approval with no value, such as one from before 1.7.0, and one with approval
+   values missing, which no command recorded (example 9.3).
 3. **Read the approver and the date from git**, before anything is shown:
    - `Approved-by` is `git config user.name`, run in the project root, with
      surrounding whitespace trimmed. Unset or empty is an error, never an
@@ -230,6 +233,7 @@ Then, in order:
    and one line with the value of `Acceptance` and where it came from:
    `Acceptance: required (from --acceptance)`,
    `Acceptance: skipped (from --no-acceptance)`,
+   `Acceptance: required (kept from the earlier approval)`,
    `Acceptance: required (from invar.yaml)` or `Acceptance: skipped (default)`.
 5. **Write.** `Status` becomes `approved`; `Approved-by`, `Approved-at`,
    `Approved-checksum` and `Acceptance` get their values. If the header has no
@@ -670,16 +674,22 @@ hashed as one text, so moving the line out of the header to the top of the body
 would give the same digest with no value in the header. §4.3 refuses a body that
 starts that way; it is the one body the digest cannot tell apart.
 
-**D-20 — A current approval changes its `Acceptance` only when a flag asks for it**
-(1.7.0). D-12 leaves a current approval alone, with or without `--reapprove`, and
-that still holds for the file's text. It does not hold for a person who decides to
-add or drop the acceptance tests of a Plan that has not changed: they need a way to
-record that, and `--reapprove` is the way to replace an approval. So `--reapprove`
-with `--acceptance` or `--no-acceptance`, naming a value other than the recorded one,
-replaces the approval. `--reapprove` alone still does nothing to a current approval:
-the default or a changed `invar.yaml` must not undo a decision that was recorded,
-when nobody named a value and the text did not change. Without `--reapprove`, a flag
-never writes, because re-running the command is harmless (D-12).
+**D-20 — An approval changes its `Acceptance` only when a flag asks for it**
+(1.7.0). One rule, for an approval that still holds and for one that changed:
+replacing an approval keeps its value unless `--acceptance` or `--no-acceptance`
+names another. A developer who fixes a sentence and re-approves must not lose the
+ticket's acceptance tests without asking, and neither the default nor a changed
+`invar.yaml` may undo a decision that was recorded. So `--reapprove` alone keeps the
+value of a changed approval, and does nothing to a current one, which D-12 leaves
+alone. A person may still decide to add or drop the tests of a Plan that has not
+changed, so `--reapprove` with a flag naming another value replaces a current approval
+too. Without `--reapprove`, a flag never writes, because re-running the command is
+harmless (D-12).
+
+The value kept is the one in the header, and a changed approval is one whose header
+may have changed too: the digest does not say what the value was. That is why the
+value is printed with the criteria, and why a Plan that lost its value goes on to
+`invar.yaml` and the default, as one with nothing recorded does.
 
 ## 8. Open questions
 
@@ -1028,8 +1038,9 @@ Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece8
   `plan approve`. A `failed` entry clears its value and keeps its key.
 - §5.1: what the value means for a draft and for an approved Plan; no value on an
   approved Plan is `skipped`.
-- §5.3: where the value comes from, what is printed, what is written, the approval
-  digest, and the line `plan check` prints. New D-19 and D-20.
+- §5.3: where the value comes from (a flag, the approval being replaced,
+  `invar.yaml`, `skipped`), what is printed, what is written, the approval digest,
+  and the line `plan check` prints. New D-19 and D-20.
 - §4.3: the body's first line may not be an `Acceptance` line (D-19).
 - Example 9.2 shows the field and its digest; examples 9.10 to 9.12 are new.
 

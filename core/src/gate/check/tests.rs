@@ -9,7 +9,7 @@ use super::{CheckError, check};
 use crate::digest::{canonicalize, digest};
 use crate::format::plan::{Acceptance, Mode};
 use crate::fs::ProjectRoot;
-use crate::gate::approve::{Decision, choose_acceptance, prepare};
+use crate::gate::approve::{Decision, prepare};
 
 fn contract_example(number: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/plan-header.md");
@@ -32,9 +32,7 @@ fn project(text: &str) -> (TempDir, ProjectRoot, PathBuf) {
 
 /// Approve the Plan the way `plan approve` does.
 fn approve(root: &ProjectRoot, spec: &Path) {
-    let Decision::Approve(pending) =
-        prepare(root, spec, Mode::Light, false, choose_acceptance(None)).unwrap()
-    else {
+    let Decision::Approve(pending) = prepare(root, spec, Mode::Light, false, None).unwrap() else {
         panic!("expected an approval");
     };
     pending.commit("rade".into(), "2026-10-05".into()).unwrap();

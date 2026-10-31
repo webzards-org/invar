@@ -96,6 +96,14 @@ impl Project {
         self.approve_in(&self.root(), args)
     }
 
+    fn check(&self) -> assert_cmd::assert::Assert {
+        Command::cargo_bin("invar")
+            .unwrap()
+            .current_dir(self.root())
+            .args(["plan", "check", "PROJ-412"])
+            .assert()
+    }
+
     fn approve_in(&self, cwd: &Path, args: &[&str]) -> assert_cmd::assert::Assert {
         Command::cargo_bin("invar")
             .unwrap()
@@ -710,7 +718,7 @@ fn skill_passes_both_flags_through() {
 }
 
 #[test]
-fn reapprove_decides_the_value_again_and_does_not_inherit_it() {
+fn reapprove_keeps_a_recorded_required() {
     let project = Project::new(Some("rade"));
     project.approve(&["PROJ-412", "--acceptance"]).success();
     let edited = project
@@ -721,7 +729,34 @@ fn reapprove_decides_the_value_again_and_does_not_inherit_it() {
     project
         .approve(&["PROJ-412", "--reapprove"])
         .success()
-        .stdout(contains("Acceptance: skipped (default)"));
+        .stdout(contains(
+            "Acceptance: required (kept from the earlier approval)\n",
+        ));
+    let written = project.read_spec();
+    assert_eq!(header_value(&written, "Acceptance"), "required");
+    assert_eq!(
+        header_value(&written, "Approved-checksum"),
+        approval_digest(&edited, "required", project.dir.path())
+    );
+    project
+        .check()
+        .success()
+        .stdout(contains("\nacceptance: required\n"));
+}
+
+#[test]
+fn reapprove_with_a_flag_changes_the_value_of_a_changed_approval() {
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let edited = project
+        .read_spec()
+        .replace("then the order is refused", "then the order waits");
+    project.write_spec(&edited);
+
+    project
+        .approve(&["PROJ-412", "--reapprove", "--no-acceptance"])
+        .success()
+        .stdout(contains("Acceptance: skipped (from --no-acceptance)\n"));
     let written = project.read_spec();
     assert_eq!(header_value(&written, "Acceptance"), "skipped");
     assert_eq!(
@@ -735,8 +770,37 @@ fn reapprove_decides_the_value_again_and_does_not_inherit_it() {
     project
         .approve(&["PROJ-412", "--reapprove", "--acceptance"])
         .success()
-        .stdout(contains("Acceptance: required (from --acceptance)"));
+        .stdout(contains("Acceptance: required (from --acceptance)\n"));
     assert_eq!(header_value(&project.read_spec(), "Acceptance"), "required");
+}
+
+#[test]
+fn replacing_an_approval_from_before_the_field_takes_the_default() {
+    let project = Project::new(Some("rade"));
+    let edited =
+        approved_under_1_6_0().replace("then the order is refused", "then the order waits");
+    project.write_spec(&edited);
+    project
+        .approve(&["PROJ-412", "--reapprove"])
+        .success()
+        .stdout(contains("Acceptance: skipped (default)\n"));
+    assert_eq!(header_value(&project.read_spec(), "Acceptance"), "skipped");
+}
+
+#[test]
+fn the_value_kept_after_a_change_by_hand_is_the_one_shown() {
+    // The digest does not say what the value was (D-20), so the person
+    // re-approving has to see what is about to be recorded.
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let flipped = project
+        .read_spec()
+        .replace("Acceptance: required", "Acceptance: skipped");
+    project.write_spec(&flipped);
+    project
+        .approve(&["PROJ-412", "--reapprove"])
+        .success()
+        .stdout(contains("Acceptance: skipped (kept"));
 }
 
 #[test]
@@ -909,17 +973,25 @@ fn a_new_value_on_a_plan_with_no_ids_still_needs_the_ids() {
 }
 
 #[test]
-fn a_failed_reset_returns_a_plan_that_is_approved_again_in_place() {
-    // The key `plan approve` added stays empty after the reset (§5.3), and a new
-    // approval fills it rather than adding a second one.
+fn a_draft_reset_by_a_failed_entry_takes_the_default_and_fills_its_key_in_place() {
+    // A `failed` entry clears the value (§5), so there is nothing to keep, and
+    // the key `plan approve` added stays for the new approval to fill.
     let project = Project::new(Some("rade"));
     project.approve(&["PROJ-412", "--acceptance"]).success();
-    let reset = project
-        .read_spec()
-        .replace("Status: approved", "Status: draft")
-        .replace("Acceptance: required", "Acceptance:");
-    project.write_spec(&reset);
-    project.approve(&["PROJ-412"]).success();
+    Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(project.root())
+        .envs(project.git_env())
+        .args(["decision", "record", "--ticket", "PROJ-412"])
+        .args(["--type", "failed", "-m", "Reservations moved."])
+        .assert()
+        .success();
+    assert_eq!(header_value(&project.read_spec(), "Status"), "draft");
+
+    project
+        .approve(&["PROJ-412"])
+        .success()
+        .stdout(contains("Acceptance: skipped (default)\n"));
     let written = project.read_spec();
     assert_eq!(written.matches("Acceptance:").count(), 1, "{written}");
     assert_eq!(header_value(&written, "Acceptance"), "skipped");

@@ -27,10 +27,10 @@
   1.7.0) that records whether a ticket needs acceptance tests. `plan approve`
   writes it: `--acceptance` or `--no-acceptance` if given, otherwise `skipped`
   (`invar.yaml` joins that order with its `acceptance:` section). The value is
-  printed with the criteria, and `--reapprove` decides it again instead of
-  inheriting it. On a Plan already approved and unchanged, a flag changes nothing
-  unless `--reapprove` is given too. The planner does not write the field, and a
-  `failed` entry clears it. Nothing acts on the value yet.
+  printed with the criteria, and `--reapprove` keeps the recorded value unless a
+  flag names another. On a Plan already approved and unchanged, a flag changes
+  nothing unless `--reapprove` is given too. The planner does not write the field,
+  and a `failed` entry clears it. Nothing acts on the value yet.
 
 - **`plan check` prints one more line** on success: `acceptance: required` or
   `acceptance: skipped`. Every existing line stays as it was.

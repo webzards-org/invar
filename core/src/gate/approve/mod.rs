@@ -36,41 +36,56 @@ mod tests;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Chosen {
     pub value: Acceptance,
-    named_by_flag: bool,
+    source: Source,
 }
 
-impl Chosen {
-    /// The flag that names this value.
-    fn flag(self) -> &'static str {
-        match self.value {
-            Acceptance::Required => "--acceptance",
-            Acceptance::Skipped => "--no-acceptance",
-        }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Source {
+    Flag,
+    EarlierApproval,
+    Default,
+}
+
+/// The flag that names `value`.
+fn flag_for(value: Acceptance) -> &'static str {
+    match value {
+        Acceptance::Required => "--acceptance",
+        Acceptance::Skipped => "--no-acceptance",
     }
 }
 
 impl fmt::Display for Chosen {
-    /// `required (from --acceptance)`, `skipped (default)`: what the person
-    /// approving is told (plan-header.md §5.3).
+    /// `required (from --acceptance)`, `required (kept from the earlier
+    /// approval)`, `skipped (default)`: what the person approving is told
+    /// (plan-header.md §5.3).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = self.value.as_str();
-        if self.named_by_flag {
-            write!(f, "{value} (from {})", self.flag())
-        } else {
-            write!(f, "{value} (default)")
+        match self.source {
+            Source::Flag => write!(f, "{value} (from {})", flag_for(self.value)),
+            Source::EarlierApproval => write!(f, "{value} (kept from the earlier approval)"),
+            Source::Default => write!(f, "{value} (default)"),
         }
     }
 }
 
-/// Decide the value of `Acceptance` (plan-header.md §5.3): `flag` if one was
-/// given, else `acceptance.required` from `invar.yaml`, else `skipped`.
+/// Decide the value of `Acceptance` (plan-header.md §5.3, D-20): `flag` if one
+/// was given, else `recorded`, else `acceptance.required` from `invar.yaml`,
+/// else `skipped`.
 ///
-/// `--reapprove` takes the value this way too: it does not inherit the old one.
-pub fn choose_acceptance(flag: Option<Acceptance>) -> Chosen {
+/// `recorded` is the value of the approval being replaced. It is `None` for a
+/// draft, including one reset by a `failed` entry, and for an approval that
+/// holds no value, such as one from before 1.7.0.
+pub fn choose_acceptance(flag: Option<Acceptance>, recorded: Option<Acceptance>) -> Chosen {
     if let Some(value) = flag {
         return Chosen {
             value,
-            named_by_flag: true,
+            source: Source::Flag,
+        };
+    }
+    if let Some(value) = recorded {
+        return Chosen {
+            value,
+            source: Source::EarlierApproval,
         };
     }
     // AT-4: `acceptance.required` from `invar.yaml` plugs in here, ahead of the
@@ -79,7 +94,7 @@ pub fn choose_acceptance(flag: Option<Acceptance>) -> Chosen {
     // command to test with, and the refusal says what to add.
     Chosen {
         value: Acceptance::Skipped,
-        named_by_flag: false,
+        source: Source::Default,
     }
 }
 
@@ -118,14 +133,15 @@ pub struct Pending {
 ///
 /// `reapprove` allows replacing an approval that changed or whose values are
 /// missing (D-12). It is not needed for a draft. An approval that is still
-/// current is left alone with or without it, unless `acceptance` is a flag that
-/// names another value than the one on record (D-20).
+/// current is left alone with or without it, unless `flag` names another value
+/// of `Acceptance` than the one on record (D-20). `Acceptance` is decided here,
+/// once the approval being replaced is known, and so before anything is shown.
 pub fn prepare(
     root: &ProjectRoot,
     spec: &Path,
     mode: Mode,
     reapprove: bool,
-    acceptance: Chosen,
+    flag: Option<Acceptance>,
 ) -> Result<Decision, ApproveError> {
     let report = validate::file(root, spec, mode);
     if !report.is_valid() {
@@ -141,19 +157,18 @@ pub fn prepare(
         })
     })?;
     let current = approval::current_digest(&plan);
-    let checksum = approval::approval_digest(&plan, Some(acceptance.value));
     let recorded = plan.header().recorded_acceptance();
-    let flag_differs = acceptance.named_by_flag && acceptance.value != recorded;
+    let differing_flag = flag.filter(|value| *value != recorded);
 
     let replaces = match classify(plan.header(), &current) {
         Prior::Draft => None,
-        Prior::Current { by, at } if !(reapprove && flag_differs) => {
+        Prior::Current { by, at } if !reapprove || differing_flag.is_none() => {
             return Ok(Decision::AlreadyApproved {
                 spec: spec.to_owned(),
                 by,
                 at,
                 recorded,
-                ignored_flag: flag_differs.then(|| acceptance.flag()),
+                ignored_flag: differing_flag.map(flag_for),
             });
         }
         prior => {
@@ -175,6 +190,15 @@ pub fn prepare(
             Some(prior)
         }
     };
+
+    // A draft's value means nothing (§5.1), and an approval no command recorded
+    // has nothing to keep (example 9.3).
+    let kept = match replaces {
+        Some(Prior::Changed { .. }) => plan.header().acceptance,
+        _ => None,
+    };
+    let acceptance = choose_acceptance(flag, kept);
+    let checksum = approval::approval_digest(&plan, Some(acceptance.value));
 
     Ok(Decision::Approve(Box::new(Pending {
         spec: spec.to_owned(),

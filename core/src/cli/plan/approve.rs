@@ -5,12 +5,14 @@
 //! names them and approves none. `--no-start` and `--skill` are for
 //! `/invar:approve`, whose shell block is this one command.
 //!
-//! Order matters: decide `Acceptance`, validate, read who is approving and
-//! today's date from git, check that those values can be written, print the
-//! acceptance criteria and the decision, and only then write. Everything that can be known to fail fails before the
-//! criteria are shown, so a person does not read the criteria of an approval
-//! that was never going to be recorded. What is left is the file changing in
-//! the meantime, which the commit refuses, and a disk that fails.
+//! Order matters: validate, compare with any earlier approval and decide
+//! `Acceptance` from that, read who is approving and today's date from git,
+//! check that those values can be written, print the acceptance criteria and
+//! the decision, and only then write. Everything that can be known to fail
+//! fails before the criteria are shown, so a person does not read the
+//! criteria of an approval that was never going to be recorded. What is left
+//! is the file changing in the meantime, which the commit refuses, and a disk
+//! that fails.
 
 use anyhow::{Context as _, Result};
 
@@ -36,13 +38,18 @@ pub struct Args {
 
     /// This ticket needs acceptance tests: records `Acceptance: required`.
     ///
-    /// Without either flag, the value comes from `invar.yaml`, and is `skipped`
-    /// when nothing there sets it. On a Plan already approved it changes nothing
-    /// unless `--reapprove` is given as well.
+    /// Without either flag, an approval being replaced keeps its value;
+    /// otherwise the value comes from `invar.yaml`, and is `skipped` when nothing
+    /// there sets it. On a Plan already approved it changes nothing unless
+    /// `--reapprove` is given as well.
     #[arg(long, conflicts_with = "no_acceptance")]
     pub acceptance: bool,
 
     /// This ticket needs no acceptance tests: records `Acceptance: skipped`.
+    ///
+    /// It is how a recorded `required` is dropped: `--reapprove` alone keeps it.
+    /// On a Plan already approved it changes nothing unless `--reapprove` is
+    /// given as well.
     #[arg(long)]
     pub no_acceptance: bool,
 
@@ -53,7 +60,8 @@ pub struct Args {
     ///
     /// Without it such a Plan is refused: a silent re-approval would look
     /// exactly like the edit the checksum exists to catch (plan-header.md
-    /// D-12). The value of `Acceptance` is decided anew, and not inherited.
+    /// D-12). The recorded value of `Acceptance` is kept unless `--acceptance`
+    /// or `--no-acceptance` names another (D-20).
     #[arg(long)]
     pub reapprove: bool,
 
@@ -103,9 +111,8 @@ fn approve(args: Args) -> Result<()> {
         (_, true) => Some(Acceptance::Skipped),
         _ => None,
     };
-    let acceptance = approve::choose_acceptance(flag);
 
-    let pending = match approve::prepare(&root, &spec, mode, args.reapprove, acceptance) {
+    let pending = match approve::prepare(&root, &spec, mode, args.reapprove, flag) {
         Ok(Decision::Approve(pending)) => pending,
         Ok(Decision::AlreadyApproved {
             spec,
