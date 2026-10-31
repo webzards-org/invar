@@ -1,0 +1,8 @@
+# Lock fixtures: git must not touch a single byte (see ../digest/.gitattributes).
+* -text -diff
+
+# Keep the tooling and metadata in this directory normal, and readable in a diff.
+locks.json text eol=lf diff
+README.md text eol=lf diff
+tools/generate.py text eol=lf diff
+.gitattributes text eol=lf diff

@@ -37,6 +37,11 @@ jobs:
         run: python3 tools/generate.py --check
         working-directory: contracts/fixtures/digest
 
+      # The same check for the lock fixtures, and the table of expected results.
+      - name: Lock fixtures
+        run: python3 tools/generate.py --check
+        working-directory: contracts/fixtures/acceptance
+
   core:
     name: core (Linux)
     runs-on: ubuntu-latest
