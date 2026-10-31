@@ -9,8 +9,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{
-    Config, ConfigError, Context, DEFAULT_BINDING_LIMIT, DEFAULT_DONE_COMMIT_MESSAGE, Done,
-    FILE_NAME, Git, Loaded, Review, Warning, load, load_for_command, parse, parse_bytes,
+    AcceptanceConfig, AcceptanceStyle, Config, ConfigError, Context, DEFAULT_BINDING_LIMIT,
+    DEFAULT_DONE_COMMIT_MESSAGE, Done, FILE_NAME, Git, Loaded, Review, Warning, load,
+    load_for_command, parse, parse_bytes,
 };
 use crate::fs::ProjectRoot;
 
@@ -76,6 +77,7 @@ fn contract_10_1_light_mode_project() {
                 commit: true,
                 commit_message: "chore: remove the Plan of {ticket}".to_owned(),
             },
+            acceptance: None,
         }
     );
     assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
@@ -118,6 +120,62 @@ fn contract_10_6_binding_limit_above_hook_cap_is_invalid() {
     assert!(message.contains("found 12000"), "{message}");
 }
 
+#[test]
+fn contract_10_7_a_full_acceptance_section() {
+    let loaded = read(&contract_example("valid-acceptance-full"));
+    assert_eq!(
+        loaded.config.acceptance,
+        Some(AcceptanceConfig {
+            required: true,
+            style: AcceptanceStyle::Integration,
+            dir: "tests/Acceptance".to_owned(),
+            run: strings(&["vendor/bin/pest", "--log-junit", "{report}", "{files}"]),
+            fakes_allowed: strings(&["http", "mail", "queue", "notification"]),
+        })
+    );
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+}
+
+#[test]
+fn contract_10_8_a_minimal_acceptance_section_takes_the_defaults() {
+    let loaded = read(&contract_example("valid-acceptance-minimal"));
+    let section = loaded.config.acceptance.unwrap();
+    // A team that configures acceptance tests gets them by default (D-10).
+    assert!(section.required);
+    assert_eq!(section.style, AcceptanceStyle::Integration);
+    assert!(section.fakes_allowed.is_empty());
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+}
+
+#[test]
+fn contract_10_9_acceptance_without_run_is_invalid() {
+    let message = reject(&contract_example("invalid-acceptance-no-run"));
+    assert!(
+        message.contains("`acceptance.run` is required"),
+        "{message}"
+    );
+}
+
+#[test]
+fn contract_10_10_acceptance_without_report_is_invalid() {
+    let message = reject(&contract_example("invalid-acceptance-no-report"));
+    assert!(message.contains("`{report}` exactly once"), "{message}");
+}
+
+#[test]
+fn contract_10_11_gherkin_is_reserved() {
+    let message = reject(&contract_example("invalid-acceptance-gherkin"));
+    assert!(message.contains("gherkin"), "{message}");
+    assert!(message.contains("later version"), "{message}");
+}
+
+#[test]
+fn contract_10_12_a_dotdot_in_dir_is_invalid() {
+    let message = reject(&contract_example("invalid-acceptance-dir"));
+    assert!(message.contains("`acceptance.dir`"), "{message}");
+    assert!(message.contains("`..`"), "{message}");
+}
+
 // --- defaults ---------------------------------------------------------------
 
 #[test]
@@ -136,6 +194,8 @@ fn defaults_are_the_documented_values() {
     assert!(!config.done.commit);
     assert_eq!(config.done.commit_message, "Remove plan {ticket}");
     assert_eq!(DEFAULT_DONE_COMMIT_MESSAGE, "Remove plan {ticket}");
+    // No section, no acceptance tests (§3.6).
+    assert_eq!(config.acceptance, None);
 }
 
 #[test]
@@ -251,6 +311,286 @@ fn an_unknown_key_under_done_warns() {
     let loaded = read("done:\n  comit: true\n");
     assert!(!loaded.config.done.commit);
     assert_eq!(warned_keys(&loaded), ["done.comit"]);
+}
+
+// --- acceptance ---------------------------------------------------------------
+
+fn strings(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| (*value).to_owned()).collect()
+}
+
+/// A section with `run` as given, and everything else valid.
+fn with_run(run: &str) -> String {
+    format!("acceptance:\n  dir: tests/Acceptance\n  run: {run}\n")
+}
+
+/// A section with `dir` as given, and everything else valid.
+fn with_dir(dir: &str) -> String {
+    format!("acceptance:\n  dir: {dir}\n  run: [pest, \"{{report}}\", \"{{files}}\"]\n")
+}
+
+#[test]
+fn an_empty_acceptance_section_means_absent() {
+    for text in [
+        "acceptance:\n",
+        "acceptance: ~\n",
+        "acceptance: {}\n",
+        "acceptance:\n  # nothing yet\n",
+        "acceptance:\n  dir:\n  run: ~\n",
+    ] {
+        let loaded = read(text);
+        assert_eq!(loaded.config, Config::default(), "{text:?}");
+        assert!(loaded.warnings.is_empty(), "{text:?}");
+    }
+}
+
+#[test]
+fn an_acceptance_section_must_be_a_mapping() {
+    for text in [
+        "acceptance: tests\n",
+        "acceptance: [a, b]\n",
+        "acceptance: true\n",
+    ] {
+        let message = reject(text);
+        assert!(message.contains("line 1"), "{text:?}: {message}");
+    }
+}
+
+#[test]
+fn acceptance_required_is_read_and_is_a_strict_boolean() {
+    let section = |required: &str| {
+        format!(
+            "acceptance:\n  required: {required}\n  dir: t\n  \
+             run: [pest, \"{{report}}\", \"{{files}}\"]\n"
+        )
+    };
+    let acceptance = |text: &str| read(text).config.acceptance.unwrap();
+    assert!(acceptance(&section("true")).required);
+    assert!(!acceptance(&section("false")).required);
+    // An empty value means absent, and absent is `true` here.
+    assert!(acceptance(&section("~")).required);
+    for rejected in ["yes", "no", "on", "off", "1"] {
+        let message = reject(&section(rejected));
+        assert!(message.contains("invalid boolean"), "{rejected}: {message}");
+    }
+}
+
+#[test]
+fn acceptance_style_lists_what_is_allowed() {
+    let message = reject(
+        "acceptance:\n  style: cucumber\n  dir: t\n  \
+         run: [pest, \"{report}\", \"{files}\"]\n",
+    );
+    assert!(message.contains("\"cucumber\""), "{message}");
+    assert!(message.contains("`integration`"), "{message}");
+    assert!(message.contains("`gherkin` is reserved"), "{message}");
+}
+
+#[test]
+fn acceptance_dir_is_required_and_relative() {
+    let message = reject("acceptance:\n  run: [pest, \"{report}\", \"{files}\"]\n");
+    assert!(
+        message.contains("`acceptance.dir` is required"),
+        "{message}"
+    );
+
+    for (dir, reason) in [
+        ("\"\"", "empty"),
+        ("/srv/tests", "absolute"),
+        ("\"C:\\\\tests\"", "absolute"),
+        ("\"\\\\tests\"", "absolute"),
+        ("tests/", "trailing"),
+        ("\"tests\\\\\"", "trailing"),
+        ("..", "`..`"),
+        ("../tests", "`..`"),
+        ("tests/../../other", "`..`"),
+        ("\"tests\\\\..\\\\other\"", "`..`"),
+    ] {
+        let message = reject(&with_dir(dir));
+        assert!(message.contains("`acceptance.dir`"), "{dir}: {message}");
+        assert!(message.contains(reason), "{dir}: {message}");
+    }
+
+    // `..` is a segment, not a substring, and whether the directory exists is
+    // not this reader's question.
+    for dir in ["tests/Acceptance", "a..b/c", "..tests", "does/not/exist"] {
+        assert_eq!(read(&with_dir(dir)).config.acceptance.unwrap().dir, dir);
+    }
+}
+
+#[test]
+fn acceptance_run_is_a_list_of_strings() {
+    for run in [
+        "{a: b}",
+        "7",
+        "true",
+        "[pest, 7, \"{report}\", \"{files}\"]",
+    ] {
+        let message = reject(&with_run(run));
+        assert!(message.contains("line 3"), "{run}: {message}");
+    }
+    let message = reject(&with_run("[]"));
+    assert!(message.contains("at least one element"), "{message}");
+    let message = reject("acceptance:\n  dir: t\n");
+    assert!(
+        message.contains("`acceptance.run` is required"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_string_run_is_refused_by_name_and_never_split() {
+    // The core defines no splitting (D-11), even of a string that would work.
+    for run in [
+        "\"vendor/bin/pest --log-junit {report} {files}\"",
+        "'pest {report} {files}'",
+        "pest",
+        "|\n    pest {report} {files}",
+    ] {
+        let message = reject(&with_run(run));
+        assert!(
+            message.contains(
+                "`acceptance.run` is a list, not a string: write the program and each \
+                 argument as its own element, such as \
+                 [\"vendor/bin/pest\", \"--log-junit\", \"{report}\", \"{files}\"] \
+                 (invar-yaml.md §3.6)"
+            ),
+            "{run}: {message}"
+        );
+    }
+
+    // It takes its place in the combined message of the section.
+    let message = reject("acceptance:\n  style: gherkin\n  dir: ../t\n  run: pest\n");
+    for expected in ["gherkin", "`acceptance.dir`", "is a list, not a string"] {
+        assert!(message.contains(expected), "{expected}: {message}");
+    }
+}
+
+#[test]
+fn acceptance_run_starts_with_a_program() {
+    for run in [
+        "[\"{report}\", \"{files}\"]",
+        "[\"{files}\", \"{report}\"]",
+        "[\"\", \"{report}\", \"{files}\"]",
+    ] {
+        let message = reject(&with_run(run));
+        assert!(
+            message.contains("starts with the program"),
+            "{run}: {message}"
+        );
+    }
+}
+
+#[test]
+fn each_acceptance_placeholder_is_one_whole_element() {
+    for (run, placeholder, found) in [
+        ("[pest, \"{files}\"]", "{report}", "found it 0 times"),
+        ("[pest, \"{report}\"]", "{files}", "found it 0 times"),
+        (
+            "[pest, \"{report}\", \"{report}\", \"{files}\"]",
+            "{report}",
+            "found it 2 times",
+        ),
+        (
+            "[pest, \"{report}\", \"{files}\", \"{files}\"]",
+            "{files}",
+            "found it 2 times",
+        ),
+        (
+            "[pest, \"--log-junit={report}\", \"{files}\"]",
+            "{report}",
+            "part of a longer element",
+        ),
+        (
+            "[\"pest --log-junit {report} {files}\"]",
+            "{files}",
+            "part of a longer element",
+        ),
+        (
+            "[pest, \"{report}\", \"{report}.xml\", \"{files}\"]",
+            "{report}",
+            "part of a longer element",
+        ),
+    ] {
+        let message = reject(&with_run(run));
+        assert!(
+            message.contains(&format!("`{placeholder}` exactly once")),
+            "{run}: {message}"
+        );
+        assert!(message.contains(found), "{run}: {message}");
+    }
+}
+
+#[test]
+fn an_unknown_placeholder_in_run_is_caught_and_a_literal_brace_is_fine() {
+    for (run, placeholder) in [
+        (
+            "[pest, \"{reports}\", \"{report}\", \"{files}\"]",
+            "{reports}",
+        ),
+        (
+            "[pest, \"{report}\", \"{files}\", \"--x={Files}\"]",
+            "{Files}",
+        ),
+        ("[pest, \"{report}\", \"{files}\", \"${HOME}\"]", "{HOME}"),
+    ] {
+        let message = reject(&with_run(run));
+        assert!(
+            message.contains(&format!("unknown placeholder `{placeholder}`")),
+            "{run}: {message}"
+        );
+    }
+
+    let run =
+        "[pest, \"{report}\", \"{files}\", \"{}\", \"{a,b}\", \"{\", \"}\", \"{\\\"k\\\": 1}\"]";
+    let section = read(&with_run(run)).config.acceptance.unwrap();
+    assert_eq!(section.run.len(), 8);
+    assert_eq!(section.run[3], "{}");
+    assert_eq!(section.run[7], "{\"k\": 1}");
+}
+
+#[test]
+fn acceptance_fakes_allowed_is_free_form_and_non_empty() {
+    let text = "acceptance:\n  dir: t\n  run: [pest, \"{report}\", \"{files}\"]\n  \
+                fakes_allowed: [http, made-up]\n";
+    assert_eq!(
+        read(text).config.acceptance.unwrap().fakes_allowed,
+        strings(&["http", "made-up"])
+    );
+    let empty = text.replace("made-up", "\"  \"");
+    let message = reject(&empty);
+    assert!(message.contains("`acceptance.fakes_allowed`"), "{message}");
+    let not_a_list = text.replace("[http, made-up]", "http");
+    assert!(reject(&not_a_list).contains("line 4"));
+}
+
+#[test]
+fn an_unknown_key_under_acceptance_warns() {
+    let loaded = read(&format!(
+        "{}  timeout: 30\n",
+        with_run("[pest, \"{report}\", \"{files}\"]")
+    ));
+    assert!(loaded.config.acceptance.is_some());
+    assert_eq!(warned_keys(&loaded), ["acceptance.timeout"]);
+}
+
+#[test]
+fn every_problem_in_the_acceptance_section_is_reported_in_one_message() {
+    let message = reject(
+        "git:\n  base_branch: \"\"\nacceptance:\n  style: gherkin\n  dir: ../t\n  \
+         run: [pest, \"{reports}\"]\n  fakes_allowed: [\"\"]\n",
+    );
+    for expected in [
+        "`git.base_branch`",
+        "gherkin",
+        "`acceptance.dir`",
+        "unknown placeholder `{reports}`",
+        "`{report}` exactly once",
+        "`{files}` exactly once",
+        "`acceptance.fakes_allowed`",
+    ] {
+        assert!(message.contains(expected), "{expected}: {message}");
+    }
 }
 
 // --- unknown and ignored keys ----------------------------------------------

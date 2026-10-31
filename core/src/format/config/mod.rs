@@ -1,11 +1,11 @@
 //! `invar.yaml` — the project config (§6).
 //!
-//! Implements `contracts/formats/invar-yaml.md` v2.1.0. The contract is the
+//! Implements `contracts/formats/invar-yaml.md` v2.2.0. The contract is the
 //! authority; section numbers below (`§3.4`, `D-2`) point into it.
 //!
-//! Light mode reads six keys: `scenarios`, `review.offer`,
-//! `git.base_branch`, `context.binding_limit`, `done.commit` and
-//! `done.commit_message`. Everything else in a config
+//! Light mode reads `scenarios`, `review.offer`, `git.base_branch`,
+//! `context.binding_limit`, `done.commit`, `done.commit_message` and the
+//! `acceptance` section. Everything else in a config
 //! is either a key of a later milestone, ignored silently (contract §5), or an
 //! unknown key, which produces a [`Warning`] and never a failure (§6) — a
 //! config written by a newer `invar` must not break an older one.
@@ -24,7 +24,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use serde::de::IgnoredAny;
+use serde::de::{self, IgnoredAny};
 
 use crate::fs::ProjectRoot;
 
@@ -48,6 +48,12 @@ pub const DEFAULT_DONE_COMMIT_MESSAGE: &str = "Remove plan {ticket}";
 
 /// The placeholder `done.commit_message` may contain (§3.5).
 pub const TICKET_PLACEHOLDER: &str = "{ticket}";
+
+/// The placeholder in `acceptance.run` for the report's path (§3.6).
+pub const REPORT_PLACEHOLDER: &str = "{report}";
+
+/// The placeholder in `acceptance.run` for the test files (§3.6).
+pub const FILES_PLACEHOLDER: &str = "{files}";
 
 /// Top-level keys of §6 that belong to later milestones (§5). Ignored
 /// silently, together with everything under them.
@@ -74,6 +80,8 @@ pub struct Config {
     pub git: Git,
     pub context: Context,
     pub done: Done,
+    /// The `acceptance` section (§3.6). `None`: absent, so no acceptance tests.
+    pub acceptance: Option<AcceptanceConfig>,
 }
 
 /// The `review` section (§3.2).
@@ -141,6 +149,30 @@ impl Default for Done {
     }
 }
 
+/// The `acceptance` section (§3.6): how this project runs its acceptance tests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcceptanceConfig {
+    /// `acceptance.required` — the default for `plan approve`. `true` unless the
+    /// project says otherwise (D-10).
+    pub required: bool,
+    pub style: AcceptanceStyle,
+    /// `acceptance.dir` — relative to the project root. Whether it exists is not
+    /// checked here.
+    pub dir: String,
+    /// `acceptance.run` — element 0 is the program, the rest its arguments, with
+    /// no shell (D-11). Holds each placeholder exactly once.
+    pub run: Vec<String>,
+    /// `acceptance.fakes_allowed` — not interpreted by the core.
+    pub fakes_allowed: Vec<String>,
+}
+
+/// `acceptance.style` (§3.6). `gherkin` is reserved, and an error for now.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AcceptanceStyle {
+    #[default]
+    Integration,
+}
+
 impl Default for Config {
     /// What an empty `invar.yaml` means (§2, example 10.2).
     fn default() -> Self {
@@ -150,6 +182,7 @@ impl Default for Config {
             git: Git::default(),
             context: Context::default(),
             done: Done::default(),
+            acceptance: None,
         }
     }
 }
@@ -371,6 +404,14 @@ pub fn parse(text: &str, path: &Path) -> Result<Loaded, ConfigError> {
         }
     };
 
+    let acceptance = raw
+        .acceptance
+        .filter(|section| !section.is_empty())
+        .and_then(|section| {
+            unknown_keys(&section.other, "acceptance.", &[], &mut warnings);
+            acceptance_section(section, &mut problems)
+        });
+
     // Every value problem in one message, so one edit fixes the file (§7).
     if !problems.is_empty() {
         return Err(invalid(problems.join("; ")));
@@ -391,9 +432,164 @@ pub fn parse(text: &str, path: &Path) -> Result<Loaded, ConfigError> {
                 commit: done.commit.unwrap_or(false),
                 commit_message,
             },
+            acceptance,
         },
         warnings,
     })
+}
+
+/// The `acceptance` section with its defaults applied, or `None` with every
+/// problem in it added to `problems` (§3.6).
+fn acceptance_section(
+    section: RawAcceptance,
+    problems: &mut Vec<String>,
+) -> Option<AcceptanceConfig> {
+    let before = problems.len();
+
+    match section.style.as_deref() {
+        None | Some("integration") => {}
+        Some("gherkin") => problems.push(
+            "`acceptance.style: gherkin` is reserved, and arrives in a later version of \
+             invar; use `integration`, or remove the key"
+                .to_owned(),
+        ),
+        Some(other) => problems.push(format!(
+            "`acceptance.style` must be `integration` (`gherkin` is reserved), found {other:?}"
+        )),
+    }
+
+    match &section.dir {
+        None => problems.push(
+            "`acceptance.dir` is required: the directory of the acceptance tests, relative \
+             to the project root"
+                .to_owned(),
+        ),
+        Some(dir) => {
+            if let Some(reason) = dir_problem(dir) {
+                problems.push(format!(
+                    "`acceptance.dir` must be a path relative to the project root, found \
+                     {dir:?}: {reason}"
+                ));
+            }
+        }
+    }
+
+    match &section.run {
+        None => problems.push(
+            "`acceptance.run` is required: a list with the program first, such as \
+             [\"vendor/bin/pest\", \"--log-junit\", \"{report}\", \"{files}\"]"
+                .to_owned(),
+        ),
+        Some(RawRun::Text) => problems.push(
+            "`acceptance.run` is a list, not a string: write the program and each argument \
+             as its own element, such as \
+             [\"vendor/bin/pest\", \"--log-junit\", \"{report}\", \"{files}\"] \
+             (invar-yaml.md §3.6)"
+                .to_owned(),
+        ),
+        Some(RawRun::List(run)) => run_problems(run, problems),
+    }
+
+    let fakes_allowed = section.fakes_allowed.unwrap_or_default();
+    if fakes_allowed.iter().any(|fake| fake.trim().is_empty()) {
+        problems.push("`acceptance.fakes_allowed` must hold non-empty strings".to_owned());
+    }
+
+    if problems.len() > before {
+        return None;
+    }
+    Some(AcceptanceConfig {
+        required: section.required.unwrap_or(true),
+        style: AcceptanceStyle::Integration,
+        dir: section.dir?,
+        run: match section.run? {
+            RawRun::List(run) => run,
+            RawRun::Text => return None,
+        },
+        fakes_allowed,
+    })
+}
+
+/// What is wrong with `dir`, if anything. A backslash counts as a separator, so the
+/// rule does not depend on the platform the config is read on.
+fn dir_problem(dir: &str) -> Option<&'static str> {
+    let drive = matches!(dir.as_bytes(), [letter, b':', ..] if letter.is_ascii_alphabetic());
+    if dir.trim().is_empty() {
+        Some("it is empty")
+    } else if dir.starts_with(['/', '\\']) || drive {
+        Some("it is absolute")
+    } else if dir.ends_with(['/', '\\']) {
+        Some("remove the trailing separator")
+    } else if dir.split(['/', '\\']).any(|segment| segment == "..") {
+        Some("it has a `..` segment")
+    } else {
+        None
+    }
+}
+
+/// Add what is wrong with `acceptance.run` to `problems` (§3.6, D-11).
+fn run_problems(run: &[String], problems: &mut Vec<String>) {
+    let Some(program) = run.first() else {
+        problems.push("`acceptance.run` must have at least one element: the program".to_owned());
+        return;
+    };
+    if program.trim().is_empty() || program == REPORT_PLACEHOLDER || program == FILES_PLACEHOLDER {
+        problems.push(format!(
+            "`acceptance.run` starts with the program to run, found {program:?}"
+        ));
+    }
+
+    let mut unknown = Vec::new();
+    for placeholder in run.iter().flat_map(|element| placeholders(element)) {
+        if placeholder != REPORT_PLACEHOLDER
+            && placeholder != FILES_PLACEHOLDER
+            && !unknown.contains(&placeholder)
+        {
+            unknown.push(placeholder);
+        }
+    }
+    for placeholder in unknown {
+        problems.push(format!(
+            "`acceptance.run` has the unknown placeholder `{placeholder}`; the placeholders \
+             are `{REPORT_PLACEHOLDER}` and `{FILES_PLACEHOLDER}`"
+        ));
+    }
+
+    for placeholder in [REPORT_PLACEHOLDER, FILES_PLACEHOLDER] {
+        let whole = run.iter().filter(|element| *element == placeholder).count();
+        let inside = run
+            .iter()
+            .any(|element| element != placeholder && element.contains(placeholder));
+        if whole != 1 || inside {
+            let found = if inside {
+                "it is part of a longer element".to_owned()
+            } else {
+                format!("found it {whole} times")
+            };
+            problems.push(format!(
+                "`acceptance.run` must have `{placeholder}` exactly once, as an element of \
+                 its own; {found}"
+            ));
+        }
+    }
+}
+
+/// Every placeholder in `element`: `{`, then letters, digits, `_` or `-`, then
+/// `}`. Any other brace is a literal one (§3.6).
+fn placeholders(element: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    for (start, _) in element.match_indices('{') {
+        let rest = &element[start + 1..];
+        if let Some(end) = rest.find('}')
+            && end > 0
+            && rest[..end]
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        {
+            found.push(&element[start..=start + 1 + end]);
+        }
+    }
+    found
 }
 
 /// Record a warning for every key in `other` that is not a known key of a
@@ -441,8 +637,70 @@ struct RawConfig {
     git: Option<RawGit>,
     context: Option<RawContext>,
     done: Option<RawDone>,
+    acceptance: Option<RawAcceptance>,
     #[serde(flatten)]
     other: BTreeMap<String, IgnoredAny>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawAcceptance {
+    required: Option<bool>,
+    style: Option<String>,
+    dir: Option<String>,
+    run: Option<RawRun>,
+    fakes_allowed: Option<Vec<String>>,
+    #[serde(flatten)]
+    other: BTreeMap<String, IgnoredAny>,
+}
+
+/// `acceptance.run` as written. A string is only recognised, so that it can be
+/// refused by name; it is never split (D-11).
+#[derive(Debug)]
+enum RawRun {
+    Text,
+    List(Vec<String>),
+}
+
+impl<'de> Deserialize<'de> for RawRun {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Run;
+
+        impl<'de> de::Visitor<'de> for Run {
+            type Value = RawRun;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a list of strings")
+            }
+
+            fn visit_str<E: de::Error>(self, _: &str) -> Result<RawRun, E> {
+                Ok(RawRun::Text)
+            }
+
+            // Element by element, so that each one keeps the parser's own error
+            // and position.
+            fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<RawRun, A::Error> {
+                let mut run = Vec::new();
+                while let Some(element) = seq.next_element()? {
+                    run.push(element);
+                }
+                Ok(RawRun::List(run))
+            }
+        }
+
+        deserializer.deserialize_any(Run)
+    }
+}
+
+impl RawAcceptance {
+    /// Nothing set: the same as an absent section (§3, D-3).
+    fn is_empty(&self) -> bool {
+        self.required.is_none()
+            && self.style.is_none()
+            && self.dir.is_none()
+            && self.run.is_none()
+            && self.fakes_allowed.is_none()
+            && self.other.is_empty()
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
