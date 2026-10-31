@@ -338,9 +338,10 @@ New contract `contracts/formats/acceptance-lock.md`, and its parser and digest i
 the core (`format/` and `digest/` kept separate, as today).
 
 - **The line:** `invar-lock: <TICKET>` (pending) or
-  `invar-lock: <TICKET> sha256:<64 hex>` (locked). Searched in the first 10 lines;
+  `invar-lock: <TICKET> sha256:<64 hex>` (locked), within the first 10 lines;
   anything before `invar-lock:` on that line is ignored, so any comment syntax
-  works (`//`, `#`, `--`). More than one such line is an error.
+  works (`//`, `#`, `--`). More than one such line anywhere is an error, and so is
+  one after line 10 or a malformed `sha256:` field.
 - **The digest:** the §4d canonicalization over the whole file **with that line
   removed**, recorded as `sha256:<hex>`.
 - **One ticket per file.** The ticket on the line is the ticket that last locked it;

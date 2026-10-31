@@ -1,0 +1,475 @@
+{
+  "schema": "invar.lock-fixtures/v1",
+  "version": "1.0.0",
+  "algorithm": "sha256",
+  "digest_format": "sha256:<64 lowercase hex>",
+  "contract": "contracts/formats/acceptance-lock.md. Every file must give the result listed for it, and each list in same_digest must give one digest. Expected values are regenerated deliberately, never as part of a code change.",
+  "same_digest": [
+    [
+      "locked/php-lf.php",
+      "locked/php-crlf.php",
+      "locked/php-cr.php",
+      "locked/php-bom-crlf-ws.php",
+      "locked/mismatch.php",
+      "pending/php.php",
+      "pending/crlf.php"
+    ],
+    [
+      "pending/python.py",
+      "pending/trailing-text.py",
+      "pending/many-spaces.py",
+      "locked/python.py"
+    ],
+    [
+      "pending/js-block.js",
+      "locked/js-block.js"
+    ]
+  ],
+  "fixtures": [
+    {
+      "path": "none/no-marker.php",
+      "bytes": 176,
+      "note": "no line contains the marker",
+      "result": "none"
+    },
+    {
+      "path": "none/case.py",
+      "bytes": 56,
+      "note": "the marker is lowercase",
+      "result": "none"
+    },
+    {
+      "path": "none/no-colon.py",
+      "bytes": 55,
+      "note": "the colon is part of the marker",
+      "result": "none"
+    },
+    {
+      "path": "none/empty.txt",
+      "bytes": 0,
+      "note": "an empty file has no lock line",
+      "result": "none"
+    },
+    {
+      "path": "pending/php.php",
+      "bytes": 184,
+      "note": "`//` prefix",
+      "result": "pending",
+      "ticket": "SHOP-214",
+      "line": 3,
+      "digest": "sha256:c46241329c807763003daefb8b337398191d623003148c2fa101b51995dd1c7e"
+    },
+    {
+      "path": "pending/python.py",
+      "bytes": 56,
+      "note": "`#` prefix, line 1",
+      "result": "pending",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "digest": "sha256:5d5da6ccd3116bee608b2a6c15d4c9f0d20f32b17b220cc13a643169ab874e07"
+    },
+    {
+      "path": "pending/sql.sql",
+      "bytes": 34,
+      "note": "`--` prefix",
+      "result": "pending",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "digest": "sha256:b4e0497804e46e0a0b0b8c31975b062152d551bac49c3c2e80932567b4085dcd"
+    },
+    {
+      "path": "pending/js-block.js",
+      "bytes": 72,
+      "note": "a block comment closed on the line",
+      "result": "pending",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "digest": "sha256:588dc5260f1fb563c69e23dace1889b60196981fc57e153007a79377ecd55193"
+    },
+    {
+      "path": "pending/html.html",
+      "bytes": 39,
+      "note": "an HTML comment closed on the line",
+      "result": "pending",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "digest": "sha256:4e29150f4b637511bc7b0cb3bf626d63ce65a89e045f33ff39bd9ce68737741e"
+    },
+    {
+      "path": "pending/docblock.php",
+      "bytes": 51,
+      "note": "` * ` inside a docblock",
+      "result": "pending",
+      "ticket": "SHOP-214",
+      "line": 3,
+      "digest": "sha256:66ccedefb04277576f216c58f7eda9ee3c053302e36ac90d3add4bcd44f1ef8e"
+    },
+    {
+      "path": "pending/no-prefix.txt",
+      "bytes": 26,
+      "note": "nothing before the marker",
+      "result": "pending",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "digest": "sha256:b9e68e1bea3e5b19ca6b2f98b73a54b73daafaa250484902e09982e07a12e733"
+    },
+    {
+      "path": "pending/trailing-text.py",
+      "bytes": 83,
+      "note": "trailing text is ignored",
+      "result": "pending",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "digest": "sha256:5d5da6ccd3116bee608b2a6c15d4c9f0d20f32b17b220cc13a643169ab874e07"
+    },
+    {
+      "path": "pending/many-spaces.py",
+      "bytes": 59,
+      "note": "more than one space",
+      "result": "pending",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "digest": "sha256:5d5da6ccd3116bee608b2a6c15d4c9f0d20f32b17b220cc13a643169ab874e07"
+    },
+    {
+      "path": "pending/crlf.php",
+      "bytes": 194,
+      "note": "CRLF terminators",
+      "result": "pending",
+      "ticket": "SHOP-214",
+      "line": 3,
+      "digest": "sha256:c46241329c807763003daefb8b337398191d623003148c2fa101b51995dd1c7e"
+    },
+    {
+      "path": "pending/line-10.py",
+      "bytes": 114,
+      "note": "the last line of the window",
+      "result": "pending",
+      "ticket": "SHOP-214",
+      "line": 10,
+      "digest": "sha256:49b6c56a50e2af4e6735b49fb5805cd7713cc718afe3fb2942c2d15ddb055507"
+    },
+    {
+      "path": "locked/php-lf.php",
+      "bytes": 256,
+      "note": "`//` prefix, LF",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 3,
+      "matches": true,
+      "digest": "sha256:c46241329c807763003daefb8b337398191d623003148c2fa101b51995dd1c7e",
+      "recorded": "sha256:c46241329c807763003daefb8b337398191d623003148c2fa101b51995dd1c7e"
+    },
+    {
+      "path": "locked/php-crlf.php",
+      "bytes": 266,
+      "note": "the same, CRLF",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 3,
+      "matches": true,
+      "digest": "sha256:c46241329c807763003daefb8b337398191d623003148c2fa101b51995dd1c7e",
+      "recorded": "sha256:c46241329c807763003daefb8b337398191d623003148c2fa101b51995dd1c7e"
+    },
+    {
+      "path": "locked/php-cr.php",
+      "bytes": 256,
+      "note": "the same, lone CR",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 3,
+      "matches": true,
+      "digest": "sha256:c46241329c807763003daefb8b337398191d623003148c2fa101b51995dd1c7e",
+      "recorded": "sha256:c46241329c807763003daefb8b337398191d623003148c2fa101b51995dd1c7e"
+    },
+    {
+      "path": "locked/php-bom-crlf-ws.php",
+      "bytes": 289,
+      "note": "the same, BOM, CRLF and trailing spaces on every line",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 3,
+      "matches": true,
+      "digest": "sha256:c46241329c807763003daefb8b337398191d623003148c2fa101b51995dd1c7e",
+      "recorded": "sha256:c46241329c807763003daefb8b337398191d623003148c2fa101b51995dd1c7e"
+    },
+    {
+      "path": "locked/python.py",
+      "bytes": 128,
+      "note": "`#` prefix",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "matches": true,
+      "digest": "sha256:5d5da6ccd3116bee608b2a6c15d4c9f0d20f32b17b220cc13a643169ab874e07",
+      "recorded": "sha256:5d5da6ccd3116bee608b2a6c15d4c9f0d20f32b17b220cc13a643169ab874e07"
+    },
+    {
+      "path": "locked/js-block.js",
+      "bytes": 144,
+      "note": "a block comment closed after the digest",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "matches": true,
+      "digest": "sha256:588dc5260f1fb563c69e23dace1889b60196981fc57e153007a79377ecd55193",
+      "recorded": "sha256:588dc5260f1fb563c69e23dace1889b60196981fc57e153007a79377ecd55193"
+    },
+    {
+      "path": "locked/html.html",
+      "bytes": 111,
+      "note": "an HTML comment closed after the digest",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "matches": true,
+      "digest": "sha256:4e29150f4b637511bc7b0cb3bf626d63ce65a89e045f33ff39bd9ce68737741e",
+      "recorded": "sha256:4e29150f4b637511bc7b0cb3bf626d63ce65a89e045f33ff39bd9ce68737741e"
+    },
+    {
+      "path": "locked/line-10.py",
+      "bytes": 186,
+      "note": "the last line of the window",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 10,
+      "matches": true,
+      "digest": "sha256:49b6c56a50e2af4e6735b49fb5805cd7713cc718afe3fb2942c2d15ddb055507",
+      "recorded": "sha256:49b6c56a50e2af4e6735b49fb5805cd7713cc718afe3fb2942c2d15ddb055507"
+    },
+    {
+      "path": "locked/last-line.py",
+      "bytes": 103,
+      "note": "removing the line leaves trailing blank lines, which are stripped",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 4,
+      "matches": true,
+      "digest": "sha256:b6a98d9ce9a2d9149288fa3df42d377c3e42737afdcdaf714e33c0a100b51060",
+      "recorded": "sha256:b6a98d9ce9a2d9149288fa3df42d377c3e42737afdcdaf714e33c0a100b51060"
+    },
+    {
+      "path": "locked/only-the-line.py",
+      "bytes": 95,
+      "note": "nothing else: the digest of zero bytes",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "matches": true,
+      "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recorded": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "locked/bom-next-line.py",
+      "bytes": 104,
+      "note": "a U+FEFF that starts the next line is content: the file is not canonicalized twice",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "matches": true,
+      "digest": "sha256:9eff3bdb19b9bef9372b96a1244c0f0f939acdb8f539551e0a099a5b20a3862e",
+      "recorded": "sha256:9eff3bdb19b9bef9372b96a1244c0f0f939acdb8f539551e0a099a5b20a3862e"
+    },
+    {
+      "path": "locked/mismatch.php",
+      "bytes": 256,
+      "note": "the recorded digest is not the file's",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 3,
+      "matches": false,
+      "digest": "sha256:c46241329c807763003daefb8b337398191d623003148c2fa101b51995dd1c7e",
+      "recorded": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "path": "error/two-lines.php",
+      "bytes": 208,
+      "note": "two lock lines",
+      "result": "error",
+      "kind": "more-than-one",
+      "lines": [
+        3,
+        11
+      ]
+    },
+    {
+      "path": "error/two-lines-far-apart.php",
+      "bytes": 382,
+      "note": "the second is outside the window",
+      "result": "error",
+      "kind": "more-than-one",
+      "lines": [
+        3,
+        40
+      ]
+    },
+    {
+      "path": "error/line-11.py",
+      "bytes": 124,
+      "note": "one line past the window",
+      "result": "error",
+      "kind": "after-window",
+      "lines": [
+        11
+      ]
+    },
+    {
+      "path": "error/line-11-locked.py",
+      "bytes": 196,
+      "note": "moving the line down does not unlock the file",
+      "result": "error",
+      "kind": "after-window",
+      "lines": [
+        11
+      ]
+    },
+    {
+      "path": "error/no-ticket.py",
+      "bytes": 47,
+      "note": "nothing after the marker",
+      "result": "error",
+      "kind": "ticket",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/no-space.py",
+      "bytes": 55,
+      "note": "no space after the marker",
+      "result": "error",
+      "kind": "ticket",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/tab.py",
+      "bytes": 56,
+      "note": "a tab is not a space",
+      "result": "error",
+      "kind": "ticket",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/lowercase-ticket.py",
+      "bytes": 56,
+      "note": "not the ticket rule",
+      "result": "error",
+      "kind": "ticket",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/ticket-no-number.py",
+      "bytes": 52,
+      "note": "not the ticket rule",
+      "result": "error",
+      "kind": "ticket",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/ticket-glued-close.js",
+      "bytes": 71,
+      "note": "trailing text needs whitespace",
+      "result": "error",
+      "kind": "ticket",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/digest-first.py",
+      "bytes": 128,
+      "note": "the digest where the ticket goes",
+      "result": "error",
+      "kind": "ticket",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/short-digest.py",
+      "bytes": 72,
+      "note": "a truncated digest is not a pending line",
+      "result": "error",
+      "kind": "digest",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/upper-digest.py",
+      "bytes": 128,
+      "note": "the hex is lowercase",
+      "result": "error",
+      "kind": "digest",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/empty-digest.py",
+      "bytes": 64,
+      "note": "nothing after `sha256:`",
+      "result": "error",
+      "kind": "digest",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/digest-glued-close.js",
+      "bytes": 143,
+      "note": "trailing text needs whitespace",
+      "result": "error",
+      "kind": "digest",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/digest-after-text.py",
+      "bytes": 136,
+      "note": "a digest out of place is not trailing text",
+      "result": "error",
+      "kind": "digest",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/digest-after-tab.py",
+      "bytes": 128,
+      "note": "fields are separated by spaces",
+      "result": "error",
+      "kind": "digest",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/two-digests.py",
+      "bytes": 200,
+      "note": "one digest only",
+      "result": "error",
+      "kind": "digest",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/invalid-utf8.py",
+      "bytes": 25,
+      "note": "canonicalization's own error, with its offset",
+      "result": "error",
+      "kind": "invalid-utf8",
+      "offset": 23
+    }
+  ]
+}

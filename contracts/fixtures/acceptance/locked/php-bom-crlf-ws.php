@@ -1,0 +1,10 @@
+﻿<?php  
+  
+// invar-lock: SHOP-214 sha256:c46241329c807763003daefb8b337398191d623003148c2fa101b51995dd1c7e  
+  
+/**  
+ * AC1: Given 3 in stock, when I order 2, then 1 remains available.  
+ */  
+it('reserves stock (AC1)', function () {  
+    expect(true)->toBeFalse();  
+});  
