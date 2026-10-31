@@ -32,10 +32,11 @@ proves nothing.
 
 If the diff says nothing is committed yet, say so in one line and stop.
 
-### 2. Number the criteria
+### 2. Take the criteria by their ids
 
-Number the acceptance criteria in the order the Plan lists them, one per list item.
-You will answer each one, by that number.
+Each acceptance criterion starts with its id (`AC2: Given …`). You will answer each
+one by that id. A Plan approved before ids existed has none: then call its criteria
+`AC1`, `AC2`, … in the order the Plan lists them, one per list item.
 
 ### 3. Check each criterion against the code
 
@@ -100,11 +101,11 @@ Exactly this shape, and nothing before or after it:
 REVIEW <TICKET>
 
 ## Acceptance criteria
-1. met — <the criterion, in a few words>
+AC1: met — <the criterion, in a few words>
    Evidence: <file:line> — <what is there>; <file:line> — <the test>
-2. not met — <the criterion, in a few words>
+AC2: not met — <the criterion, in a few words>
    Evidence: <file:line> — <what is there instead, or what is missing>
-3. unclear — <the criterion, in a few words>
+AC3: unclear — <the criterion, in a few words>
    Why: <what you could not tell, and what would settle it>
 
 ## Invariants the Plan names that the change appears to break
@@ -117,7 +118,7 @@ REVIEW <TICKET>
 - <path> — <what changed>
 ```
 
-- Every criterion appears, by its number, exactly once.
+- Every criterion appears, by its id, exactly once.
 - Every `met` and every `not met` has at least one `file:line`. A verdict without one
   is not a verdict.
 - An empty section says `None found.` — never leave it out.

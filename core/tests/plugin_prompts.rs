@@ -182,6 +182,34 @@ fn example_plan() -> String {
 }
 
 #[test]
+fn the_planner_asks_for_numbered_criteria_and_knows_the_tests_to_change_section() {
+    let (_, body) = frontmatter("agents/planner.md");
+
+    assert!(
+        body.contains("`- AC1: Given <state>, when <action>, then <observable outcome>.`"),
+        "the planner prompt lost the `AC<n>:` form"
+    );
+    assert!(
+        body.contains("## Acceptance tests to change"),
+        "the planner prompt lost the new heading"
+    );
+    assert!(
+        body.contains("only when the ticket must change or\ndelete another ticket's locked"),
+        "the planner prompt lost when the section is written"
+    );
+    // The example shows the form it asks for; `plan validate` holds the rest.
+    assert!(example_plan().contains("\n- AC1: Given "));
+}
+
+#[test]
+fn the_reviewer_reports_each_criterion_by_its_id() {
+    let (_, body) = frontmatter("agents/reviewer.md");
+
+    assert!(body.contains("Every criterion appears, by its id, exactly once"));
+    assert!(body.contains("A Plan approved before ids existed has none"));
+}
+
+#[test]
 fn the_example_plan_in_the_prompt_passes_plan_validate() {
     // The template is what the planner imitates. If the contract moves, this is
     // where it is noticed — not in a planner that learned the old shape.
@@ -712,10 +740,10 @@ fn the_reviewers_output_has_the_fixed_shape() {
     let order = [
         "REVIEW <TICKET>",
         "## Acceptance criteria",
-        "1. met —",
+        "AC1: met —",
         "Evidence: <file:line>",
-        "2. not met —",
-        "3. unclear —",
+        "AC2: not met —",
+        "AC3: unclear —",
         "Why:",
         "## Invariants the Plan names that the change appears to break",
         // M1-26: a planner miss, reported apart because its fix is in Phase 1.

@@ -2,15 +2,20 @@
 //!
 //! The core reads the body only as far as it needs: the level-2 headings, the
 //! text under each, and whether the required ones are there, spelled exactly,
-//! in order, and not empty. The prose inside a section is never parsed.
+//! in order, and not empty. The prose inside a section is never parsed; the two
+//! sections read line by line for their form are in `criteria`.
 
 use std::ops::Range;
 
 use crate::diagnostics::Diagnostics;
 
-use super::Mode;
+use super::{Mode, criteria};
 
 pub(super) const ACCEPTANCE_CRITERIA: &str = "Acceptance criteria";
+
+/// Optional, in light mode only (§6.5, D-17).
+pub const ACCEPTANCE_TESTS_TO_CHANGE: &str = "Acceptance tests to change";
+const IMPLEMENTATION_CONTEXT: &str = "Implementation context";
 
 /// Light mode, `scenarios: false` (§6).
 const LIGHT: [&str; 7] = [
@@ -20,7 +25,7 @@ const LIGHT: [&str; 7] = [
     "Open questions / answers",
     "Rejected alternatives",
     ACCEPTANCE_CRITERIA,
-    "Implementation context",
+    IMPLEMENTATION_CONTEXT,
 ];
 
 /// `scenarios: true` — the 1.0.0 list, unchanged (§6, OQ-2).
@@ -32,7 +37,7 @@ const SCENARIOS: [&str; 8] = [
     "Rejected alternatives",
     "Scenarios to write",
     "Scenarios to delete",
-    "Implementation context",
+    IMPLEMENTATION_CONTEXT,
 ];
 
 pub(super) fn required(mode: Mode) -> &'static [&'static str] {
@@ -63,10 +68,13 @@ struct HeadingLike {
 
 /// Find every section in `rest` — the text after the closing delimiter, whose
 /// first line is line `first_line` of the file — and check the required ones.
+/// `unnumbered_allowed` says whether criteria with no ids at all are valid
+/// (D-16).
 pub(super) fn scan(
     rest: &str,
     first_line: usize,
     mode: Mode,
+    unnumbered_allowed: bool,
     found: &mut Diagnostics,
 ) -> Vec<Section> {
     let mut sections: Vec<Section> = Vec::new();
@@ -134,7 +142,17 @@ pub(super) fn scan(
         section.content.start = section.content.start.min(section.content.end);
     }
 
-    check_required(rest, &sections, &heading_like, mode, found);
+    check_required(
+        rest,
+        &sections,
+        &heading_like,
+        mode,
+        unnumbered_allowed,
+        found,
+    );
+    if mode == Mode::Light {
+        check_tests_to_change(rest, &sections, &heading_like, found);
+    }
     sections
 }
 
@@ -143,6 +161,7 @@ fn check_required(
     sections: &[Section],
     heading_like: &[HeadingLike],
     mode: Mode,
+    unnumbered_allowed: bool,
     found: &mut Diagnostics,
 ) {
     let required = required(mode);
@@ -172,6 +191,8 @@ fn check_required(
         let content = &rest[first.content.clone()];
         if !has_text(name, content) {
             found.at(first.line, empty_message(name, mode));
+        } else if *name == ACCEPTANCE_CRITERIA {
+            criteria::check_ids(content, first.line + 1, unnumbered_allowed, found);
         }
     }
 
@@ -204,10 +225,34 @@ fn report_missing(
     heading_like: &[HeadingLike],
     found: &mut Diagnostics,
 ) {
+    if report_misspelled(name, sections, heading_like, found) {
+        return;
+    }
+
+    let place = match position.checked_sub(1).map(|p| required[p]) {
+        Some(previous) => format!("after `## {previous}`"),
+        None => "as the first section".to_owned(),
+    };
+    found.general(format!(
+        "missing required section `## {name}`; add it {place}"
+    ));
+}
+
+/// Report a heading that is `## {name}` in all but its spelling. `true` when
+/// there was one.
+fn report_misspelled(
+    name: &str,
+    sections: &[Section],
+    heading_like: &[HeadingLike],
+    found: &mut Diagnostics,
+) -> bool {
     let wanted = normalize(name);
 
     // A level-2 heading that differs only in case, spacing or punctuation.
-    if let Some(near) = sections.iter().find(|s| normalize(&s.heading) == wanted) {
+    if let Some(near) = sections
+        .iter()
+        .find(|s| s.heading != name && normalize(&s.heading) == wanted)
+    {
         found.at(
             near.line,
             format!(
@@ -216,7 +261,7 @@ fn report_missing(
                 near.heading
             ),
         );
-        return;
+        return true;
     }
     // The right words at the wrong level, or without the space: `### Scope`,
     // `##Scope`.
@@ -232,16 +277,55 @@ fn report_missing(
                 near.text
             ),
         );
-        return;
+        return true;
     }
+    false
+}
 
-    let place = match position.checked_sub(1).map(|p| required[p]) {
-        Some(previous) => format!("after `## {previous}`"),
-        None => "as the first section".to_owned(),
+/// `## Acceptance tests to change`, when it is there: once, spelled exactly,
+/// between the criteria and the Implementation context, and well-formed (§6.5).
+/// Absent means none.
+fn check_tests_to_change(
+    rest: &str,
+    sections: &[Section],
+    heading_like: &[HeadingLike],
+    found: &mut Diagnostics,
+) {
+    let name = ACCEPTANCE_TESTS_TO_CHANGE;
+    // A misspelled heading would otherwise be an additional section, and the
+    // change it means to declare would not be declared.
+    report_misspelled(name, sections, heading_like, found);
+
+    let line_of = |heading: &str| {
+        sections
+            .iter()
+            .find(|s| s.heading == heading)
+            .map(|s| s.line)
     };
-    found.general(format!(
-        "missing required section `## {name}`; add it {place}"
-    ));
+    let matches: Vec<&Section> = sections.iter().filter(|s| s.heading == name).collect();
+    let Some(first) = matches.first() else {
+        return;
+    };
+    for duplicate in &matches[1..] {
+        found.at(
+            duplicate.line,
+            format!(
+                "`## {name}` appears again (first on line {}); it appears once — merge the two",
+                first.line
+            ),
+        );
+    }
+    let after_criteria = line_of(ACCEPTANCE_CRITERIA).is_none_or(|line| first.line > line);
+    let before_context = line_of(IMPLEMENTATION_CONTEXT).is_none_or(|line| first.line < line);
+    if !(after_criteria && before_context) {
+        found.at(
+            first.line,
+            format!(
+                "`## {name}` is out of order: it comes after `## {ACCEPTANCE_CRITERIA}` and                  before `## {IMPLEMENTATION_CONTEXT}` (plan-header.md §6.5)"
+            ),
+        );
+    }
+    criteria::check_tests_to_change(&rest[first.content.clone()], first.line, found);
 }
 
 /// Does the section hold written content (§6, D-14)?
@@ -250,21 +334,25 @@ fn report_missing(
 /// leading list marker and a leading checkbox are removed. So `-`, `1.`,
 /// `- [ ]`, `...` and `<!-- fill in -->` are not content. In
 /// `## Acceptance criteria` a placeholder line (`_none_`, `TBD`, ...) does not
-/// count either (D-8, D-14).
+/// count either, with or without an id in front of it (D-8, D-14, §6.4).
 fn has_text(name: &str, content: &str) -> bool {
     let mut in_comment = false;
     content.lines().any(|line| {
         let visible = crate::format::values::without_comments(line, &mut in_comment);
         let text = strip_checkbox(strip_list_marker(visible.trim()));
-        text.chars().any(char::is_alphanumeric)
-            && !(name == ACCEPTANCE_CRITERIA && is_placeholder(text))
+        if name == ACCEPTANCE_CRITERIA {
+            let text = criteria::without_id(text);
+            text.chars().any(char::is_alphanumeric) && !is_placeholder(text)
+        } else {
+            text.chars().any(char::is_alphanumeric)
+        }
     })
 }
 
 /// The line after a leading list marker: `-`, `*` or `+`, or digits followed
 /// by `.` or `)` — and only when the marker is followed by a space or ends the
 /// line. `**TBD**` and `1.5 seconds` are not list items.
-fn strip_list_marker(line: &str) -> &str {
+pub(super) fn strip_list_marker(line: &str) -> &str {
     let ends_marker = |rest: &str| rest.is_empty() || rest.starts_with(char::is_whitespace);
 
     if let Some(rest) = line.strip_prefix(['-', '*', '+'])
@@ -283,7 +371,7 @@ fn strip_list_marker(line: &str) -> &str {
 }
 
 /// The text after a leading task-list checkbox: `[ ]`, `[x]` or `[X]`.
-fn strip_checkbox(text: &str) -> &str {
+pub(super) fn strip_checkbox(text: &str) -> &str {
     ["[ ]", "[x]", "[X]"]
         .iter()
         .find_map(|mark| text.strip_prefix(*mark))
@@ -294,7 +382,7 @@ fn strip_checkbox(text: &str) -> &str {
 /// line is one of a few words, in any capitalisation, with any emphasis or
 /// trailing punctuation around it (`**TBD**`, `N/A.`). Deliberately a short
 /// list (plan-header.md D-14).
-fn is_placeholder(text: &str) -> bool {
+pub(super) fn is_placeholder(text: &str) -> bool {
     let word = text
         .trim_matches(|c: char| c.is_whitespace() || matches!(c, '_' | '*' | '.' | ':' | '!'))
         .to_lowercase();
@@ -305,7 +393,7 @@ fn empty_message(name: &str, mode: Mode) -> String {
     let what_to_write = match name {
         ACCEPTANCE_CRITERIA => {
             "add at least one acceptance criterion, one per list item: \
-             `- Given …, when …, then ….` Comments, bare list markers and placeholders \
+             `- AC1: Given …, when …, then ….` Comments, bare list markers and placeholders \
              (`_none_`, `TBD`, `TODO`, `N/A`) do not count; `_none_` is not accepted here \
              (plan-header.md D-8, D-14)"
         }
@@ -316,7 +404,7 @@ fn empty_message(name: &str, mode: Mode) -> String {
             "list the alternatives and why they were dropped, or write one line saying \
              none were considered"
         }
-        "Implementation context" => {
+        IMPLEMENTATION_CONTEXT => {
             "add the guidance this ticket needs from AI_CONTEXT and BUSINESS_CONTEXT, \
              or write one line saying no context source applies"
         }

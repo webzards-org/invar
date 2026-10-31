@@ -12,7 +12,7 @@
 use std::fmt::Write as _;
 
 use crate::digest;
-use crate::format::plan::Plan;
+use crate::format::plan::{ACCEPTANCE_TESTS_TO_CHANGE, Plan};
 
 #[cfg(test)]
 mod tests;
@@ -20,7 +20,10 @@ mod tests;
 /// The fixed section order (M1-16). `## Ticket` is not part of it: the pasted
 /// ticket text is included only when `with_ticket` is set, and when it is, it
 /// comes first — the context a reviewer would want before everything the
-/// Plan derived from it.
+/// Plan derived from it. `## Acceptance tests to change` is not part of it
+/// either: it comes right after the criteria, and only when the Plan declares
+/// any, because it is what a reviewer must see of a change to another ticket's
+/// locked tests (plan-header.md §6.5).
 const SECTIONS: [&str; 6] = [
     "Intent",
     "Scope",
@@ -54,6 +57,11 @@ pub fn render(plan: &Plan, ticket: &str, with_ticket: bool) -> String {
     }
     for heading in SECTIONS {
         write_section(&mut out, heading, plan.section(heading));
+        if heading == "Acceptance criteria"
+            && let Some(content) = plan.acceptance_tests_to_change()
+        {
+            write_section(&mut out, ACCEPTANCE_TESTS_TO_CHANGE, Some(content));
+        }
     }
     digest::canonicalize(&out)
 }

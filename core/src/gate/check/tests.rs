@@ -65,7 +65,7 @@ fn the_contracts_approved_example_passes() {
     assert_eq!(approved.at, "2026-10-05");
     assert_eq!(
         approved.checksum,
-        "sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44"
+        "sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b"
     );
     assert_eq!(approved.spec, spec);
 }
@@ -87,7 +87,7 @@ fn an_approved_plan_checked_out_with_crlf_still_passes() {
     let approved = check(&root, &spec, Mode::Light).unwrap();
     assert_eq!(
         approved.checksum,
-        "sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44"
+        "sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b"
     );
 }
 

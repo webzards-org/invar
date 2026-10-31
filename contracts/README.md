@@ -47,3 +47,4 @@ deliberately, never automatically.
 | Set | Covers | Written for |
 |---|---|---|
 | `fixtures/digest/` | Canonicalization and digests (§4d) | M1-1, M1-2 |
+| `fixtures/plan/` | A Plan as an earlier contract version approved it (`plan-header.md` D-16) | AT-2 |

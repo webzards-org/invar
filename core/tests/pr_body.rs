@@ -304,7 +304,7 @@ fn a_plan_edited_after_approval_is_refused_and_nothing_is_written() {
 fn an_approval_nobody_recorded_is_refused() {
     // plan-header.md example 9.3: `Status: approved`, and no checksum.
     let unrecorded = approved_plan().replace(
-        "Approved-checksum: sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44",
+        "Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b",
         "Approved-checksum:",
     );
     assert_ne!(unrecorded, approved_plan());
@@ -346,5 +346,56 @@ fn an_approved_plan_checked_out_with_crlf_is_still_approved_and_renders_the_same
 
     let stdout = stdout_of(&project.pr_body(&["SHOP-214"]).success());
 
+    assert_snapshot("pr-body-shop-214.md", &stdout);
+}
+
+// --- `## Acceptance tests to change` (plan-header.md §6.5) -----------------------
+
+/// Example 9.1 with `content` as its `## Acceptance tests to change`, under
+/// example 9.2's header with the checksum of this body: approved, and current.
+fn approved_with_tests_to_change(content: &str) -> String {
+    let context = "## Implementation context\n";
+    let draft = draft_plan().replacen(
+        context,
+        &format!("## Acceptance tests to change\n{content}\n{context}"),
+        1,
+    );
+    let body = draft.split_once("\n---\n").unwrap().1;
+
+    let scratch = tempfile::tempdir().unwrap();
+    let file = scratch.path().join("body.md");
+    fs::write(&file, body.trim_start_matches('\n')).unwrap();
+    let output = Command::cargo_bin("invar")
+        .unwrap()
+        .arg("hash")
+        .arg(&file)
+        .output()
+        .unwrap();
+    let checksum = String::from_utf8(output.stdout).unwrap();
+
+    let header = contract_example("9.2")
+        .lines()
+        .map(|line| match line.strip_prefix("Approved-checksum:") {
+            Some(_) => format!("Approved-checksum: {}\n", checksum.trim()),
+            None => format!("{line}\n"),
+        })
+        .collect::<String>();
+    header + body
+}
+
+const TESTS_TO_CHANGE: &str = "- tests/Acceptance/Shop190PaidTest.php — change — its 403 no longer holds within 24 hours\n\
+     - tests/Acceptance/Shop177RefundTest.php — delete — refunds moved to SHOP-301\n";
+
+#[test]
+fn a_plan_with_tests_to_change_renders_exactly_the_stored_description() {
+    let project = Project::new(&approved_with_tests_to_change(TESTS_TO_CHANGE));
+    let stdout = stdout_of(&project.pr_body(&["SHOP-214"]).success().stderr(""));
+    assert_snapshot("pr-body-shop-214-tests-to-change.md", &stdout);
+}
+
+#[test]
+fn a_section_that_says_none_renders_as_a_plan_without_it() {
+    let project = Project::new(&approved_with_tests_to_change("_none_\n"));
+    let stdout = stdout_of(&project.pr_body(&["SHOP-214"]).success());
     assert_snapshot("pr-body-shop-214.md", &stdout);
 }

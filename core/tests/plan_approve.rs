@@ -27,8 +27,8 @@ fn plan_text(ticket: &str) -> String {
          ## Open questions / answers\nNone were needed.\n\n\
          ## Rejected alternatives\nNone considered.\n\n\
          ## Acceptance criteria\n\n\
-         - Given 3 in stock, when I order 2, then 1 remains available.\n\
-         - Given 1 in stock, when I order 2, then the order is refused.\n\n\
+         - AC1: Given 3 in stock, when I order 2, then 1 remains available.\n\
+         - AC2: Given 1 in stock, when I order 2, then the order is refused.\n\n\
          ## Implementation context\n- AI_CONTEXT: controllers stay thin\n"
     )
 }
@@ -146,7 +146,7 @@ fn approves_a_draft_printing_the_criteria_first() {
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
     let criteria = stdout
-        .find("- Given 3 in stock")
+        .find("- AC1: Given 3 in stock")
         .expect("the criteria are printed");
     let approved = stdout.find("approved: ").expect("the result is printed");
     assert!(
@@ -154,7 +154,7 @@ fn approves_a_draft_printing_the_criteria_first() {
         "criteria after the approval:\n{stdout}"
     );
     assert!(stdout.contains(&format!("Acceptance criteria of PROJ-412 ({SPEC})")));
-    assert!(stdout.contains("- Given 1 in stock, when I order 2, then the order is refused."));
+    assert!(stdout.contains("- AC2: Given 1 in stock, when I order 2, then the order is refused."));
 
     let written = project.read_spec();
     assert_eq!(header_value(&written, "Status"), "approved");
@@ -208,8 +208,8 @@ fn the_repository_user_name_wins_over_the_global_one() {
 fn an_invalid_plan_is_refused_naming_the_problems() {
     let project = Project::new(Some("rade"));
     let draft = plan_text("PROJ-412").replace(
-        "- Given 3 in stock, when I order 2, then 1 remains available.\n\
-         - Given 1 in stock, when I order 2, then the order is refused.\n",
+        "- AC1: Given 3 in stock, when I order 2, then 1 remains available.\n\
+         - AC2: Given 1 in stock, when I order 2, then the order is refused.\n",
         "_none_\n",
     );
     project.write_spec(&draft);
@@ -466,4 +466,105 @@ fn skill_changes_nothing_about_a_successful_approval() {
         .approve(&["--skill"])
         .success()
         .stdout(contains("approved PROJ-412 checksum sha256:"));
+}
+
+// --- the ids (plan-header.md §6.4, D-16) -----------------------------------------
+
+#[test]
+fn each_criterion_is_shown_with_its_id() {
+    let project = Project::new(Some("rade"));
+    let assert = project.approve(&["PROJ-412"]).success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(
+        stdout.contains(
+            "  - AC1: Given 3 in stock, when I order 2, then 1 remains available.\n  \
+             - AC2: Given 1 in stock, when I order 2, then the order is refused.\n"
+        ),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn a_draft_without_ids_is_refused_naming_each_line() {
+    let project = Project::new(Some("rade"));
+    let draft = plan_text("PROJ-412")
+        .replace("- AC1: ", "- ")
+        .replace("- AC2: ", "- ");
+    project.write_spec(&draft);
+    let line = draft
+        .lines()
+        .position(|l| l.contains("3 in stock"))
+        .unwrap()
+        + 1;
+    project
+        .approve(&["PROJ-412"])
+        .failure()
+        .stdout(contains(format!("{SPEC}:{line}: this criterion has no id")))
+        .stdout(contains(format!(
+            "{SPEC}:{}: this criterion has no id",
+            line + 1
+        )));
+    assert_eq!(project.read_spec(), draft, "a refusal wrote to the Plan");
+}
+
+/// The Plan approved under 1.5.0, with a ticket that fits this project.
+fn approved_under_1_5_0() -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../contracts/fixtures/plan/approved-1.5.0-no-ids.md");
+    fs::read_to_string(path)
+        .unwrap()
+        .replace("Ticket: SHOP-214", "Ticket: PROJ-412")
+}
+
+#[test]
+fn an_approval_from_before_ids_is_left_alone() {
+    let project = Project::new(Some("rade"));
+    project.write_spec(&approved_under_1_5_0());
+    project.approve(&["PROJ-412"]).success();
+    assert_eq!(project.read_spec(), approved_under_1_5_0());
+}
+
+#[test]
+fn reapproving_a_plan_with_no_ids_is_refused_until_it_has_them() {
+    let project = Project::new(Some("rade"));
+    let changed = approved_under_1_5_0().replace("Soft-deleting", "Deleting");
+    project.write_spec(&changed);
+
+    // Without the flag: the refusal it has always been.
+    project
+        .approve(&["PROJ-412"])
+        .failure()
+        .stderr(contains("--reapprove"));
+
+    // With it: no new approval of criteria with no ids.
+    let line = changed
+        .lines()
+        .position(|l| l.starts_with("- Given"))
+        .unwrap()
+        + 1;
+    project
+        .approve(&["PROJ-412", "--reapprove"])
+        .failure()
+        .stdout(contains(format!("{SPEC}:{line}: this criterion has no id")))
+        .stderr(contains("this would be a new one"));
+    assert_eq!(project.read_spec(), changed, "a refusal wrote to the Plan");
+
+    // Numbered, the same Plan is approved again.
+    let mut number = 0;
+    let numbered: String = changed
+        .lines()
+        .map(|line| match line.strip_prefix("- Given") {
+            Some(rest) => {
+                number += 1;
+                format!("- AC{number}: Given{rest}\n")
+            }
+            None => format!("{line}\n"),
+        })
+        .collect();
+    project.write_spec(&numbered);
+    project
+        .approve(&["PROJ-412", "--reapprove"])
+        .success()
+        .stdout(contains("- AC1: Given a pending"));
+    assert_eq!(header_value(&project.read_spec(), "Status"), "approved");
 }

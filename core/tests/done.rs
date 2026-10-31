@@ -567,3 +567,13 @@ fn skill_closes_an_approved_plan_as_without_it() {
         .stdout(contains(format!("removed: {PLAN_DIR} (staged")));
     assert!(!project.exists(PLAN_DIR));
 }
+
+#[test]
+fn a_plan_approved_before_criteria_had_ids_closes() {
+    // plan-header.md D-16: its cycle ends the way it began.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../contracts/fixtures/plan/approved-1.5.0-no-ids.md");
+    let project = Project::new(&fs::read_to_string(path).unwrap());
+    project.done(&["SHOP-214"]).success();
+    assert!(!project.exists(PLAN_DIR));
+}

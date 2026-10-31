@@ -60,8 +60,9 @@ pub enum Command {
     /// Render the Plan as a PR description.
     ///
     /// Fixed section order — Intent, Scope, Open questions / answers,
-    /// Rejected alternatives, Acceptance criteria, Implementation context —
-    /// with the ticket id and the approval line. The pasted `## Ticket` text
+    /// Rejected alternatives, Acceptance criteria, Acceptance tests to change
+    /// when the Plan declares any, Implementation context — with the ticket id
+    /// and the approval line. The pasted `## Ticket` text
     /// is left out unless `--with-ticket` is given. Refuses on a draft Plan:
     /// a PR description describes an approved specification.
     ///
@@ -70,8 +71,8 @@ pub enum Command {
     /// Print what the reviewer reads: the approved Plan, the binding context
     /// and the branch's diff.
     ///
-    /// The Plan's Intent, Scope, Acceptance criteria and Implementation
-    /// context; `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`; and the diff of
+    /// The Plan's Intent, Scope, Acceptance criteria, Acceptance tests to change
+    /// when it declares any, and Implementation context; `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`; and the diff of
     /// what is committed on this branch since it left the base branch
     /// (`git.base_branch`, else `origin/HEAD`, else `main`), with `.invar/`
     /// left out. A diff above 40,000 characters is replaced by the list of

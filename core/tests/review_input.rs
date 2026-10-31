@@ -353,3 +353,79 @@ fn the_help_says_it_is_advisory_and_never_shows_the_log() {
         .stdout(contains("draft"))
         .stdout(contains("40,000"));
 }
+
+// --- `## Acceptance tests to change` (plan-header.md §6.5) -----------------------
+
+/// Example 9.1 with `content` as its `## Acceptance tests to change`, under
+/// example 9.2's header with the checksum of this body: approved, and current.
+fn approved_with_tests_to_change(content: &str) -> String {
+    let context = "## Implementation context\n";
+    let draft = draft_plan().replacen(
+        context,
+        &format!("## Acceptance tests to change\n{content}\n{context}"),
+        1,
+    );
+    let body = draft.split_once("\n---\n").unwrap().1;
+
+    let scratch = tempfile::tempdir().unwrap();
+    let file = scratch.path().join("body.md");
+    fs::write(&file, body.trim_start_matches('\n')).unwrap();
+    let output = Command::cargo_bin("invar")
+        .unwrap()
+        .arg("hash")
+        .arg(&file)
+        .output()
+        .unwrap();
+    let checksum = String::from_utf8(output.stdout).unwrap();
+
+    let header = contract_example("9.2")
+        .lines()
+        .map(|line| match line.strip_prefix("Approved-checksum:") {
+            Some(_) => format!("Approved-checksum: {}\n", checksum.trim()),
+            None => format!("{line}\n"),
+        })
+        .collect::<String>();
+    header + body
+}
+
+const TESTS_TO_CHANGE: &str = "- tests/Acceptance/Shop190PaidTest.php — change — its 403 no longer holds within 24 hours\n\
+     - tests/Acceptance/Shop177RefundTest.php — delete — refunds moved to SHOP-301\n";
+
+/// Compare `actual` with `tests/snapshots/<name>`, as `tests/pr_body.rs` does:
+/// `INVAR_BLESS_SNAPSHOTS=1` rewrites it, and the diff is what gets read.
+fn assert_snapshot(name: &str, actual: &str) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/snapshots")
+        .join(name);
+    if std::env::var_os("INVAR_BLESS_SNAPSHOTS").is_some() {
+        fs::write(&path, actual).unwrap();
+        return;
+    }
+    let expected = fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("cannot read the snapshot {} ({err})", path.display()))
+        .replace("\r\n", "\n");
+    assert_eq!(
+        actual,
+        expected,
+        "the output differs from {}",
+        path.display()
+    );
+}
+
+#[test]
+fn a_plan_with_tests_to_change_prints_exactly_the_stored_input() {
+    // Nothing committed yet, so the snapshot holds no commit or blob hash that
+    // this machine's git configuration could change.
+    let repo = Repo::new(&approved_with_tests_to_change(TESTS_TO_CHANGE));
+    let out = stdout_of(&repo.review_input().success());
+    assert_snapshot("review-input-shop-214-tests-to-change.txt", &out);
+}
+
+#[test]
+fn a_section_that_says_none_prints_as_a_plan_without_it() {
+    let without = stdout_of(&Repo::new(&approved_plan()).review_input().success());
+    assert!(!without.contains("Acceptance tests to change"), "{without}");
+
+    let none = Repo::new(&approved_with_tests_to_change("_none_\n"));
+    assert_eq!(stdout_of(&none.review_input().success()), without);
+}

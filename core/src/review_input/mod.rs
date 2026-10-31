@@ -10,10 +10,11 @@
 //! The input is, in this order:
 //!
 //! 1. the approved Plan's **Intent, Scope, Acceptance criteria and
-//!    Implementation context** — what the branch is judged against. Not the
-//!    pasted ticket, the questions or the rejected alternatives: they explain
-//!    how the Plan came about, and a reviewer reading them starts to weigh the
-//!    planner's reasons instead of the result;
+//!    Implementation context**, with **Acceptance tests to change** after the
+//!    criteria when the Plan declares any — what the branch is judged against.
+//!    Not the pasted ticket, the questions or the rejected alternatives: they
+//!    explain how the Plan came about, and a reviewer reading them starts to
+//!    weigh the planner's reasons instead of the result;
 //! 2. the **binding context**, `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`, as
 //!    `context show --binding` prints it — the invariants a change can break,
 //!    all of them: the reviewer checks every one, including those the Plan
@@ -30,7 +31,7 @@
 use std::fmt::Write as _;
 
 use crate::context::Binding;
-use crate::format::plan::Plan;
+use crate::format::plan::{ACCEPTANCE_TESTS_TO_CHANGE, Plan};
 use crate::fs::ProjectRoot;
 use crate::git::{self, GitError};
 use crate::pr_body::strip_blank_edges;
@@ -141,11 +142,10 @@ pub fn render(plan: &Plan, binding: &Binding, base: &str, diff: &Diff) -> String
     );
 
     for heading in SECTIONS {
-        let _ = writeln!(out);
-        let _ = writeln!(out, "=== Plan: {heading} ===");
-        let _ = writeln!(out);
-        out.push_str(&section(plan, heading));
-        out.push('\n');
+        write_section(&mut out, plan, heading);
+        if heading == "Acceptance criteria" && plan.acceptance_tests_to_change().is_some() {
+            write_section(&mut out, plan, ACCEPTANCE_TESTS_TO_CHANGE);
+        }
     }
 
     let binding = binding.render();
@@ -206,6 +206,14 @@ pub fn render(plan: &Plan, binding: &Binding, base: &str, diff: &Diff) -> String
         }
     }
     out
+}
+
+fn write_section(out: &mut String, plan: &Plan, heading: &str) {
+    let _ = writeln!(out);
+    let _ = writeln!(out, "=== Plan: {heading} ===");
+    let _ = writeln!(out);
+    out.push_str(&section(plan, heading));
+    out.push('\n');
 }
 
 /// A section's text without the blank lines around it, line endings

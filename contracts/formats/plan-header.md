@@ -1,10 +1,10 @@
 # Contract: Plan header and required sections
 
-**Version:** 1.5.0 — `Module` may use capital letters; see §10 for what changed and why
+**Version:** 1.6.0 — numbered acceptance criteria and `## Acceptance tests to change`; see §10 for what changed and why
 **Status:** stable
 **Implements:** §4a (Plan document structure), §4d (Checksums), §5c (Context
 delivery), §12 (Plan lifecycle); light mode L-1, L-2, L-5
-(`docs/TASKS-M1.md`)
+(`docs/TASKS-M1.md`); A-3, A-5 (`docs/TASKS-AT.md`)
 **Read by:** the core (`format/`), the planner and coder agents (as prose),
 `/invar:review` (M1-20), any later reimplementation
 
@@ -23,13 +23,14 @@ One file: `.invar/plans/<TICKET>-<slug>/spec.md`.
 The Plan is **written by the agent**, not by `invar`. There is no `plan new`
 command: the core validates and approves, it does not author. Consequently the
 body is deliberately loosely specified — how a Plan reads varies with the agent
-and the ticket. What this contract fixes is the **header** and the **minimum
-required sections**, since those are what the core and the coder depend on.
+and the ticket. What this contract fixes is the **header**, the **minimum
+required sections**, and the **ids of the acceptance criteria**, since those are
+what the core and the coder depend on.
 
 Which sections are required depends on `scenarios` in `invar.yaml`
 (`invar-yaml.md` §3.1). **Light mode** — `scenarios: false`, and the default —
-is what M1 implements: acceptance criteria live in the Plan, as prose, and no
-`.feature` files exist (L-1). The rules for `scenarios: true` stay in this
+is what M1 implements: acceptance criteria live in the Plan, as numbered prose,
+and no `.feature` files exist (L-1). The rules for `scenarios: true` stay in this
 contract, marked as such, for the milestone that introduces `.feature` files.
 
 A Plan is a consumable instruction, not documentation. It is deleted inside the
@@ -148,8 +149,9 @@ approval is stale, and `plan check` refuses — and with it `invar done`
 `plan validate` checks **form**: the path and directory name (§2), encoding
 and structure (§3, §4), the presence of every required key and the format of
 every non-empty value (§5), `Ticket` against the directory name (above), and
-the required sections (§6). It does not look at whether the Plan is approved:
-the second rule above — an `approved` Plan has its three values — is
+the sections (§6). It does not look at whether the Plan's approval holds, and
+reads `Status` for one thing only: whether criteria with no ids may stand
+(D-16). The second rule above — an `approved` Plan has its three values — is
 checked by `plan check` (M1-10), which `invar done` runs, and by
 `plan approve` (M1-9), which refuses such a Plan without `--reapprove`
 (D-12). A draft is valid whatever its approval values hold, and so is the
@@ -181,7 +183,9 @@ on every routine rebase.
 `invar plan approve <TICKET | PATH>` is the human gate (§4a). In order:
 
 1. **Validate.** A Plan that `plan validate` rejects is refused, with the same
-   list of problems.
+   list of problems. A new approval must have numbered criteria (§6.4), so
+   `--reapprove` also refuses, listing each one, criteria that `plan validate`
+   accepts only because an earlier approval stands (D-16).
 2. **Compare with any earlier approval** (D-12):
    - `Status: draft` — approve. Any values already in the approval keys are
      overwritten.
@@ -231,6 +235,9 @@ light mode. If a Plan contains them anyway, they are ordinary additional
 sections: the core ignores them, and the rules of §6.2 and D-5 do not apply
 (D-9).
 
+One section is **optional** in light mode: `## Acceptance tests to change`, right
+after `## Acceptance criteria` (§6.5). Absent means none.
+
 **`scenarios: true`.** Eight headings, as specified in version 1.0.0:
 
 ```markdown
@@ -245,7 +252,9 @@ sections: the core ignores them, and the rules of §6.2 and D-5 do not apply
 ```
 
 Whether `## Acceptance criteria` is required in this mode as well is open
-(OQ-2) and is decided by the milestone that introduces `.feature` files.
+(OQ-2) and is decided by the milestone that introduces `.feature` files. In this
+mode `## Acceptance criteria` and `## Acceptance tests to change` are ordinary
+additional sections: the rules of §6.4 and §6.5 do not apply (D-17).
 
 **Rules for both modes:**
 
@@ -274,7 +283,8 @@ Whether `## Acceptance criteria` is required in this mode as well is open
 | `## Scope` | Modules and layers touched; what is explicitly out of scope | No |
 | `## Open questions / answers` | The clarifying questions of Phase 1 and the developer's answers | Yes — with an explicit line saying none were needed |
 | `## Rejected alternatives` | Approaches considered and dropped, with the reason | Yes — same |
-| `## Acceptance criteria` | What the change will be judged against (§6.4) — light mode | **No** — and no placeholder counts as content (D-8, D-14) |
+| `## Acceptance criteria` | What the change will be judged against, as numbered items (§6.4) — light mode | **No** — and no placeholder counts as content (D-8, D-14) |
+| `## Acceptance tests to change` | Another ticket's locked tests this ticket changes or deletes (§6.5) — light mode, **optional** | Absent means none; if present, not blank — `_none_` when there are none |
 | `## Scenarios to write` | A machine-readable list (§6.2) — `scenarios: true` only | No |
 | `## Scenarios to delete` | A machine-readable list (§6.2) — `scenarios: true` only | Yes — written `_none_`, never left blank (D-5) |
 | `## Implementation context` | Ticket-specific guidance for Phase 2 (§6.3) | Yes — with an explicit line saying no context source applies |
@@ -357,26 +367,53 @@ to — and cannot be turned into tests later. Unlike `## Scenarios to delete`,
 "nothing" is never a valid answer here, so `_none_` is not an escape (D-8), and
 neither is any other way of writing it (D-14).
 
-**Recommended form: one criterion per list item, in Given/When/Then prose.**
+**One criterion per list item, numbered, in Given/When/Then prose.** *Numbered
+since 1.6.0.*
 
 ```markdown
-- Given <the starting state>, when <the action>, then <the observable outcome>.
+- AC1: Given <the starting state>, when <the action>, then <the observable outcome>.
+- AC2: Given <the starting state>,
+  when <the action>, then <the observable outcome>.
 ```
 
-A list item may wrap across lines. Each criterion should describe one
-behavior, observable from outside the code — a response, a stored state, what
-a user sees — so that it can be checked without reading the implementation.
+The number is the criterion's **id**, and these rules are checked (D-18):
 
-**The core does not parse it.** `plan validate` checks only that the heading is
-present, in order, and that the section is non-empty (M1-8). The form is fixed
-anyway, for the readers that depend on it:
+- An id is `AC` followed by a positive integer with no leading zero, then `:`
+  and a space. It is the first token after the list marker, and after a checkbox
+  if the item has one. `AC01`, `ac1`, `AC 1:` and `AC1` without the colon are
+  not ids. An id is written plain, and emphasis around it (`**AC1:**`) is an
+  error; emphasis in the criterion's text is fine.
+- Ids are unique, contiguous from `AC1`, and appear in order. `AC1`, `AC3` is a
+  gap; `AC2`, `AC1` is out of order.
+- A list item may wrap. A line indented by two spaces or a tab, under an item,
+  belongs to that item, which keeps its one id. An indented line that has a list
+  marker and an id is a criterion of its own.
+- What counts as a criterion is what counted before: comments, bare list markers
+  and placeholders are not criteria. A placeholder after an id (`AC1: TBD`) is
+  still a placeholder.
+- Any other line of real text in the section is an error: every criterion is a
+  numbered list item.
+
+**A Plan approved before 1.6.0 has no ids**, and its body is frozen, so an
+approved Plan whose criteria carry **no ids at all** is valid as it was approved
+(D-16). It must not be edited to add them. An approved Plan with some ids and a
+broken rule is invalid, as a draft is. A new approval always needs ids.
+
+Each criterion should describe one behavior, observable from outside the code —
+a response, a stored state, what a user sees — so that it can be checked without
+reading the implementation.
+
+**The core parses the section as far as the ids, and no further.** It never
+interprets the Given/When/Then prose (D-18). `plan validate` checks that the
+heading is present, in order, that the section is non-empty, and the rules above
+(M1-8). The form of the prose is fixed anyway, for the readers that depend on it:
 
 - **The developer at the gate.** `plan approve` prints the criteria before
   approving (M1-9). They are the part of the Plan the code will be held to, so
   they are the part a person must actually read.
-- **`/invar:review`** reports each criterion as `met`, `not met` or `unclear`,
-  with evidence (M1-20). One criterion per item is what lets it answer per
-  criterion instead of for the section as a whole.
+- **`/invar:review`** reports each criterion by its id as `met`, `not met` or
+  `unclear`, with evidence (M1-20). One criterion per item is what lets it answer
+  per criterion instead of for the section as a whole.
 - **The PR description** carries them to the reviewer (M1-16).
 - **The later conversion into `.feature` files** (L-1). One Given/When/Then
   criterion becomes one `Scenario:`; a criterion written that way converts
@@ -394,6 +431,36 @@ where it surfaces: it reports invariants the diff appears to break (M1-20).
 
 Because the section is part of the body, `Approved-checksum` covers it: the
 criteria are frozen at approval exactly as a confirmed scenario would be (L-1).
+
+### 6.5 `## Acceptance tests to change`
+
+New in 1.6.0. **Optional, and light mode only** (D-17). It is how a later ticket
+is allowed to change or remove another ticket's locked acceptance tests: the
+change is declared in the Plan, so it passes the gate and a person sees it (§4c,
+A-3). Absent means none.
+
+It comes right after `## Acceptance criteria`, and in any case before
+`## Implementation context`. The list form is that of §6.2:
+
+```
+- <path> — change — <reason>
+- <path> — delete — <reason>
+```
+
+- `<path>` is relative to the project root, the first token after `- `. It is
+  not checked here that the file exists or is locked.
+- The action is exactly `change` or `delete`.
+- The reason is required: a placeholder is not a reason.
+- The separators are a space, an em dash and a space. Each item is one
+  unindented line.
+- If the section is present it must not be empty. `_none_` is allowed as its
+  single line, as in §6.2.
+
+As with `## Acceptance criteria`, `Approved-checksum` covers it.
+
+The PR description and `invar review-input` show it right after the criteria,
+when it lists something: the point of the section is that a person sees the
+change. Absent or `_none_`, they show nothing, not even the heading.
 
 ## 7. Decisions and their reasons
 
@@ -518,6 +585,36 @@ a label: nothing in the core compares modules, so case is kept as written and
 no normalization is applied. `-` stays out of the name because the decision
 entry's filename (`decision-entry.md` §2) ends the module at the first `-`.
 
+**D-16 — An approved Plan with no ids stands; a new approval needs them**
+(1.6.0). `plan check` and `done` run `plan validate`, so requiring ids of every
+Plan would refuse each Plan approved under 1.5.0 before its cycle closed — and
+its body cannot gain ids, because `Approved-checksum` freezes it. So the rule
+follows the state: criteria with **no ids at all** are valid when `Status` says
+`approved`. That is not a way around the numbering. A draft that claims
+`Status: approved` passes `plan validate` and nothing else: `plan check` refuses
+it because no approval of that text was recorded, and `plan approve --reapprove`
+refuses it for its missing ids, since the exception covers the approval that accepted those criteria and no
+later one. A Plan that has some ids is numbered, and every rule applies, whatever
+its `Status`. `decision record --type failed` still returns such a Plan to draft,
+with its body untouched (§4c); it is then an ordinary draft, and needs its ids
+before it can be approved again.
+
+**D-17 — The new rules apply in light mode only** (1.6.0). With
+`scenarios: true`, `## Acceptance criteria` is not required (OQ-2), and locked
+acceptance tests are written from numbered criteria, so neither those criteria
+nor a list of changes to their tests has a meaning yet. Both are ordinary
+additional sections there, as the scenario sections are in light mode (D-9). The
+milestone that introduces `.feature` files decides again, with OQ-2.
+
+**D-18 — The core reads the id and nothing after it** (1.6.0). A later command
+joins criteria to tests, to the review and to the PR by id (A-5), and that is a
+comparison of tokens. Matching prose to prose would be a judgement, which the
+core never makes, so the prose stays unparsed (D-14). Emphasis around an id is
+refused by name rather than read through, because a token is compared as it is
+written. Wrapping is decided by indentation alone, and an indented list item with an id still counts as a
+criterion: otherwise a wrongly indented `AC2` would disappear into `AC1`, and no
+later check would know that it had existed.
+
 ## 8. Open questions
 
 **OQ-1 — Re-approving an already approved Plan.** *Resolved in 1.3.0 by
@@ -532,7 +629,7 @@ Decide in the milestone that introduces `.feature` files; until then the
 
 ## 9. Examples
 
-Examples 9.1, 9.2, 9.3 and 9.5 are light mode. Example 9.4 applies when
+Examples 9.1, 9.2, 9.3 and 9.5 to 9.9 are light mode. Example 9.4 applies when
 `scenarios: true`.
 
 ### 9.1 Valid — a light-mode draft, as the agent creates it
@@ -579,14 +676,14 @@ orders. Out of scope: refunds, cancellation by staff, e-mail notifications.
   neither reserved nor sellable.
 
 ## Acceptance criteria
-- Given a pending, unpaid order of mine, when I cancel it, then its status is
-  `cancelled` and its reserved stock is available for sale again.
-- Given a paid order of mine, when I try to cancel it, then the request is
+- AC1: Given a pending, unpaid order of mine, when I cancel it, then its status
+  is `cancelled` and its reserved stock is available for sale again.
+- AC2: Given a paid order of mine, when I try to cancel it, then the request is
   refused with 403 and the order is unchanged.
-- Given an order that belongs to another team, when I send a cancel request
+- AC3: Given an order that belongs to another team, when I send a cancel request
   with its id, then the response is 404 and the order is unchanged.
-- Given an order I cancelled, when I open my order history, then it is listed
-  with status `cancelled`.
+- AC4: Given an order I cancelled, when I open my order history, then it is
+  listed with status `cancelled`.
 
 ## Implementation context
 - AI_CONTEXT: controllers stay thin — the change lives in
@@ -599,8 +696,8 @@ orders. Out of scope: refunds, cancellation by staff, e-mail notifications.
   calls `withoutGlobalScopes()`
 ```
 
-The third criterion is the one the invariant asks for (§6.4): it fails if the
-cancel route loads the order without the team scope — exactly the incident the
+`AC3` is the criterion the invariant asks for (§6.4): it fails if the cancel
+route loads the order without the team scope — exactly the incident the
 invariant exists to prevent. The other criteria come from the ticket and the
 answers in `## Open questions / answers`.
 
@@ -619,7 +716,7 @@ Module: orders
 Status: approved
 Approved-by: rade
 Approved-at: 2026-10-05
-Approved-checksum: sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44
+Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b
 ---
 ```
 
@@ -711,7 +808,122 @@ There is nothing for the developer to approve the change against, nothing for
 `_none_` under the heading would be invalid in the same way (D-8). `plan
 validate` reports it as an empty required section, naming the heading.
 
+### 9.6 Valid — numbered criteria and `## Acceptance tests to change`
+
+```markdown
+---
+Ticket: SHOP-301
+Module: orders
+Status: draft
+Approved-by:
+Approved-at:
+Approved-checksum:
+---
+
+## Ticket
+SHOP-301 — A paid order can be cancelled too, for 24 hours, and it is refunded.
+
+## Intent
+Let customers cancel a paid order within 24 hours of paying for it.
+
+## Scope
+`App\Actions\Orders\CancelOrder` and `OrderPolicy::cancel`. Out of scope:
+partial refunds.
+
+## Open questions / answers
+None were needed.
+
+## Rejected alternatives
+None considered.
+
+## Acceptance criteria
+- AC1: Given an order of mine paid 23 hours ago, when I cancel it, then its status
+  is `cancelled` and a full refund is recorded.
+- AC2: Given an order of mine paid 25 hours ago, when I try to cancel it, then the
+  request is refused with 403 and the order is unchanged.
+
+## Acceptance tests to change
+- tests/Acceptance/Shop214CancelTest.php — change — its 403 no longer holds within 24 hours
+- tests/Acceptance/Shop190PaidTest.php — delete — it pins "paid is never cancelled"
+
+## Implementation context
+- AI_CONTEXT: stock and refund changes stay inside the action's transaction
+```
+
+### 9.7 Invalid — a gap in the ids
+
+The header and every other section as in 9.1; only this part differs:
+
+```markdown
+## Acceptance criteria
+- AC1: Given a pending, unpaid order of mine, when I cancel it, then its status
+  is `cancelled`.
+- AC3: Given a paid order of mine, when I try to cancel it, then the request is
+  refused with 403.
+```
+
+**Why:** ids are contiguous from `AC1` (§6.4). `AC2` either was forgotten or was
+removed without renumbering, and every later reader joins on the id. `plan
+validate` reports it on the line of `AC3`, saying that `AC2` is missing.
+
+### 9.8 Invalid — an unknown action
+
+The header and every other section as in 9.1, with this section added after
+`## Acceptance criteria`:
+
+```markdown
+## Acceptance tests to change
+- tests/Acceptance/Shop214CancelOrderTest.php — rewrite — the 403 no longer holds
+```
+
+**Why:** the action is exactly `change` or `delete` (§6.5). A later check treats
+the two differently, and it can only do that for words it knows. `plan validate`
+names the line and the word.
+
+### 9.9 Valid — approved under 1.5.0, with no ids
+
+`contracts/fixtures/plan/approved-1.5.0-no-ids.md` is example 9.1 and its approval
+as 1.5.0 wrote them: `Status: approved`, the real digest, and these criteria:
+
+```markdown
+## Acceptance criteria
+- Given a pending, unpaid order of mine, when I cancel it, then its status is
+  `cancelled` and its reserved stock is available for sale again.
+```
+
+**Why valid:** it passes `plan validate` and `plan check`, and `done` closes it
+(D-16). Adding ids would change the body and stale the approval. Under
+`Status: draft` the same text is invalid: every item lacks its id.
+
 ## 10. Version history
+
+**1.6.0 — numbered criteria and `## Acceptance tests to change` (AT-2).**
+
+- §6.4: every acceptance criterion is a list item that starts with its id, `AC<n>:`;
+  ids are unique, contiguous from `AC1` and in order, and any other line of real
+  text in the section is an error. New D-18.
+- New §6.5: `## Acceptance tests to change`, optional, in light mode, shown by
+  the PR description and `invar review-input` when it lists something. New D-17.
+- §5.1, §5.3 and new D-16: criteria with no ids at all stay valid under an
+  existing approval; a new approval, `--reapprove` included, needs ids.
+- Example 9.1 is numbered, so example 9.2 carries its new digest; examples 9.6 to
+  9.9 are new.
+
+**Why:** a criterion id is the join key for everything after the gate: the test
+that covers it, the lock, the review, the PR (A-5). Without one, a coverage check
+would have to match prose to prose, which is the judgement the core never makes.
+The new section keeps locked tests changeable, but only through a Plan a person
+approved (§4c).
+
+**Compatibility:** Plans are consumable and do not outlive their cycle (§12), so a
+required id format is safe for new Plans. A Plan already **approved** under 1.5.0
+keeps working until its cycle closes: its criteria have no ids, and it passes
+`plan validate`, `plan check` and `done` unchanged (D-16). A Plan that is still a
+**draft** under 1.5.0 is invalid until its criteria have ids. So is an approved
+Plan returned to draft by a `failed` entry, or one being re-approved after an
+edit. An approved Plan with some ids and a broken rule is invalid as well; under
+1.5.0 such ids were only prose. A section named `## Acceptance tests to change`
+was an ignored additional section under 1.5.0 and is now read.
 
 **1.5.0 — capitalized module names.**
 

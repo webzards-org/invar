@@ -293,7 +293,7 @@ fn reset_plan(spec: &Path, original: &str, mode: Mode) -> Result<(), RecordError
 
     let preserved = fs::read_to_string(spec).is_ok_and(|written| {
         written == text
-            && Plan::parse(&written, mode).is_ok_and(|reread| {
+            && Plan::parse_reset(&written, mode).is_ok_and(|reread| {
                 reread.body() == body
                     && reread.header().status == Status::Draft
                     && reread.header().approved_checksum.is_none()

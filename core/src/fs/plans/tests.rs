@@ -21,7 +21,7 @@ fn plan_text(ticket: &str) -> String {
          ## Scope\n`orders` only.\n\n\
          ## Open questions / answers\nNone were needed.\n\n\
          ## Rejected alternatives\nNone considered.\n\n\
-         ## Acceptance criteria\n- Given an unpaid order, when I cancel it, then it is cancelled.\n\n\
+         ## Acceptance criteria\n- AC1: Given an unpaid order, when I cancel it, then it is cancelled.\n\n\
          ## Implementation context\n- AI_CONTEXT: controllers stay thin\n"
     )
 }

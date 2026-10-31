@@ -97,6 +97,10 @@ fn approve(args: Args) -> Result<()> {
             print_report(&report, &cwd);
             return Err(ApproveError::Invalid(report).into());
         }
+        Err(ApproveError::Unnumbered(report)) => {
+            print_report(&report, &cwd);
+            return Err(ApproveError::Unnumbered(report).into());
+        }
         Err(err) => return Err(err.into()),
     };
 

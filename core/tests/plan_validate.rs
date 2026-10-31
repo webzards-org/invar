@@ -24,7 +24,7 @@ fn plan_text(ticket: &str) -> String {
          ## Scope\n`orders` only.\n\n\
          ## Open questions / answers\nNone were needed.\n\n\
          ## Rejected alternatives\nNone considered.\n\n\
-         ## Acceptance criteria\n- Given an unpaid order, when I cancel it, then it is cancelled.\n\n\
+         ## Acceptance criteria\n- AC1: Given an unpaid order, when I cancel it, then it is cancelled.\n\n\
          ## Implementation context\n- AI_CONTEXT: controllers stay thin\n"
     )
 }
@@ -102,7 +102,7 @@ fn every_problem_is_printed_as_path_line_message_in_one_run() {
             "",
         )
         .replace(
-            "- Given an unpaid order, when I cancel it, then it is cancelled.\n",
+            "- AC1: Given an unpaid order, when I cancel it, then it is cancelled.\n",
             "",
         );
     project.plan("PROJ-412-reserve-stock", &text);
@@ -305,4 +305,93 @@ fn an_unknown_config_key_is_a_warning_not_a_failure() {
         .validate(&["PROJ-412"])
         .success()
         .stderr(contains("warning:").and(contains("`senarios`")));
+}
+
+// --- numbered criteria and `## Acceptance tests to change` (AT-2) ---------------
+
+/// `plan validate` on `plan_text` with `from` replaced by `to`: its one problem.
+fn the_problem_with(from: &str, to: &str) -> String {
+    let project = Project::new("");
+    let text = plan_text("PROJ-412");
+    assert!(text.contains(from), "{from:?}");
+    project.plan("PROJ-412-reserve-stock", &text.replacen(from, to, 1));
+    let assert = project.validate(&["PROJ-412"]).failure().code(1);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert_eq!(stdout.lines().count(), 1, "{stdout}");
+    stdout
+}
+
+const CRITERION: &str = "- AC1: Given an unpaid order, when I cancel it, then it is cancelled.\n";
+const CONTEXT: &str = "## Implementation context\n";
+
+#[test]
+fn each_refusal_of_the_ids_names_the_line_in_the_file() {
+    let line = plan_text("PROJ-412")
+        .lines()
+        .position(|l| l == CRITERION.trim_end())
+        .unwrap()
+        + 1;
+    for (to, at, what) in [
+        ("- Given x, then y.\n", line, "this criterion has no id"),
+        ("- AC01: Given x.\n", line, "`AC01:` is not a criterion id"),
+        ("- ac1: Given x.\n", line, "`ac1:` is not a criterion id"),
+        ("- AC1 Given x.\n", line, "`AC1` is not a criterion id"),
+        (
+            "Given x.\n",
+            line,
+            "every criterion is a numbered list item",
+        ),
+        ("- AC1: x.\n- AC1: y.\n", line + 1, "`AC1` appears again"),
+        ("- AC1: x.\n- AC3: y.\n", line + 1, "`AC2` is missing"),
+        ("- AC2: x.\n- AC1: y.\n", line + 1, "`AC1` is out of order"),
+    ] {
+        let stdout = the_problem_with(CRITERION, to);
+        assert!(
+            stdout.starts_with(&format!("{SPEC}:{at}: ")),
+            "{to:?}: {stdout}"
+        );
+        assert!(stdout.contains(what), "{what:?}: {stdout}");
+    }
+}
+
+#[test]
+fn each_refusal_of_the_tests_to_change_names_the_line_in_the_file() {
+    let heading = plan_text("PROJ-412")
+        .lines()
+        .position(|l| l == CONTEXT.trim_end())
+        .unwrap()
+        + 1;
+    for (item, at, what) in [
+        ("- — change — why\n", heading + 1, "has no path"),
+        ("- tests/A.php\n", heading + 1, "has no action"),
+        ("- tests/A.php — change\n", heading + 1, "has no reason"),
+        (
+            "- tests/A.php — redo — why\n",
+            heading + 1,
+            "unknown action `redo`",
+        ),
+        ("", heading, "`## Acceptance tests to change` is empty"),
+    ] {
+        let stdout = the_problem_with(
+            CONTEXT,
+            &format!("## Acceptance tests to change\n{item}\n{CONTEXT}"),
+        );
+        assert!(
+            stdout.starts_with(&format!("{SPEC}:{at}: ")),
+            "{item:?}: {stdout}"
+        );
+        assert!(stdout.contains(what), "{what:?}: {stdout}");
+    }
+}
+
+#[test]
+fn a_valid_tests_to_change_section_passes() {
+    let project = Project::new("");
+    let text = plan_text("PROJ-412").replacen(
+        CONTEXT,
+        &format!("## Acceptance tests to change\n- tests/A.php — delete — why\n\n{CONTEXT}"),
+        1,
+    );
+    project.plan("PROJ-412-reserve-stock", &text);
+    project.validate(&["PROJ-412"]).success();
 }
