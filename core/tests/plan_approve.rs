@@ -317,7 +317,7 @@ fn a_body_changed_after_approval_needs_reapprove() {
         .failure()
         .stdout("")
         .stderr(contains(
-            "the body changed after rade approved it on 2026-10-05",
+            "the body or `Acceptance` changed after rade approved it on 2026-10-05",
         ))
         .stderr(contains("--reapprove"));
     assert_eq!(project.read_spec(), edited, "a refusal must not write");
@@ -327,7 +327,7 @@ fn a_body_changed_after_approval_needs_reapprove() {
         .approve(&["PROJ-412", "--reapprove"])
         .success()
         .stdout(contains(
-            "re-approving: the body changed after rade approved it",
+            "re-approving: the body or `Acceptance` changed after rade approved it",
         ))
         .stdout(contains("then the order waits for stock"));
     let written = project.read_spec();

@@ -287,6 +287,23 @@ fn refuses_on_a_plan_changed_after_approval_and_changes_nothing() {
 }
 
 #[test]
+fn refuses_on_an_acceptance_value_changed_after_approval_and_changes_nothing() {
+    // plan-header.md example 9.10, and the same Plan with the decision flipped.
+    let body = draft_plan().split_once("\n---\n").unwrap().1.to_owned();
+    let approved = contract_example("9.10") + &body;
+    let project = Project::new(&approved);
+    let edited = approved.replace("Acceptance: required", "Acceptance: skipped");
+    fs::write(project.root().join(SPEC), &edited).unwrap();
+
+    project
+        .done(&["SHOP-214"])
+        .failure()
+        .stderr(contains("changed after it was approved"));
+
+    assert_eq!(project.read(SPEC), edited);
+}
+
+#[test]
 fn the_message_flag_is_gone() {
     // `done` writes no entry, so it takes no entry text.
     let project = Project::new(&approved_plan());

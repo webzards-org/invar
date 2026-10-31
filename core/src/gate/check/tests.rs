@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 use super::{CheckError, check};
+use crate::digest::{canonicalize, digest};
 use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
 use crate::gate::approve::{Decision, prepare};
@@ -204,4 +205,131 @@ fn a_header_ticket_moved_away_from_its_directory_is_refused() {
         ),
         other => panic!("expected Invalid, got {other}"),
     }
+}
+
+// --- the approval digest covers `Acceptance` (plan-header.md §5.3, D-19) ------------
+
+/// The body of example 9.1, as the digest sees it.
+fn canonical_body() -> String {
+    canonicalize(
+        contract_example("9.1")
+            .split_once("\n---\n")
+            .unwrap()
+            .1
+            .trim_start_matches('\n'),
+    )
+}
+
+/// Example `number`'s header on example 9.1's body.
+fn in_full(number: &str) -> String {
+    let body = contract_example("9.1")
+        .split_once("\n---\n")
+        .unwrap()
+        .1
+        .to_owned();
+    contract_example(number) + &body
+}
+
+#[test]
+fn with_a_value_the_digest_takes_its_line_in_front_of_the_body() {
+    let (_dir, root, spec) = project(&in_full("9.10"));
+    let approved = check(&root, &spec, Mode::Light).unwrap();
+    assert_eq!(
+        approved.checksum,
+        digest(&format!("Acceptance: required\n{}", canonical_body()))
+    );
+    assert_ne!(approved.checksum, digest(&canonical_body()));
+}
+
+#[test]
+fn without_a_value_the_digest_is_that_of_the_body() {
+    let (_dir, root, spec) = project(&in_full("9.12"));
+    let approved = check(&root, &spec, Mode::Light).unwrap();
+    assert_eq!(approved.checksum, digest(&canonical_body()));
+}
+
+#[test]
+fn an_approval_with_a_value_checked_out_with_crlf_still_passes() {
+    // The line in the digest ends in `\n`, whatever the file uses.
+    let (_dir, root, spec) = project(&in_full("9.10").replace('\n', "\r\n"));
+    assert!(check(&root, &spec, Mode::Light).is_ok());
+}
+
+#[test]
+fn changing_removing_or_clearing_the_value_stales_the_approval() {
+    let approved = in_full("9.10");
+    for edited in [
+        approved.replace("Acceptance: required", "Acceptance: skipped"),
+        approved.replace("Acceptance: required\n", ""),
+        approved.replace("Acceptance: required", "Acceptance:"),
+    ] {
+        assert_ne!(edited, approved);
+        let (_dir, root, spec) = project(&edited);
+        assert!(
+            matches!(refusal(&root, &spec), CheckError::Changed(_)),
+            "{edited}"
+        );
+    }
+}
+
+#[test]
+fn adding_a_value_to_an_approval_from_before_the_field_stales_it() {
+    let line = "\nApproved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b\n";
+    for value in ["required", "skipped"] {
+        let edited = in_full("9.12").replace(line, &format!("{line}Acceptance: {value}\n"));
+        let (_dir, root, spec) = project(&edited);
+        assert!(
+            matches!(refusal(&root, &spec), CheckError::Changed(_)),
+            "{edited}"
+        );
+    }
+}
+
+#[test]
+fn an_empty_key_added_to_an_approval_from_before_the_field_changes_nothing() {
+    let line = "\nApproved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b\n";
+    let edited = in_full("9.12").replace(line, &format!("{line}Acceptance:\n"));
+    let (_dir, root, spec) = project(&edited);
+    assert!(check(&root, &spec, Mode::Light).is_ok());
+}
+
+#[test]
+fn the_moved_line_is_refused_in_every_spelling_the_digest_cannot_tell_apart() {
+    for line in [
+        "Acceptance: skipped",
+        "Acceptance: required   ",
+        "\u{FEFF}Acceptance: required",
+    ] {
+        let moved =
+            in_full("9.12").replace("---\n\n## Ticket", &format!("---\n\n{line}\n## Ticket"));
+        let (_dir, root, spec) = project(&moved);
+        assert!(
+            matches!(refusal(&root, &spec), CheckError::Invalid(_)),
+            "{line:?}"
+        );
+    }
+}
+
+#[test]
+fn moving_the_value_to_the_top_of_the_body_is_refused() {
+    // The digest alone cannot see this: it hashes the same text (D-19).
+    let moved = in_full("9.10")
+        .replace("Acceptance: required\n", "")
+        .replace("---\n\n## Ticket", "---\n\nAcceptance: required\n## Ticket");
+    assert_eq!(
+        digest(&canonicalize(
+            moved
+                .split_once("\n---\n")
+                .unwrap()
+                .1
+                .trim_start_matches('\n')
+        )),
+        digest(&format!("Acceptance: required\n{}", canonical_body())),
+        "the moved line must give the digest of the approval"
+    );
+    let (_dir, root, spec) = project(&moved);
+    assert!(
+        matches!(refusal(&root, &spec), CheckError::Invalid(_)),
+        "{moved}"
+    );
 }

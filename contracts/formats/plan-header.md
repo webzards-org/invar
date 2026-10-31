@@ -106,8 +106,8 @@ Everything from the **first non-blank line after the closing delimiter** to the
 end of the file. Blank lines between the delimiter and the first heading are not
 part of the body (see D-1).
 
-The body's first line may not be exactly `Acceptance: required` or
-`Acceptance: skipped` (D-19).
+The body's first line may not read `Acceptance: required` or `Acceptance: skipped`
+once canonicalized (§4d), which ignores a BOM and trailing whitespace (D-19).
 
 ## 5. Header fields
 
@@ -1040,7 +1040,7 @@ the planner does not write it. A Plan approved before 1.7.0 keeps its digest and
 stays approved, and an absent field reads as `skipped`. Two things that were
 accepted are now refused: a value other than `required` or `skipped` under an
 `Acceptance` key, which was an unknown key before, and a body whose first line is
-exactly an `Acceptance` line. The success line of `plan approve` is unchanged, and
+an `Acceptance` line. The success line of `plan approve` is unchanged, and
 the checksum it shows is the new digest. `plan check` prints one more line.
 
 **1.6.0 — numbered criteria and `## Acceptance tests to change` (AT-2).**

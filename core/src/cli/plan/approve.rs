@@ -111,7 +111,9 @@ fn approve(args: Args) -> Result<()> {
     let shown = target::shown(pending.spec(), &cwd);
     match pending.replaces() {
         Some(Prior::Changed { by, at, .. }) => {
-            println!("re-approving: the body changed after {by} approved it on {at}\n")
+            println!(
+                "re-approving: the body or `Acceptance` changed after {by} approved it on {at}\n"
+            )
         }
         Some(Prior::Unrecorded { .. }) => println!(
             "re-approving: the earlier approval was not recorded by `invar plan approve`\n"

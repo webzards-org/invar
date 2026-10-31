@@ -169,6 +169,8 @@ fn a_missing_plan_is_an_error() {
 
 // --- a Plan approved before criteria had ids (plan-header.md D-16) ----------------
 
+const CHECKSUM_1_6_0: &str =
+    "sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b";
 const CHECKSUM_1_5_0: &str =
     "sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44";
 
@@ -230,4 +232,64 @@ fn claiming_approval_to_escape_the_ids_gets_no_further_than_validate() {
         .check()
         .failure()
         .stderr(contains("recorded this approval"));
+}
+
+// --- `Acceptance` is under the approval (plan-header.md §5.3, D-19) ----------------
+
+/// Example `number`'s header on example 9.1's body.
+fn in_full(number: &str) -> String {
+    let draft = contract_example("9.1");
+    contract_example(number) + draft.split_once("\n---\n").unwrap().1
+}
+
+#[test]
+fn a_plan_approved_under_the_previous_contract_still_passes() {
+    Project::new(&in_full("9.12"))
+        .check()
+        .success()
+        .stdout(contains(CHECKSUM_1_6_0))
+        .stderr("");
+}
+
+#[test]
+fn an_approval_with_a_value_passes() {
+    Project::new(&in_full("9.10")).check().success().stderr("");
+}
+
+#[test]
+fn changing_the_value_after_approval_is_refused() {
+    for edited in [
+        in_full("9.10").replace("Acceptance: required", "Acceptance: skipped"),
+        in_full("9.10").replace("Acceptance: required\n", ""),
+        in_full("9.10").replace("Acceptance: required", "Acceptance:"),
+        in_full("9.12").replace(
+            &format!("Approved-checksum: {CHECKSUM_1_6_0}\n"),
+            &format!("Approved-checksum: {CHECKSUM_1_6_0}\nAcceptance: required\n"),
+        ),
+    ] {
+        Project::new(&edited)
+            .check()
+            .failure()
+            .code(1)
+            .stderr(contains(
+                "the Plan for SHOP-214 changed after it was approved",
+            ))
+            .stderr(contains("`Acceptance` value"))
+            .stderr(contains("--reapprove"));
+    }
+}
+
+#[test]
+fn an_unknown_value_is_refused_naming_the_line() {
+    let text = in_full("9.10").replace("Acceptance: required", "Acceptance: optional");
+    let line = text
+        .lines()
+        .position(|l| l.starts_with("Acceptance:"))
+        .unwrap()
+        + 1;
+    Project::new(&text)
+        .check()
+        .failure()
+        .stdout(contains(format!("{SPEC}:{line}: `Acceptance` must be")))
+        .stdout(contains("found `optional`"));
 }

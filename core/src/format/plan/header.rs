@@ -68,6 +68,15 @@ pub enum Acceptance {
     Skipped,
 }
 
+impl Acceptance {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
 /// The header's known fields. An empty value is `None`: the key is present —
 /// the parser requires that — but nothing has been written into it yet.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -46,7 +46,7 @@ use std::fs::{self, File};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
-pub use header::{Header, Status};
+pub use header::{Acceptance, Header, Status};
 pub use sections::{ACCEPTANCE_TESTS_TO_CHANGE, Section};
 
 use crate::diagnostics::Diagnostics;
@@ -398,9 +398,24 @@ fn analyze(text: &str, mode: Mode, unnumbered: Unnumbered) -> Analysis {
     // §4.3, D-1: the body starts at the first non-blank line.
     let mut body_start = rest.len();
     let mut offset = 0;
-    for (line, eol) in split_lines(&rest) {
+    for (index, (line, eol)) in split_lines(&rest).into_iter().enumerate() {
         if !line.trim().is_empty() {
             body_start = offset;
+            // The approval digest hashes this line and the body as one text,
+            // so here it would stand in for the header's value (D-19). What
+            // canonicalization strips does not count: a BOM in front of it, and
+            // whitespace after it.
+            let line = line.strip_prefix('\u{FEFF}').unwrap_or(line).trim_end();
+            if matches!(line, "Acceptance: required" | "Acceptance: skipped") {
+                found.at(
+                    rest_first_line + index,
+                    format!(
+                        "the body cannot start with `{line}`: that line belongs in the \
+                         header, where `plan approve` writes it (plan-header.md D-19). \
+                         Remove it"
+                    ),
+                );
+            }
             break;
         }
         offset += line.len() + eol.len();

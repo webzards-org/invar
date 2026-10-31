@@ -7,8 +7,7 @@
 use std::fs;
 use std::path::Path;
 
-use super::header::Acceptance;
-use super::{Approval, Mode, Plan, PlanError, Status};
+use super::{Acceptance, Approval, Mode, Plan, PlanError, Status};
 use crate::diagnostics::Diagnostics;
 
 // --- fixtures ---------------------------------------------------------------

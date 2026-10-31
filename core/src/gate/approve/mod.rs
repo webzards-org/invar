@@ -13,8 +13,8 @@
 //!   `Approved-by`, `Approved-at`, `Approved-checksum`. The write is checked
 //!   against the file read back: the body must be byte-identical.
 //! - **A changed approval is never silently renewed** (D-12, resolving OQ-1).
-//!   An `approved` Plan whose body no longer matches its checksum — or whose
-//!   approval values are missing — is refused unless `--reapprove` is given.
+//!   An `approved` Plan that no longer matches its checksum — or whose approval
+//!   values are missing — is refused unless `--reapprove` is given.
 //! - **A new approval needs numbered criteria** (D-16). `plan validate` lets an
 //!   approval from before ids existed stand; it does not let one be issued.
 
@@ -82,7 +82,7 @@ pub fn prepare(
             problems,
         })
     })?;
-    let checksum = approval::body_digest(&plan);
+    let checksum = approval::current_digest(&plan);
 
     let replaces = match classify(plan.header(), &checksum) {
         Prior::Draft => None,
@@ -285,8 +285,8 @@ impl fmt::Display for ApproveError {
                 match prior {
                     Prior::Changed { by, at, recorded } => write!(
                         f,
-                        "the body changed after {by} approved it on {at} (approved \
-                         {recorded}, now {current}). An approval covers the text that was \
+                        "the body or `Acceptance` changed after {by} approved it on {at} \
+                         (approved {recorded}, now {current}). An approval covers what was \
                          read, so it is not renewed silently: read the Plan again, then \
                          approve it with `--reapprove`"
                     ),

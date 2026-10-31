@@ -1,24 +1,39 @@
-//! A Plan's approval, read against its body as it is now — what
+//! A Plan's approval, read against the Plan as it is now — what
 //! `plan approve` and `plan check` both decide from (plan-header.md §5.1,
 //! §5.3).
 
 use crate::digest;
-use crate::format::plan::{Header, Plan, Status};
+use crate::format::plan::{Acceptance, Header, Plan, Status};
 
-/// The §4d digest of the Plan's body: what `Approved-checksum` records.
-pub fn body_digest(plan: &Plan) -> String {
-    digest::digest(&digest::canonicalize(plan.body()))
+/// The approval digest of the Plan as it is now: what `Approved-checksum` must
+/// equal for the approval to hold.
+pub fn current_digest(plan: &Plan) -> String {
+    approval_digest(plan, plan.header().acceptance)
 }
 
-/// What the header says about earlier approvals, against the body as it is
+/// The approval digest, and the one place it is computed (plan-header.md §5.3,
+/// D-19). With an `Acceptance` value, the §4d digest of the line
+/// `Acceptance: <value>`, a newline, then the canonical body; so changing,
+/// removing or clearing the value stales the approval. Without one, the digest
+/// of the body alone, which keeps an approval from before the field existed.
+fn approval_digest(plan: &Plan, acceptance: Option<Acceptance>) -> String {
+    let body = digest::canonicalize(plan.body());
+    match acceptance {
+        Some(value) => digest::digest(&format!("Acceptance: {}\n{body}", value.as_str())),
+        None => digest::digest(&body),
+    }
+}
+
+/// What the header says about earlier approvals, against the Plan as it is
 /// now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Prior {
     /// `Status: draft`, whatever is in the approval fields.
     Draft,
-    /// Approved, every value present, and the checksum matches the body.
+    /// Approved, every value present, and the checksum matches the Plan.
     Current { by: String, at: String },
-    /// Approved, but the body changed since: the checksum no longer matches.
+    /// Approved, but the body or `Acceptance` changed since: the checksum no
+    /// longer matches.
     Changed {
         by: String,
         at: String,
@@ -29,7 +44,7 @@ pub enum Prior {
     Unrecorded { missing: Vec<&'static str> },
 }
 
-/// Compare the header's approval with `current`, the digest of the body now.
+/// Compare the header's approval with `current`, the approval digest now.
 pub fn classify(header: &Header, current: &str) -> Prior {
     if header.status == Status::Draft {
         return Prior::Draft;

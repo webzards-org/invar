@@ -3,13 +3,13 @@
 //! The read side of the gate. Run by the agent at the start of Phase 2 and by
 //! `invar done`, it turns "the coder may not work from a draft Plan" into a
 //! check on disk. It passes exactly one state: `Status: approved`, every
-//! approval value present, and `Approved-checksum` equal to the §4d digest of
-//! the body as it is now. Everything else is refused, each case in its own
-//! words (plan-header.md §5.1, D-11):
+//! approval value present, and `Approved-checksum` equal to the approval digest
+//! of the Plan as it is now (§5.3, D-19). Everything else is refused, each case
+//! in its own words (plan-header.md §5.1, D-11):
 //!
 //! - a draft — nobody has approved it;
-//! - an approval whose body changed since — the developer approved other
-//!   text;
+//! - an approval whose body or `Acceptance` changed since — the developer
+//!   approved something else;
 //! - `approved` without its recorded values (example 9.3) — no
 //!   `plan approve` wrote it;
 //! - a Plan that is not valid in form — its approval cannot be read.
@@ -60,7 +60,7 @@ pub fn check(root: &ProjectRoot, spec: &Path, mode: Mode) -> Result<Approved, Ch
         })
     })?;
 
-    let current = approval::body_digest(&plan);
+    let current = approval::current_digest(&plan);
     let spec = spec.to_owned();
     let ticket = plan.header().ticket.clone();
     match classify(plan.header(), &current) {
@@ -90,7 +90,7 @@ pub fn check(root: &ProjectRoot, spec: &Path, mode: Mode) -> Result<Approved, Ch
 
 // --- refusals ---------------------------------------------------------------
 
-/// An approval whose body changed since.
+/// An approval whose body or `Acceptance` changed since.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stale {
     pub spec: PathBuf,
@@ -98,7 +98,7 @@ pub struct Stale {
     /// Who approved, and when.
     pub by: String,
     pub at: String,
-    /// `Approved-checksum`, and the digest of the body now.
+    /// `Approved-checksum`, and the approval digest now.
     pub recorded: String,
     pub current: String,
 }
@@ -118,7 +118,7 @@ pub enum CheckError {
         spec: PathBuf,
         ticket: String,
     },
-    /// Approved, and the body changed since.
+    /// Approved, and the body or `Acceptance` changed since.
     Changed(Box<Stale>),
     /// `Status: approved` without the values `plan approve` writes.
     Unrecorded {
@@ -163,8 +163,9 @@ impl fmt::Display for CheckError {
                 write!(
                     f,
                     "{}: the Plan for {ticket} changed after it was approved: {by} \
-                     approved it on {at}, and its body is no longer the text they approved \
-                     (approved {recorded}, now {current}). Do not start implementing. Show \
+                     approved it on {at}, and its body or its `Acceptance` value is no \
+                     longer what they approved (approved {recorded}, now {current}). Do not \
+                     start implementing. Show \
                      the developer what changed; if they accept it, they approve it again \
                      with `invar plan approve {ticket} --reapprove`, otherwise restore the \
                      approved text",
