@@ -45,7 +45,7 @@ fn project(text: &str) -> (TempDir, ProjectRoot, PathBuf) {
 }
 
 fn pending(root: &ProjectRoot, spec: &Path, reapprove: bool) -> Pending {
-    match prepare(root, spec, Mode::Light, reapprove, None) {
+    match prepare(root, spec, Mode::Light, reapprove, None, None) {
         Ok(Decision::Approve(pending)) => *pending,
         Ok(other) => panic!("expected an approval, got {other:?}"),
         Err(err) => panic!("expected an approval, got: {err}"),
@@ -59,7 +59,7 @@ fn approve(root: &ProjectRoot, spec: &Path, reapprove: bool) {
 }
 
 fn refusal(root: &ProjectRoot, spec: &Path, reapprove: bool) -> ApproveError {
-    match prepare(root, spec, Mode::Light, reapprove, None) {
+    match prepare(root, spec, Mode::Light, reapprove, None, None) {
         Err(err) => err,
         Ok(decision) => panic!("expected a refusal, got {decision:?}"),
     }
@@ -327,7 +327,7 @@ fn an_approved_plan_whose_body_is_unchanged_is_left_alone() {
     approve(&root, &spec, false);
     let approved = fs::read_to_string(&spec).unwrap();
     for reapprove in [false, true] {
-        match prepare(&root, &spec, Mode::Light, reapprove, None).unwrap() {
+        match prepare(&root, &spec, Mode::Light, reapprove, None, None).unwrap() {
             Decision::AlreadyApproved { by, at, .. } => {
                 assert_eq!((by.as_str(), at.as_str()), ("rade", "2026-10-05"));
             }
@@ -575,7 +575,67 @@ fn every_label_claims_only_what_the_digest_showed() {
         ),
         (None, Earlier::Nothing, Skipped, "skipped (default)"),
     ] {
-        let chosen = choose_acceptance(flag, earlier);
+        let chosen = choose_acceptance(flag, earlier, None);
+        assert_eq!(chosen.value, value);
+        assert_eq!(chosen.to_string(), shown);
+    }
+}
+
+#[test]
+fn config_comes_after_the_flag_and_the_earlier_approval_and_before_the_default() {
+    use Acceptance::{Required, Skipped};
+    for (flag, earlier, configured, value, shown) in [
+        (
+            None,
+            Earlier::Nothing,
+            Some(Required),
+            Required,
+            "required (from invar.yaml)",
+        ),
+        (
+            None,
+            Earlier::Nothing,
+            Some(Skipped),
+            Skipped,
+            "skipped (from invar.yaml)",
+        ),
+        (
+            None,
+            Earlier::NotApproved(Skipped),
+            Some(Required),
+            Required,
+            "required (from invar.yaml; the `skipped` in the header was not part of the approval)",
+        ),
+        (
+            Some(Skipped),
+            Earlier::Nothing,
+            Some(Required),
+            Skipped,
+            "skipped (from --no-acceptance)",
+        ),
+        (
+            Some(Required),
+            Earlier::Nothing,
+            Some(Skipped),
+            Required,
+            "required (from --acceptance)",
+        ),
+        (
+            None,
+            Earlier::Confirmed(Skipped),
+            Some(Required),
+            Skipped,
+            "skipped (kept from the earlier approval)",
+        ),
+        (
+            None,
+            Earlier::Unconfirmed(Required),
+            Some(Skipped),
+            Required,
+            "required (from the header; the earlier approval cannot confirm it)",
+        ),
+    ] {
+        let chosen = choose_acceptance(flag, earlier, configured);
         assert_eq!(chosen.value, value);
         assert_eq!(chosen.to_string(), shown);
     }

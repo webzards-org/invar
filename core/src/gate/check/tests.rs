@@ -32,7 +32,8 @@ fn project(text: &str) -> (TempDir, ProjectRoot, PathBuf) {
 
 /// Approve the Plan the way `plan approve` does.
 fn approve(root: &ProjectRoot, spec: &Path) {
-    let Decision::Approve(pending) = prepare(root, spec, Mode::Light, false, None).unwrap() else {
+    let Decision::Approve(pending) = prepare(root, spec, Mode::Light, false, None, None).unwrap()
+    else {
         panic!("expected an approval");
     };
     pending.commit("rade".into(), "2026-10-05".into()).unwrap();

@@ -33,6 +33,14 @@ fn plan_text(ticket: &str) -> String {
     )
 }
 
+/// An `acceptance:` section whose default is `skipped`, so that a flag decides.
+const SKIPPED_BY_CONFIG: &str = "acceptance:\n  required: false\n  dir: tests/Acceptance\n  \
+     run: [pest, \"{report}\", \"{files}\"]\n";
+
+/// An `acceptance:` section with `required` left to its default.
+const REQUIRED_BY_CONFIG: &str = "acceptance:\n  dir: tests/Acceptance\n  \
+     run: [pest, \"{report}\", \"{files}\"]\n";
+
 /// A project with a Plan, and a git configuration of its own.
 struct Project {
     dir: TempDir,
@@ -54,6 +62,10 @@ impl Project {
 
     fn root(&self) -> PathBuf {
         self.dir.path().canonicalize().unwrap()
+    }
+
+    fn configure(&self, config: &str) {
+        fs::write(self.root().join("invar.yaml"), config).unwrap();
     }
 
     fn gitconfig(&self) -> PathBuf {
@@ -606,6 +618,9 @@ fn the_value_comes_from_the_flag_else_the_default_and_names_its_source() {
         ),
     ] {
         let project = Project::new(Some("rade"));
+        if args.contains(&"--acceptance") {
+            project.configure(SKIPPED_BY_CONFIG);
+        }
         let draft = project.read_spec();
         let stdout = stdout_of(project.approve(args).success().stderr(""));
 
@@ -638,6 +653,7 @@ fn the_value_comes_from_the_flag_else_the_default_and_names_its_source() {
 #[test]
 fn the_key_is_added_after_the_checksum_and_nothing_else_moves() {
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.approve(&["PROJ-412", "--acceptance"]).success();
     let written = project.read_spec();
     let header: Vec<&str> = written.lines().skip(1).take(7).collect();
@@ -675,6 +691,7 @@ fn a_value_left_in_a_draft_means_nothing_and_is_replaced() {
 #[test]
 fn an_unknown_value_in_a_draft_is_refused_naming_the_line() {
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     let draft = plan_text("PROJ-412").replace(
         "Approved-checksum:\n",
         "Approved-checksum:\nAcceptance: maybe\n",
@@ -690,6 +707,7 @@ fn an_unknown_value_in_a_draft_is_refused_naming_the_line() {
 #[test]
 fn both_flags_together_are_refused_and_nothing_is_written() {
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     let draft = project.read_spec();
     for args in [
         &["PROJ-412", "--acceptance", "--no-acceptance"][..],
@@ -709,6 +727,7 @@ fn both_flags_together_are_refused_and_nothing_is_written() {
 fn skill_passes_both_flags_through() {
     for (flag, value) in [("--acceptance", "required"), ("--no-acceptance", "skipped")] {
         let project = Project::new(Some("rade"));
+        project.configure(SKIPPED_BY_CONFIG);
         project
             .approve(&["--skill", "PROJ-412", flag])
             .success()
@@ -724,6 +743,7 @@ const UNCONFIRMED_REQUIRED: &str =
 #[test]
 fn reapprove_keeps_a_recorded_required() {
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.approve(&["PROJ-412", "--acceptance"]).success();
     let edited = project
         .read_spec()
@@ -750,6 +770,7 @@ fn reapprove_keeps_a_recorded_required() {
 #[test]
 fn reapprove_with_a_flag_changes_the_value_of_a_changed_approval() {
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.approve(&["PROJ-412", "--acceptance"]).success();
     let edited = project
         .read_spec()
@@ -809,6 +830,7 @@ fn a_value_flipped_since_approval_is_refused_until_a_flag_chooses() {
         ),
     ] {
         let project = Project::new(Some("rade"));
+        project.configure(SKIPPED_BY_CONFIG);
         project.approve(&["PROJ-412", first]).success();
         let flipped = project.read_spec().replace(
             &format!("Acceptance: {approved}"),
@@ -847,6 +869,7 @@ fn a_value_flipped_since_approval_is_refused_until_a_flag_chooses() {
 #[test]
 fn a_value_removed_or_cleared_since_approval_is_refused_too() {
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.approve(&["PROJ-412", "--acceptance"]).success();
     let approved = project.read_spec();
     for edited in [
@@ -869,6 +892,7 @@ fn a_value_removed_or_cleared_since_approval_is_refused_too() {
 #[test]
 fn skill_reports_the_flipped_value_refusal_on_stdout() {
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.approve(&["PROJ-412", "--acceptance"]).success();
     let flipped = project
         .read_spec()
@@ -889,6 +913,7 @@ fn a_value_flipped_and_a_body_changed_keep_the_header_with_an_honest_label() {
     // The digest cannot tell this from an honest edit (D-20), so the value is
     // not refused, and the label does not say it was approved.
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.approve(&["PROJ-412", "--acceptance"]).success();
     let edited = project
         .read_spec()
@@ -938,6 +963,7 @@ fn a_value_added_to_an_approval_from_before_the_field_was_not_part_of_it() {
 #[test]
 fn a_value_changed_by_hand_needs_reapprove() {
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.approve(&["PROJ-412", "--acceptance"]).success();
     let edited = project
         .read_spec()
@@ -954,6 +980,7 @@ fn a_value_changed_by_hand_needs_reapprove() {
 #[test]
 fn already_approved_with_another_flag_writes_nothing_and_says_so() {
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.approve(&["PROJ-412"]).success();
     let approved = project.read_spec();
     project
@@ -971,6 +998,7 @@ fn already_approved_with_another_flag_writes_nothing_and_says_so() {
 #[test]
 fn already_approved_with_the_same_flag_has_nothing_to_say() {
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.approve(&["PROJ-412", "--acceptance"]).success();
     let approved = project.read_spec();
     project
@@ -984,6 +1012,7 @@ fn already_approved_with_the_same_flag_has_nothing_to_say() {
 #[test]
 fn reapprove_with_another_flag_changes_a_current_approval() {
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.approve(&["PROJ-412", "--acceptance"]).success();
     let before = project.read_spec();
     project.git(&["config", "--global", "user.name", "mila"]);
@@ -1017,6 +1046,7 @@ fn reapprove_without_a_flag_or_with_the_same_one_leaves_a_current_approval_alone
     // D-20: `required` must not fall back to the default when nobody named a
     // value and the text did not change.
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.approve(&["PROJ-412", "--acceptance"]).success();
     let approved = project.read_spec();
     for args in [
@@ -1064,6 +1094,7 @@ fn approved_under_1_6_0() -> String {
 #[test]
 fn an_approval_from_before_the_field_is_left_alone_and_reads_as_skipped() {
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     let old = approved_under_1_6_0();
     project.write_spec(&old);
     for args in [
@@ -1096,6 +1127,7 @@ fn an_approval_from_before_the_field_is_left_alone_and_reads_as_skipped() {
 fn a_new_value_on_a_plan_with_no_ids_still_needs_the_ids() {
     // D-16: replacing the approval is a new approval, whatever the reason.
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.write_spec(&approved_under_1_5_0());
     project
         .approve(&["PROJ-412", "--reapprove", "--acceptance"])
@@ -1109,6 +1141,7 @@ fn a_draft_reset_by_a_failed_entry_takes_the_default_and_fills_its_key_in_place(
     // A `failed` entry clears the value (§5), so there is nothing to keep, and
     // the key `plan approve` added stays for the new approval to fill.
     let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
     project.approve(&["PROJ-412", "--acceptance"]).success();
     Command::cargo_bin("invar")
         .unwrap()
@@ -1120,6 +1153,7 @@ fn a_draft_reset_by_a_failed_entry_takes_the_default_and_fills_its_key_in_place(
         .success();
     assert_eq!(header_value(&project.read_spec(), "Status"), "draft");
 
+    project.configure("");
     project
         .approve(&["PROJ-412"])
         .success()
@@ -1127,4 +1161,181 @@ fn a_draft_reset_by_a_failed_entry_takes_the_default_and_fills_its_key_in_place(
     let written = project.read_spec();
     assert_eq!(written.matches("Acceptance:").count(), 1, "{written}");
     assert_eq!(header_value(&written, "Acceptance"), "skipped");
+}
+
+// --- `acceptance` in invar.yaml (invar-yaml.md §3.6, plan-header.md §5.3) ---------
+
+#[test]
+fn with_no_section_and_no_flag_it_stays_the_plain_default() {
+    let project = Project::new(Some("rade"));
+    project
+        .approve(&["PROJ-412"])
+        .success()
+        .stdout(contains("Acceptance: skipped (default)"));
+    assert_eq!(header_value(&project.read_spec(), "Acceptance"), "skipped");
+}
+
+#[test]
+fn the_config_decides_when_nothing_else_does() {
+    for (config, value) in [
+        (REQUIRED_BY_CONFIG, "required"),
+        (SKIPPED_BY_CONFIG, "skipped"),
+    ] {
+        let project = Project::new(Some("rade"));
+        project.configure(config);
+        project
+            .approve(&["PROJ-412"])
+            .success()
+            .stdout(contains(format!("Acceptance: {value} (from invar.yaml)")));
+        assert_eq!(header_value(&project.read_spec(), "Acceptance"), value);
+    }
+}
+
+#[test]
+fn a_flag_overrides_the_config() {
+    let project = Project::new(Some("rade"));
+    project.configure(REQUIRED_BY_CONFIG);
+    project
+        .approve(&["PROJ-412", "--no-acceptance"])
+        .success()
+        .stdout(contains("Acceptance: skipped (from --no-acceptance)"));
+    assert_eq!(header_value(&project.read_spec(), "Acceptance"), "skipped");
+
+    let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
+    project
+        .approve(&["PROJ-412", "--acceptance"])
+        .success()
+        .stdout(contains("Acceptance: required (from --acceptance)"));
+    assert_eq!(header_value(&project.read_spec(), "Acceptance"), "required");
+}
+
+#[test]
+fn a_changed_config_does_not_undo_a_recorded_value() {
+    let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
+    project.approve(&["PROJ-412"]).success();
+    project.configure(REQUIRED_BY_CONFIG);
+    let edited = project
+        .read_spec()
+        .replace("then the order is refused", "then the order waits");
+    project.write_spec(&edited);
+
+    project
+        .approve(&["PROJ-412", "--reapprove"])
+        .success()
+        .stdout(contains("Acceptance: skipped (from the header;"));
+    assert_eq!(header_value(&project.read_spec(), "Acceptance"), "skipped");
+}
+
+#[test]
+fn acceptance_with_no_section_is_refused_before_the_criteria_and_writes_nothing() {
+    let project = Project::new(Some("rade"));
+    let before = project.read_spec();
+    project
+        .approve(&["PROJ-412", "--acceptance"])
+        .failure()
+        .stdout(contains("Acceptance criteria").not())
+        .stderr(contains("`acceptance:` section"))
+        .stderr(contains("\nacceptance:\n  dir: "))
+        .stderr(contains("{report}"))
+        .stderr(contains("{files}"))
+        .stderr(contains("--no-acceptance"));
+    assert_eq!(project.read_spec(), before);
+}
+
+#[test]
+fn acceptance_with_an_empty_section_is_refused_as_with_none() {
+    let project = Project::new(Some("rade"));
+    project.configure("acceptance:\n");
+    project
+        .approve(&["PROJ-412", "--acceptance"])
+        .failure()
+        .stderr(contains("`acceptance:` section"));
+}
+
+#[test]
+fn acceptance_with_no_section_is_refused_on_an_approved_plan_too() {
+    // Otherwise the "changed nothing" line would send them to this refusal.
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--no-acceptance"]).success();
+    let before = project.read_spec();
+    for args in [
+        &["PROJ-412", "--acceptance"][..],
+        &["PROJ-412", "--reapprove", "--acceptance"][..],
+    ] {
+        project
+            .approve(args)
+            .failure()
+            .stderr(contains("`acceptance:` section"));
+    }
+    assert_eq!(project.read_spec(), before);
+}
+
+#[test]
+fn no_acceptance_with_no_section_is_fine() {
+    let project = Project::new(Some("rade"));
+    project
+        .approve(&["PROJ-412", "--no-acceptance"])
+        .success()
+        .stderr(contains("warning").not());
+}
+
+#[test]
+fn a_required_kept_with_no_section_warns_and_is_kept() {
+    let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    project.configure("");
+    let edited = project
+        .read_spec()
+        .replace("then the order is refused", "then the order waits");
+    project.write_spec(&edited);
+
+    project
+        .approve(&["PROJ-412", "--reapprove"])
+        .success()
+        .stdout(contains(UNCONFIRMED_REQUIRED))
+        .stderr(contains("no `acceptance:` section"))
+        .stderr(contains("until one is added"));
+    assert_eq!(header_value(&project.read_spec(), "Acceptance"), "required");
+}
+
+#[test]
+fn a_kept_skipped_or_a_kept_required_with_a_section_does_not_warn() {
+    let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let edited = project
+        .read_spec()
+        .replace("then the order is refused", "then the order waits");
+    project.write_spec(&edited);
+    project
+        .approve(&["PROJ-412", "--reapprove"])
+        .success()
+        .stderr(contains("warning").not());
+
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412"]).success();
+    let edited = project
+        .read_spec()
+        .replace("then the order is refused", "then the order waits");
+    project.write_spec(&edited);
+    project
+        .approve(&["PROJ-412", "--reapprove"])
+        .success()
+        .stderr(contains("warning").not());
+}
+
+#[test]
+fn an_invalid_section_stops_the_approval() {
+    let project = Project::new(Some("rade"));
+    project.configure("acceptance:\n  dir: tests\n");
+    let before = project.read_spec();
+    project
+        .approve(&["PROJ-412"])
+        .failure()
+        .stdout(contains("Acceptance criteria").not())
+        .stderr(contains("`acceptance.run` is required"));
+    assert_eq!(project.read_spec(), before);
 }

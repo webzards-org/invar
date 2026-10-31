@@ -16,7 +16,7 @@
 
 use anyhow::{Context as _, Result};
 
-use crate::format::plan::Acceptance;
+use crate::format::plan::{Acceptance, Mode};
 use crate::gate::approval::Prior;
 use crate::gate::approve::{self, ApproveError, Decision};
 use crate::git;
@@ -38,16 +38,18 @@ pub struct Args {
 
     /// This ticket needs acceptance tests: records `Acceptance: required`.
     ///
-    /// Without either flag, an approval being replaced keeps the value in its
-    /// header; otherwise the value comes from `invar.yaml`, and is `skipped` when
-    /// nothing there sets it. On a Plan already approved it changes nothing
-    /// unless `--reapprove` is given as well.
+    /// Refused when `invar.yaml` has no `acceptance:` section, since there is no
+    /// command to run them with. Without either flag, an approval being replaced
+    /// keeps the value in its header; otherwise the value is `acceptance.required`
+    /// from `invar.yaml`, and `skipped` when there is no such section. On a Plan
+    /// already approved it changes nothing unless `--reapprove` is given as well.
     #[arg(long, conflicts_with = "no_acceptance")]
     pub acceptance: bool,
 
     /// This ticket needs no acceptance tests: records `Acceptance: skipped`.
     ///
-    /// It is how a recorded `required` is dropped: `--reapprove` alone keeps it.
+    /// It overrides `acceptance.required` in `invar.yaml`, and it is how a
+    /// recorded `required` is dropped: `--reapprove` alone keeps it.
     /// On a Plan already approved it changes nothing unless `--reapprove` is
     /// given as well.
     #[arg(long)]
@@ -107,14 +109,22 @@ fn approve(args: Args) -> Result<()> {
         )?,
     };
     let (root, spec) = target::resolve(&query, &cwd)?;
-    let mode = super::mode(&root)?;
+    let config = crate::cli::config(&root)?;
+    let mode = Mode::of(&config);
+    let configured = config.acceptance.as_ref().map(|section| {
+        if section.required {
+            Acceptance::Required
+        } else {
+            Acceptance::Skipped
+        }
+    });
     let flag = match (args.acceptance, args.no_acceptance) {
         (true, _) => Some(Acceptance::Required),
         (_, true) => Some(Acceptance::Skipped),
         _ => None,
     };
 
-    let pending = match approve::prepare(&root, &spec, mode, args.reapprove, flag) {
+    let pending = match approve::prepare(&root, &spec, mode, args.reapprove, flag, configured) {
         Ok(Decision::Approve(pending)) => pending,
         Ok(Decision::AlreadyApproved {
             spec,
@@ -182,6 +192,12 @@ fn approve(args: Args) -> Result<()> {
     }
     println!();
     println!("Acceptance: {}", pending.acceptance());
+    if pending.required_without_section() {
+        eprintln!(
+            "warning: invar.yaml has no `acceptance:` section, so no acceptance tests can be \
+             run for this ticket until one is added"
+        );
+    }
     println!();
 
     let ticket = pending.ticket().to_owned();

@@ -44,6 +44,9 @@ enum Source {
     Flag,
     EarlierApproval,
     UnconfirmedHeader,
+    /// `acceptance.required`, with the value in the header, if any, that the
+    /// approval did not cover.
+    Config(Option<Acceptance>),
     /// With the value in the header, if any, that the approval did not cover.
     Default(Option<Acceptance>),
 }
@@ -83,6 +86,12 @@ impl fmt::Display for Chosen {
                 f,
                 "{value} (from the header; the earlier approval cannot confirm it)"
             ),
+            Source::Config(None) => write!(f, "{value} (from invar.yaml)"),
+            Source::Config(Some(header)) => write!(
+                f,
+                "{value} (from invar.yaml; the `{}` in the header was not part of the approval)",
+                header.as_str()
+            ),
             Source::Default(None) => write!(f, "{value} (default)"),
             Source::Default(Some(header)) => write!(
                 f,
@@ -94,9 +103,13 @@ impl fmt::Display for Chosen {
 }
 
 /// Decide the value of `Acceptance` (plan-header.md §5.3, D-20): `flag` if one
-/// was given, else what `earlier` has to keep, else `acceptance.required` from
-/// `invar.yaml`, else `skipped`.
-pub fn choose_acceptance(flag: Option<Acceptance>, earlier: Earlier) -> Chosen {
+/// was given, else what `earlier` has to keep, else `configured`, which is
+/// `acceptance.required` from `invar.yaml`, else `skipped`.
+pub fn choose_acceptance(
+    flag: Option<Acceptance>,
+    earlier: Earlier,
+    configured: Option<Acceptance>,
+) -> Chosen {
     if let Some(value) = flag {
         return Chosen {
             value,
@@ -119,13 +132,15 @@ pub fn choose_acceptance(flag: Option<Acceptance>, earlier: Earlier) -> Chosen {
         Earlier::NotApproved(value) => Some(value),
         Earlier::Nothing => None,
     };
-    // AT-4: `acceptance.required` from `invar.yaml` plugs in here, ahead of the
-    // default, printed as `(from invar.yaml)`. `--acceptance` is then refused
-    // above when the config has no `acceptance:` section: there is no `run`
-    // command to test with, and the refusal says what to add.
-    Chosen {
-        value: Acceptance::Skipped,
-        source: Source::Default(in_header),
+    match configured {
+        Some(value) => Chosen {
+            value,
+            source: Source::Config(in_header),
+        },
+        None => Chosen {
+            value: Acceptance::Skipped,
+            source: Source::Default(in_header),
+        },
     }
 }
 
@@ -158,6 +173,8 @@ pub struct Pending {
     acceptance: Chosen,
     /// The earlier approval being replaced, under `--reapprove`.
     replaces: Option<Prior>,
+    /// `required`, and `invar.yaml` has no `acceptance:` section to test it with.
+    required_without_section: bool,
 }
 
 /// Check `spec` for approval.
@@ -167,13 +184,21 @@ pub struct Pending {
 /// current is left alone with or without it, unless `flag` names another value
 /// of `Acceptance` than the one on record (D-20). `Acceptance` is decided here,
 /// once the approval being replaced is known, and so before anything is shown.
+///
+/// `configured` is `acceptance.required` from `invar.yaml`; `None` means the
+/// config has no `acceptance:` section, and `--acceptance` is then refused,
+/// whatever state the Plan is in: there is no `run` command to test with.
 pub fn prepare(
     root: &ProjectRoot,
     spec: &Path,
     mode: Mode,
     reapprove: bool,
     flag: Option<Acceptance>,
+    configured: Option<Acceptance>,
 ) -> Result<Decision, ApproveError> {
+    if flag == Some(Acceptance::Required) && configured.is_none() {
+        return Err(ApproveError::NoAcceptanceSection);
+    }
     let report = validate::file(root, spec, mode);
     if !report.is_valid() {
         return Err(ApproveError::Invalid(report));
@@ -244,7 +269,7 @@ pub fn prepare(
         }
         _ => Earlier::Nothing,
     };
-    let acceptance = choose_acceptance(flag, earlier);
+    let acceptance = choose_acceptance(flag, earlier, configured);
     let checksum = approval::approval_digest(&plan, Some(acceptance.value));
 
     Ok(Decision::Approve(Box::new(Pending {
@@ -255,6 +280,7 @@ pub fn prepare(
         checksum,
         acceptance,
         replaces,
+        required_without_section: acceptance.value == Acceptance::Required && configured.is_none(),
     })))
 }
 
@@ -275,6 +301,12 @@ impl Pending {
     /// The value being written, and where it came from.
     pub fn acceptance(&self) -> Chosen {
         self.acceptance
+    }
+
+    /// Whether the value is `required` while `invar.yaml` has no `acceptance:`
+    /// section. Only a kept value can be: `--acceptance` is refused without one.
+    pub fn required_without_section(&self) -> bool {
+        self.required_without_section
     }
 
     /// The value on record in the approval being replaced.
@@ -370,6 +402,8 @@ fn read(spec: &Path) -> Result<String, ApproveError> {
 
 #[derive(Debug)]
 pub enum ApproveError {
+    /// `--acceptance`, and `invar.yaml` has no `acceptance:` section.
+    NoAcceptanceSection,
     /// `plan validate` does not pass. The report says why.
     Invalid(Report),
     Read {
@@ -415,6 +449,16 @@ pub enum ApproveError {
 impl fmt::Display for ApproveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::NoAcceptanceSection => write!(
+                f,
+                "`--acceptance` needs an `acceptance:` section in invar.yaml, and it has \
+                 none, so there is no command to run the tests with. Add one, with your \
+                 own directory and test command:\n\n\
+                 acceptance:\n  \
+                 dir: tests/Acceptance\n  \
+                 run: [\"vendor/bin/pest\", \"--log-junit\", \"{{report}}\", \"{{files}}\"]\n\n\
+                 or approve with `--no-acceptance`"
+            ),
             Self::Invalid(report) => {
                 let count = report.problems.len();
                 let noun = if count == 1 { "problem" } else { "problems" };
