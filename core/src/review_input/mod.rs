@@ -218,7 +218,7 @@ fn write_section(out: &mut String, plan: &Plan, heading: &str) {
 
 /// A section's text without the blank lines around it, line endings
 /// normalized; `none` when the Plan has no such section or it is blank.
-fn section(plan: &Plan, heading: &str) -> String {
+pub(crate) fn section(plan: &Plan, heading: &str) -> String {
     let normalized = plan
         .section(heading)
         .map(|text| text.replace("\r\n", "\n").replace('\r', "\n"));

@@ -1,0 +1,41 @@
+=== invar acceptance spec: SHOP-214 ===
+
+Ticket: SHOP-214
+Acceptance: required
+style: integration
+
+=== Where and how ===
+
+dir: tests/Acceptance
+run: ["vendor/bin/pest", "--log-junit", "{report}", "{files}"]
+  You do not run this: `invar acceptance lock` does, and fills in `{report}` and `{files}`.
+fakes_allowed: http, mail
+
+=== Conventions ===
+
+- One ticket per file; a ticket may have several files. Every file lives under the directory above.
+- Each file has the pending lock line `invar-lock: SHOP-214` within its first 10 lines, behind the file's own comment prefix. Never write a digest: `invar acceptance lock` writes it.
+- Every test's name contains its criterion's id as a whole token (`AC3`), exactly one id per test. Each criterion has at least one test.
+- The criterion's text is in the test's docblock or comment, word for word.
+- Use the real database and the application's own scopes, policies and middleware. Fake only what `fakes_allowed` lists.
+- A negative criterion (refused, 403, 404, not found, not changed) gets a control probe in the same test: the same request that must succeed for an allowed case, so that the test fails for the right reason before the code exists.
+- Every test must fail on an assertion before the code exists. A test that passes, or that fails on an error (a missing class), is refused by `invar acceptance lock`.
+- Write only test files, and helpers under the directory above. Never application code, the Plan, or a file with a locked `invar-lock:` line.
+
+=== Criteria ===
+
+AC1: Given an unpaid order, when its owner cancels it, then it is cancelled and its stock is released.
+AC2: Given a paid order, when its owner cancels it, then the request is refused with 403.
+
+=== Scope ===
+
+`Orders` only: `CancelOrder`, and its route.
+
+=== Implementation context ===
+
+- AI_CONTEXT: controllers stay thin
+- BUSINESS_CONTEXT: a paid order is never cancelled here
+
+=== Next step ===
+
+Run `invar acceptance lock SHOP-214`. It checks coverage, that every criterion has a test, and red before green, that every test fails on an assertion.

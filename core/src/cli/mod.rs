@@ -17,6 +17,7 @@ use crate::format::config;
 use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
 
+mod acceptance;
 mod context;
 mod decision;
 mod done;
@@ -57,6 +58,9 @@ pub enum Command {
     /// is gone, for the planner to read next time.
     #[command(subcommand)]
     Decision(decision::Command),
+    /// Work with the acceptance tests of a ticket, for the test-writer agent.
+    #[command(subcommand)]
+    Acceptance(acceptance::Command),
     /// Render the Plan as a PR description.
     ///
     /// Fixed section order — Intent, Scope, Open questions / answers,
@@ -136,6 +140,7 @@ impl Cli {
             Command::Hash(args) => hash::run(args).map(|()| ExitCode::SUCCESS),
             Command::Plan(command) => plan::run(command),
             Command::Decision(command) => decision::run(command).map(|()| ExitCode::SUCCESS),
+            Command::Acceptance(command) => acceptance::run(command).map(|()| ExitCode::SUCCESS),
             Command::PrBody(args) => pr_body::run(args).map(|()| ExitCode::SUCCESS),
             Command::ReviewInput(args) => review_input::run(args).map(|()| ExitCode::SUCCESS),
             Command::Done(args) => done::run(args).map(|()| ExitCode::SUCCESS),

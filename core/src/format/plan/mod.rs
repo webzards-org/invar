@@ -235,8 +235,6 @@ impl Plan {
     /// The criteria with their ids, in order, read by the rules `plan validate`
     /// checks them with (§6.4). Empty when they have no ids, which only an approval
     /// from before ids existed can be (D-16).
-    // `invar acceptance spec` is the first caller, in the next commit.
-    #[allow(dead_code)]
     pub fn criteria(&self) -> Vec<Criterion> {
         self.acceptance_criteria()
             .map_or_else(Vec::new, criteria::parse_criteria)
