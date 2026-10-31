@@ -1,11 +1,12 @@
 # Contract: `invar.yaml`
 
-**Version:** 2.1.0 — `done.commit` and `done.commit_message`; see §11
+**Version:** 2.2.0 — the `acceptance` section; see §11
 **Status:** stable
 **Implements:** §6 (Config file), §13c (the review's base branch), §14.3; light
-mode L-2 and L-7 (`docs/TASKS-M1.md`)
-**Read by:** the core (`format/config`; `invar done` for `done.*`), the protocol skill (`review.offer`,
-M1-18), any later reimplementation
+mode L-2 and L-7 (`docs/TASKS-M1.md`); A-2, A-6 and A-7 (`docs/TASKS-AT.md`)
+**Read by:** the core (`format/config`; `invar done` for `done.*`; `plan approve`
+for `acceptance.required`), the protocol skill (`review.offer`, M1-18), any later
+reimplementation
 
 > Changing this file is a **public-contract change** (§14.3). It is made
 > deliberately, in its own PR, with the reason recorded, the version bumped,
@@ -27,7 +28,8 @@ round trip.
 
 §6 of the design document describes the full key set the finished system will
 read. Version 1.0.0 of this contract covers **light mode** (M1), which reads
-four keys (unchanged in 2.0.0); 2.1.0 adds the two keys of the `done` section.
+four keys (unchanged in 2.0.0); 2.1.0 adds the two keys of the `done` section,
+and 2.2.0 the `acceptance` section.
 The rest of §6 is listed in §5 below so that a config written for a
 later milestone is read by this one without failing and without noise.
 
@@ -52,6 +54,11 @@ later milestone is read by this one without failing and without noise.
 | `context.binding_limit` | integer | `9000` | Character ceiling for `invar context show --binding` (M1-14) |
 | `done.commit` | bool | `false` | Whether `invar done` commits the deletion of the Plan without being given `--commit`; see §3.5 |
 | `done.commit_message` | string | `Remove plan {ticket}` | The message of that commit; `{ticket}` is replaced by the Plan's ticket id |
+| `acceptance.required` | bool | `true` when the section is present | The default of `plan approve` for whether a ticket needs acceptance tests; see §3.6 |
+| `acceptance.style` | string | `integration` | The kind of acceptance tests; `gherkin` is reserved |
+| `acceptance.dir` | string | none: **required** in the section | Where the acceptance tests live, relative to the project root |
+| `acceptance.run` | list of strings | none: **required** in the section | The command that runs them, with no shell |
+| `acceptance.fakes_allowed` | list of strings | empty | What the tests may fake; not interpreted by the core |
 
 A dotted key is a key inside a section: `review.offer` is written as
 
@@ -60,8 +67,8 @@ review:
   offer: true
 ```
 
-The sections `review`, `git`, `context` and `done` must be mappings when
-present. An empty section (`review:` with nothing under it) is the same as an
+The sections `review`, `git`, `context`, `done` and `acceptance` must be mappings
+when present. An empty section (`review:` with nothing under it) is the same as an
 absent one.
 
 ### 3.1 `scenarios`
@@ -144,6 +151,58 @@ times, or not at all. A message that starts with a YAML indicator or contains
 `: ` must be quoted: `commit_message: "chore: remove the Plan of {ticket}"`.
 The key applies only when a commit is made; set alone, it changes nothing.
 
+### 3.6 The `acceptance` section
+
+```yaml
+acceptance:
+  required: true                  # default when the section is present
+  style: integration              # integration | gherkin (reserved)
+  dir: tests/Acceptance           # required
+  run: ["vendor/bin/pest", "--log-junit", "{report}", "{files}"]   # required
+  fakes_allowed: [http, mail, queue, notification]                 # default []
+```
+
+**Absent means the previous behavior:** the project has no acceptance tests, and
+`plan approve` defaults to `skipped`. A section in which every key is empty is the
+same as an absent one (D-3).
+
+**`required`** is the default of `plan approve` for this project, and `true` when
+the section is present (D-10). It is only a default: the developer still decides
+per ticket at approval, and a flag or a recorded value comes first (`plan-header.md`
+§5.3).
+
+**`style`** is `integration`. `gherkin` is reserved: an error that names it and says
+it arrives later. Any other value is an error listing the allowed ones.
+
+**`dir`** is a path relative to the project root: not empty, not absolute, with no
+`..` segment and no trailing separator. A backslash counts as a separator, and a
+leading drive letter (`C:`) as absolute, so the rule does not depend on the platform
+reading the file. Whether the directory exists is not checked here.
+
+**`run`** is a list of strings with at least one element. The core runs it without a
+shell (D-11): element 0 is the program, and the rest are its arguments, with no
+splitting and no quoting rules. Element 0 is not empty and is not a placeholder. A
+string is an error with its own message saying to write a list; it is never split.
+
+| Placeholder | Must appear | Becomes |
+|---|---|---|
+| `{report}` | Exactly once, as a whole element | One path the core chooses |
+| `{files}` | Exactly once, as a whole element | Zero or more arguments, one per test file |
+
+`{files}` is required because without it, locking the tests of one ticket would run
+the whole suite. A **placeholder** is `{`, then one or more letters, digits, `_` or
+`-`, then `}`, anywhere in an element. Any other placeholder is an error, so a typo
+such as `{reports}` is caught. Any other brace is a literal one: `{}`, `{a,b}` and
+`{"k": 1}` are passed on as they are.
+
+Reading the command runs nothing. This version of the core does not execute it.
+
+**`fakes_allowed`** is a list of non-empty strings, empty by default. The core does
+not interpret it and passes it on to the test-writer, so unknown values are accepted
+as they are.
+
+`invar init` writes this section commented out (D-12).
+
 ## 4. Value rules
 
 These apply to every key in §3.
@@ -193,7 +252,7 @@ version of `invar` must not break an older one.
 
 - The warning names the key by its full dotted path (`review.ofer`,
   `senarios`), so a typo is easy to find.
-- Unknown keys are reported at the top level and inside the four sections
+- Unknown keys are reported at the top level and inside the five sections
   this version reads. Keys inside an ignored subtree (`lint.rules.…`) are never reported;
   that subtree belongs to a later milestone as a whole.
 - The value of an unknown key is not validated. It may be any YAML.
@@ -209,7 +268,7 @@ Each of these is a distinct failure, so a caller can tell them apart:
 |---|---|---|
 | **Missing** | No `invar.yaml` in the project root | The path it looked for, and that `invar init` creates it |
 | **Unreadable** | The file exists but cannot be read (permissions, a directory of that name) | The path and the operating system's reason |
-| **Invalid** | Not UTF-8, not valid YAML, not a mapping, a duplicated key, a value outside §3 and §4 | The path, the line and column where YAML reports one, and what is wrong |
+| **Invalid** | Not UTF-8, not valid YAML, not a mapping, a duplicated key, a value outside §3 and §4, an `acceptance` section that breaks §3.6 | The path, the line and column where YAML reports one, and what is wrong |
 | **Scenarios not supported** | `scenarios: true`, when a command runs | That `.feature` files arrive in a later milestone, and to set `scenarios: false` |
 
 An invalid file reports every problem with a known key's value in one message
@@ -300,6 +359,31 @@ run a commit-message hook (Conventional Commits and the like) that would refuse
 the default; `invar done` never bypasses it, so the project chooses a message
 its own hook accepts.
 
+**D-10 — `acceptance.required` defaults to `true` when the section is present**
+(2.2.0). A team that writes down a directory and a test command has asked for
+acceptance tests, so it gets them by default, and a ticket that needs none is a
+decision someone makes at approval with `--no-acceptance`. Skipping is the weaker
+guarantee, so skipping is what has to be asked for (A-6). This does not break the
+rule that an absent key means the previous behavior: an absent *section* still does,
+and a config with the section did not exist before this version.
+
+**D-11 — `acceptance.run` is a list, and runs without a shell** (2.2.0). A string form
+would make the core define shell splitting and quoting, which is a language of its
+own that every reimplementation would have to match. Handing the string to a shell
+would make the command depend on the platform, and on which shell it finds. A list
+needs neither: each element is one argument, exactly as written. A project that does
+need a shell says so: `["sh", "-c", …]`, or a script of its own.
+
+Each placeholder is a whole element for the same reason. `{files}` becomes any number
+of arguments, which has no meaning inside a longer one, and keeping `{report}` to the
+same rule means the core never rewrites text inside an argument.
+
+**D-12 — `invar init` writes the `acceptance` section commented out** (2.2.0). `run`
+and `dir` depend on the project, and the core must not guess them (A-2). An active
+section with a wrong command would stop the first cycle at the test-writer, on a
+project that has not chosen acceptance tests at all. Commented out, the section is one
+edit away, and a project that does nothing keeps the behavior of an absent section.
+
 ## 9. Open questions
 
 **OQ-1 — JSON Schema.** `contracts/README.md` lists a JSON Schema for
@@ -336,7 +420,8 @@ done:
 
 Reads as: light mode, the review is offered, `develop` is the base branch,
 binding context may be at most 8,000 characters, and `invar done` commits the
-Plan's deletion as `chore: remove the Plan of SHOP-214`. No warnings.
+Plan's deletion as `chore: remove the Plan of SHOP-214`. There are no acceptance
+tests. No warnings.
 
 ### 10.2 Valid — empty
 
@@ -346,7 +431,7 @@ Plan's deletion as `chore: remove the Plan of SHOP-214`. No warnings.
 ```
 
 Reads as: `scenarios: false`, `review.offer: true` (D-8), base branch
-detected, `binding_limit: 9000`, `done.commit: false`.
+detected, `binding_limit: 9000`, `done.commit: false`, no `acceptance` section.
 
 ### 10.3 Valid — written for a later milestone
 
@@ -420,7 +505,96 @@ of the agent's context (§3.4, D-5). A team that raised the limit to fit a
 growing `BUSINESS_CONTEXT.md` would stop delivering its invariants and not
 notice. The fix is to trim or split the context files, not to raise the limit.
 
+### 10.7 Valid — a full `acceptance` section
+
+<!-- example: valid-acceptance-full -->
+```yaml
+acceptance:
+  required: true
+  style: integration
+  dir: tests/Acceptance
+  run: ["vendor/bin/pest", "--log-junit", "{report}", "{files}"]
+  fakes_allowed: [http, mail, queue, notification]
+```
+
+Reads as written. No warnings.
+
+### 10.8 Valid — a minimal `acceptance` section
+
+<!-- example: valid-acceptance-minimal -->
+```yaml
+acceptance:
+  dir: tests/Acceptance
+  run: ["vendor/bin/pest", "--log-junit", "{report}", "{files}"]
+```
+
+Reads as `required: true` (D-10), `style: integration` and no `fakes_allowed`.
+
+### 10.9 Invalid — `acceptance` without `run`
+
+<!-- example: invalid-acceptance-no-run -->
+```yaml
+acceptance:
+  dir: tests/Acceptance
+```
+
+**Why:** a section with no command cannot run the tests it asks for.
+
+### 10.10 Invalid — `run` without `{report}`
+
+<!-- example: invalid-acceptance-no-report -->
+```yaml
+acceptance:
+  dir: tests/Acceptance
+  run: ["vendor/bin/pest", "{files}"]
+```
+
+**Why:** the report is where the core reads the result, so the command has to be told
+where to write it.
+
+### 10.11 Invalid — `style: gherkin`
+
+<!-- example: invalid-acceptance-gherkin -->
+```yaml
+acceptance:
+  style: gherkin
+  dir: tests/Acceptance
+  run: ["vendor/bin/pest", "--log-junit", "{report}", "{files}"]
+```
+
+**Why:** the value is reserved (A-7). The message names it and says it arrives later,
+so it is not mistaken for a typo.
+
+### 10.12 Invalid — a `..` in `dir`
+
+<!-- example: invalid-acceptance-dir -->
+```yaml
+acceptance:
+  dir: ../shared/tests
+  run: ["vendor/bin/pest", "--log-junit", "{report}", "{files}"]
+```
+
+**Why:** the tests the core runs and locks stay inside the project.
+
 ## 11. Version history
+
+**2.2.0 — the `acceptance` section (AT-4).**
+
+- §3, new §3.6: `acceptance.required`, `style`, `dir`, `run` and `fakes_allowed`. New
+  D-10, D-11 and D-12; new examples 10.7 to 10.12.
+- §6: unknown keys are reported inside `acceptance` too.
+- §7: **Invalid** covers a section that breaks §3.6.
+- `plan approve` reads `acceptance.required` (`plan-header.md` §5.3), and refuses
+  `--acceptance` when the section is absent. Nothing runs the command yet.
+
+**Why:** acceptance tests need a command and a directory that only the project knows,
+and keeping them in configuration keeps the core ignorant of any test framework (A-2).
+The default for a ticket belongs here too, and the decision stays a person's (A-6).
+
+**Compatibility:** new optional section. A config without it behaves exactly as
+before, so no file that was valid becomes invalid. A config written for 2.2.0 read by
+an older `invar` warns about the unknown key `acceptance` and keeps working.
+
 
 **2.1.0 — `done.commit` and `done.commit_message`.**
 
