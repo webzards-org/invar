@@ -1,5 +1,5 @@
 //! Tests for Plan parsing and writing (M1-6), against
-//! `contracts/formats/plan-header.md` v1.4.1.
+//! `contracts/formats/plan-header.md` v1.6.0.
 //!
 //! The valid Plan used throughout is the contract's own example 9.1, read out
 //! of the Markdown, so the contract and the parser cannot drift apart.
@@ -108,7 +108,7 @@ fn contract_9_1_sections_are_found_in_order() {
     );
     let criteria = plan.acceptance_criteria().unwrap();
     assert!(
-        criteria.starts_with("- Given a pending, unpaid order of mine"),
+        criteria.starts_with("- AC1: Given a pending, unpaid order of mine"),
         "{criteria}"
     );
     assert!(
@@ -575,11 +575,18 @@ fn blank_lines_between_header_and_body_do_not_change_the_body() {
 #[test]
 fn every_missing_section_is_reported_in_one_run() {
     let mut text = valid();
-    for heading in ["## Intent\n", "## Scope\n", "## Implementation context\n"] {
+    for heading in ["## Intent\n", "## Scope\n"] {
         text = replace(&text, heading, "");
     }
-    // With their headings gone, the text joins the previous section: the
-    // problems left are exactly the three missing headings.
+    text = text
+        .split("## Implementation context\n")
+        .next()
+        .unwrap()
+        .to_owned();
+    // With their headings gone, the text joins the previous section; the last
+    // section goes with its text, since list items that joined the criteria
+    // would be criteria without ids. The problems left are exactly the three
+    // missing headings.
     let found = messages(&text, Mode::Light);
     assert_eq!(
         found,
@@ -787,23 +794,32 @@ fn markers_and_comments_do_not_count_as_acceptance_criteria() {
 }
 
 #[test]
-fn real_criteria_are_accepted_whatever_their_form() {
+fn real_criteria_are_accepted_in_every_list_form() {
     for content in [
-        "- Given a paid order, when I cancel it, then it is refused.",
-        "Given a paid order, when I cancel it, then it is refused.",
-        "1. Given a paid order, when I cancel it, then it is refused.",
-        "- [ ] Given a paid order, when I cancel it, then it is refused.",
-        "<!-- one criterion per item -->\n- Given a paid order, when I cancel it, then it is refused.",
-        "<!-- note --> Given a paid order, when I cancel it, then it is refused.",
+        "- AC1: Given a paid order, when I cancel it, then it is refused.",
+        "* AC1: Given a paid order, when I cancel it, then it is refused.",
+        "1. AC1: Given a paid order, when I cancel it, then it is refused.",
+        "- [ ] AC1: Given a paid order, when I cancel it, then it is refused.",
+        "<!-- one criterion per item -->\n- AC1: Given a paid order, when I cancel it, then it is refused.",
+        "<!-- note --> - AC1: Given a paid order, when I cancel it, then it is refused.",
         // A placeholder next to a real criterion does not cancel it.
-        "TBD\n- Given a paid order, when I cancel it, then it is refused.",
+        "TBD\n- AC1: Given a paid order, when I cancel it, then it is refused.",
         // Not English, and not ASCII.
-        "- Ako je narud\u{17E}bina pla\u{107}ena, zahtev se odbija sa 403.",
+        "- AC1: Ako je narud\u{17E}bina pla\u{107}ena, zahtev se odbija sa 403.",
         // A number or a `#` inside the text is just text.
-        "- Order #214 is refused, not cancelled.",
+        "- AC1: Order #214 is refused, not cancelled.",
         // Starting with a placeholder word is not being one.
-        "None of the unpaid orders is deleted.",
-        "1.5 seconds after the click the button is disabled.",
+        "- AC1: None of the unpaid orders is deleted.",
+        "- AC1: 1.5 seconds after the click the button is disabled.",
+        // A wrapped item keeps its one id, however it is indented.
+        "- AC1: Given a paid order,\n  when I cancel it, then it is refused.",
+        "- AC1: Given a paid order,\n\twhen I cancel it, then it is refused.",
+        // Blank lines and nested detail stay with the item above.
+        "- AC1: Given a paid order,\n\n  when I cancel it, then:\n  - it is refused\n- AC2: Given x, then y.",
+        // A wrapped line may start with anything but a list item's id.
+        "- AC1: Given a paid order,\n  ac2 is its code, and it is refused.",
+        // An item's own margin of one space.
+        " - AC1: Given x, then y.\n - AC2: Given y, then z.",
     ] {
         Plan::parse(&with_criteria(content), Mode::Light)
             .unwrap_or_else(|problems| panic!("{content:?} was refused:\n{problems}"));
@@ -1033,4 +1049,490 @@ fn check_without_a_header_reports_only_that() {
     assert_eq!(checked.problems.len(), 1);
     assert_eq!(checked.ticket, None);
     assert_eq!(checked.status, None);
+}
+
+// --- numbered criteria (plan-header.md §6.4, D-16, D-18) ---------------------
+
+/// The 1-based line of the first line that contains `needle`.
+fn line_of(text: &str, needle: &str) -> usize {
+    text.lines()
+        .position(|line| line.contains(needle))
+        .unwrap_or_else(|| panic!("{needle:?} not in the fixture"))
+        + 1
+}
+
+/// `content` as the criteria yields exactly one problem: on the line holding
+/// `at`, and mentioning `what`.
+fn assert_criteria_problem(content: &str, at: &str, what: &str) {
+    let text = with_criteria(content);
+    let found = messages(&text, Mode::Light);
+    assert_eq!(found.len(), 1, "{content:?}: {found:#?}");
+    let prefix = format!("line {}: ", line_of(&text, at));
+    assert!(found[0].starts_with(&prefix), "{prefix}: {found:#?}");
+    assert!(found[0].contains(what), "{what:?}: {found:#?}");
+}
+
+#[test]
+fn a_criterion_without_an_id_is_refused_at_its_line() {
+    assert_criteria_problem(
+        "- AC1: Given x, then y.\n- Given z, then w.",
+        "Given z",
+        "this criterion has no id",
+    );
+}
+
+#[test]
+fn a_malformed_id_is_refused_naming_it() {
+    for (content, token) in [
+        ("- AC01: Given x, then y.", "`AC01:` is not a criterion id"),
+        ("- ac1: Given x, then y.", "`ac1:` is not a criterion id"),
+        ("- Ac1: Given x, then y.", "`Ac1:` is not a criterion id"),
+        ("- AC1 Given x, then y.", "`AC1` is not a criterion id"),
+        ("- AC1:Given x, then y.", "`AC1:` is not a criterion id"),
+        ("- AC0: Given x, then y.", "`AC0:` is not a criterion id"),
+        ("- AC 1: Given x, then y.", "`AC 1:` is not a criterion id"),
+        ("- AC-1: Given x, then y.", "`AC-1:` is not a criterion id"),
+        (
+            "- AC99999999999999999999: Given x.",
+            "`AC99999999999999999999:` is not a criterion id",
+        ),
+    ] {
+        assert_criteria_problem(content, "Given x", token);
+    }
+}
+
+#[test]
+fn a_word_that_starts_like_an_id_is_only_a_missing_id() {
+    assert_criteria_problem(
+        "- Accepted orders are listed.",
+        "Accepted",
+        "this criterion has no id",
+    );
+}
+
+#[test]
+fn a_duplicate_id_is_refused_at_the_second_one() {
+    let text = with_criteria("- AC1: First.\n- AC2: Second.\n- AC2: Third.");
+    let found = messages(&text, Mode::Light);
+    assert_eq!(
+        found,
+        [format!(
+            "line {}: `AC2` appears again (first on line {}); each criterion has its own id — \
+             renumber them (plan-header.md §6.4)",
+            line_of(&text, "Third"),
+            line_of(&text, "Second"),
+        )]
+    );
+}
+
+#[test]
+fn a_gap_is_refused_at_the_id_after_it() {
+    assert_criteria_problem(
+        "- AC1: First.\n- AC3: Third.",
+        "Third",
+        "`AC3` follows `AC1`, so `AC2` is missing",
+    );
+    assert_criteria_problem(
+        "- AC1: First.\n- AC5: Fifth.",
+        "Fifth",
+        "`AC5` follows `AC1`, so `AC2` to `AC4` are missing",
+    );
+    assert_criteria_problem(
+        "- AC2: Second.",
+        "Second",
+        "`AC2` is the first id, so `AC1` is missing",
+    );
+}
+
+#[test]
+fn ids_out_of_order_are_refused_once_and_not_as_a_gap() {
+    assert_criteria_problem(
+        "- AC2: Second.\n- AC1: First.",
+        "First",
+        "`AC1` is out of order: it comes after `AC2`",
+    );
+}
+
+#[test]
+fn a_gap_a_bad_item_may_fill_is_not_reported_on_top_of_it() {
+    assert_criteria_problem(
+        "- AC1: First.\n- Second has none.\n- AC3: Third.",
+        "Second",
+        "this criterion has no id",
+    );
+    // One bad item cannot explain two missing ids.
+    let found = messages(
+        &with_criteria("- AC1: First.\n- Second has none.\n- AC4: Fourth."),
+        Mode::Light,
+    );
+    assert_eq!(found.len(), 2, "{found:#?}");
+}
+
+#[test]
+fn a_line_of_text_outside_a_list_item_is_refused() {
+    for (content, at) in [
+        ("Given x, then y.", "Given x"),
+        ("The criteria:\n- AC1: Given x.", "The criteria"),
+        // Not indented, so not a continuation.
+        ("- AC1: Given x,\nwhen y.", "when y"),
+        ("### Refusals\n- AC1: Given x.", "### Refusals"),
+        // An id without a list marker, indented or not, is not swallowed.
+        (
+            "- AC1: Given x.\nAC2: Given y.\n- AC3: Given z.",
+            "AC2: Given y.",
+        ),
+        (
+            "- AC1: Given x.\n  AC2: Given y.\n- AC3: Given z.",
+            "AC2: Given y.",
+        ),
+    ] {
+        assert_criteria_problem(content, at, "every criterion is a numbered list item");
+    }
+}
+
+#[test]
+fn an_indented_item_with_an_id_is_a_criterion_and_not_a_continuation() {
+    // Otherwise `AC3` would vanish into `AC1`, and the gap with it.
+    assert_criteria_problem(
+        "- AC1: First.\n  - AC3: Third.",
+        "Third",
+        "`AC2` is missing",
+    );
+    Plan::parse(
+        &with_criteria("  - AC1: First.\n  - AC2: Second."),
+        Mode::Light,
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_placeholder_after_an_id_is_still_a_placeholder() {
+    for content in [
+        "- AC1: TBD",
+        "- AC1: **N/A.**",
+        "- AC1: _none_",
+        "- AC1:",
+        "- AC1: ...",
+        "- AC1: <!-- fill in -->",
+        "- [ ] AC1: TODO",
+    ] {
+        assert_criteria_rejected(content);
+    }
+    // Beside a real criterion it is its own problem, not a silent gap.
+    assert_criteria_problem(
+        "- AC1: TBD\n- AC2: Given x, then y.",
+        "AC1: TBD",
+        "`AC1` has no criterion",
+    );
+}
+
+#[test]
+fn every_id_problem_is_reported_in_one_run() {
+    let found = messages(
+        &with_criteria("Intro.\n- AC1: A.\n- AC1: B.\n- ac2: C.\n- AC6: D.\n- AC3: E."),
+        Mode::Light,
+    );
+    for needle in [
+        "every criterion is a numbered",
+        "`AC1` appears again",
+        "`ac2:` is not",
+        "`AC3` is out of order",
+    ] {
+        assert!(
+            found.iter().any(|m| m.contains(needle)),
+            "{needle}: {found:#?}"
+        );
+    }
+}
+
+#[test]
+fn crlf_does_not_change_the_lines_or_the_verdict() {
+    let text = with_criteria("- AC1: First.\n- AC3: Third.");
+    let at = line_of(&text, "Third");
+    let found = messages(&text.replace('\n', "\r\n"), Mode::Light);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(
+        found[0].starts_with(&format!("line {at}: `AC3` follows")),
+        "{found:#?}"
+    );
+    parse(&valid().replace('\n', "\r\n"));
+}
+
+/// The body of `text` under the header of an approval.
+fn as_approved(text: &str) -> String {
+    let body = text.split_once("\n---\n").unwrap().1;
+    contract_example("9.2") + body
+}
+
+const UNNUMBERED: &str = "- Given x, then y.\n- Given z, then w.\nA closing remark.";
+
+#[test]
+fn an_approved_plan_with_no_ids_at_all_is_valid_as_it_was_approved() {
+    parse(&as_approved(&with_criteria(UNNUMBERED)));
+    // `Status` is what decides: the same text as a draft is not valid.
+    assert_eq!(messages(&with_criteria(UNNUMBERED), Mode::Light).len(), 3);
+    // Malformed ids are no ids: 1.5.0 read them as prose.
+    parse(&as_approved(&with_criteria("- ac1: Given x, then y.")));
+}
+
+#[test]
+fn an_approved_plan_with_some_ids_is_held_to_every_rule() {
+    for (content, what) in [
+        ("- AC1: A.\n- AC3: B.", "`AC2` is missing"),
+        ("- AC1: A.\n- AC1: B.", "`AC1` appears again"),
+        ("- AC2: A.\n- AC1: B.", "out of order"),
+        ("- AC1: A.\n- B has none.", "this criterion has no id"),
+    ] {
+        let found = messages(&as_approved(&with_criteria(content)), Mode::Light);
+        assert_eq!(found.len(), 1, "{content:?}: {found:#?}");
+        assert!(found[0].contains(what), "{what:?}: {found:#?}");
+    }
+}
+
+#[test]
+fn an_approved_plan_with_no_criteria_is_still_refused() {
+    let found = messages(&as_approved(&with_criteria("TBD")), Mode::Light);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(
+        found[0].contains("`## Acceptance criteria` is empty"),
+        "{found:#?}"
+    );
+}
+
+#[test]
+fn a_new_approval_is_held_to_the_rules_whatever_the_status_says() {
+    let approved = as_approved(&with_criteria(UNNUMBERED));
+    assert_eq!(Plan::problems_as_draft(&approved, Mode::Light).len(), 3);
+    assert!(Plan::problems_as_draft(&valid(), Mode::Light).is_empty());
+}
+
+#[test]
+fn a_plan_just_reset_to_draft_reads_back_with_its_body_as_it_was() {
+    let mut plan = parse(&as_approved(&with_criteria(UNNUMBERED)));
+    plan.reset_to_draft();
+    let text = plan.to_text();
+    assert!(Plan::parse(&text, Mode::Light).is_err());
+    Plan::parse_reset(&text, Mode::Light).unwrap();
+}
+
+fn fixture_approved_under_1_5_0() -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../contracts/fixtures/plan/approved-1.5.0-no-ids.md");
+    fs::read_to_string(path).unwrap()
+}
+
+#[test]
+fn the_plan_approved_under_1_5_0_is_valid_and_has_no_ids() {
+    let plan = parse(&fixture_approved_under_1_5_0());
+    assert_eq!(plan.header().status, Status::Approved);
+    assert!(!plan.acceptance_criteria().unwrap().contains("AC1"));
+}
+
+#[test]
+fn the_new_rules_do_not_apply_with_scenarios() {
+    // Both are ordinary additional sections there (D-17).
+    let text = contract_example("9.4").replace(
+        "## Scenarios to delete\n",
+        "## Scenarios to delete\n_none_\n\n## Acceptance criteria\nnot numbered\n\n\
+         ## Acceptance tests to change\n\n## Implementation context\n- AI_CONTEXT: x\n",
+    );
+    Plan::parse(&text, Mode::Scenarios).unwrap();
+}
+
+// --- `## Acceptance tests to change` (plan-header.md §6.5, D-17) -------------
+
+/// Example 9.1 with `content` as the section, right after the criteria.
+fn with_tests_to_change(content: &str) -> String {
+    replace(
+        &valid(),
+        "## Implementation context\n",
+        &format!("## Acceptance tests to change\n{content}\n## Implementation context\n"),
+    )
+}
+
+fn assert_tests_to_change_problem(content: &str, at: &str, what: &str) {
+    let text = with_tests_to_change(content);
+    let found = messages(&text, Mode::Light);
+    assert_eq!(found.len(), 1, "{content:?}: {found:#?}");
+    let prefix = format!("line {}: ", line_of(&text, at));
+    assert!(found[0].starts_with(&prefix), "{prefix}: {found:#?}");
+    assert!(found[0].contains(what), "{what:?}: {found:#?}");
+}
+
+#[test]
+fn the_section_is_optional_and_its_valid_forms_pass() {
+    parse(&valid());
+    for content in [
+        "- tests/A.php — change — the rule moved\n- tests/B.php — delete — no longer applies\n",
+        "_none_\n",
+        // Blank lines around it are nothing, and a comment is not an item.
+        "\n- tests/A.php — change — the rule moved\n\n<!-- one more later -->\n",
+        // Only the first two separators are separators.
+        "- tests/A.php — change — the rule moved — see SHOP-9\n",
+    ] {
+        Plan::parse(&with_tests_to_change(content), Mode::Light)
+            .unwrap_or_else(|problems| panic!("{content:?} was refused:\n{problems}"));
+    }
+}
+
+#[test]
+fn an_item_without_a_path_an_action_or_a_reason_is_refused_at_its_line() {
+    for (content, what) in [
+        ("- — change — why\n", "has no path"),
+        ("-\n", "has no path"),
+        ("- tests/A.php\n", "has no action"),
+        ("- tests/A.php —  — why\n", "has no action"),
+        ("- tests/A.php — change\n", "has no reason"),
+        ("- tests/A.php — change —\n", "has no reason"),
+        ("- tests/A.php — delete — TBD\n", "has no reason"),
+    ] {
+        let text = with_tests_to_change(content);
+        let line = line_of(&text, "## Acceptance tests to change") + 1;
+        let found = messages(&text, Mode::Light);
+        assert_eq!(found.len(), 1, "{content:?}: {found:#?}");
+        assert!(
+            found[0].starts_with(&format!("line {line}: ")),
+            "{found:#?}"
+        );
+        assert!(found[0].contains(what), "{what:?}: {found:#?}");
+    }
+}
+
+#[test]
+fn an_item_missing_two_parts_reports_both() {
+    let found = messages(&with_tests_to_change("- tests/A.php —\n"), Mode::Light);
+    assert_eq!(found.len(), 2, "{found:#?}");
+    assert!(found[0].contains("has no action"), "{found:#?}");
+    assert!(found[1].contains("has no reason"), "{found:#?}");
+}
+
+#[test]
+fn an_unknown_action_is_refused_naming_it() {
+    for action in ["rewrite", "Change", "DELETE", "remove"] {
+        assert_tests_to_change_problem(
+            &format!("- tests/A.php — {action} — why\n"),
+            "tests/A.php",
+            &format!("unknown action `{action}`"),
+        );
+    }
+}
+
+#[test]
+fn the_wrong_separators_and_wrapped_items_are_refused() {
+    assert_tests_to_change_problem(
+        "- tests/A.php - change - why\n",
+        "tests/A.php",
+        "the separators are a space, an em dash and a space",
+    );
+    assert_tests_to_change_problem(
+        "tests/A.php — change — why\n",
+        "tests/A.php",
+        "one unindented line",
+    );
+    assert_tests_to_change_problem(
+        "- tests/A.php — change — why it\n  has to move\n",
+        "has to move",
+        "one unindented line",
+    );
+}
+
+#[test]
+fn an_empty_section_is_refused_at_its_heading() {
+    for content in ["", "<!-- later -->\n", "...\n"] {
+        assert_tests_to_change_problem(
+            content,
+            "## Acceptance tests to change",
+            "`## Acceptance tests to change` is empty",
+        );
+    }
+}
+
+#[test]
+fn none_is_the_single_line_or_it_is_an_error() {
+    assert_tests_to_change_problem(
+        "_none_\n- tests/A.php — change — why\n",
+        "_none_",
+        "`_none_` is the single line",
+    );
+}
+
+#[test]
+fn the_section_appears_once_in_its_place_spelled_exactly() {
+    let item = "- tests/A.php — change — why\n";
+
+    let twice = with_tests_to_change(&format!("{item}\n## Acceptance tests to change\n{item}"));
+    let found = messages(&twice, Mode::Light);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found[0].contains("appears again"), "{found:#?}");
+
+    let misplaced = replace(
+        &valid(),
+        "## Acceptance criteria\n",
+        &format!("## Acceptance tests to change\n{item}\n## Acceptance criteria\n"),
+    );
+    let found = messages(&misplaced, Mode::Light);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found[0].contains("is out of order"), "{found:#?}");
+
+    let misspelled = with_tests_to_change(item).replace(
+        "## Acceptance tests to change",
+        "## Acceptance Tests To Change",
+    );
+    let found = messages(&misspelled, Mode::Light);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(
+        found[0].contains("should be `## Acceptance tests to change`"),
+        "{found:#?}"
+    );
+}
+
+#[test]
+fn an_additional_section_may_stand_between_it_and_the_criteria() {
+    let text = replace(
+        &valid(),
+        "## Implementation context\n",
+        "## Notes\nAnything.\n\n## Acceptance tests to change\n_none_\n\n\
+         ## Implementation context\n",
+    );
+    parse(&text);
+}
+
+// --- the contract's examples of 1.6.0 ----------------------------------------
+
+#[test]
+fn contract_9_6_is_valid() {
+    let plan = parse(&contract_example("9.6"));
+    assert!(plan.section("Acceptance tests to change").is_some());
+}
+
+#[test]
+fn contract_9_7_is_refused_for_its_gap() {
+    let excerpt = contract_example("9.7");
+    let content = excerpt
+        .split_once("## Acceptance criteria\n")
+        .unwrap()
+        .1
+        .trim_end();
+    assert_criteria_problem(content, "AC3:", "`AC2` is missing");
+}
+
+#[test]
+fn contract_9_8_is_refused_for_its_action() {
+    let excerpt = contract_example("9.8");
+    let content = excerpt
+        .split_once("## Acceptance tests to change\n")
+        .unwrap()
+        .1;
+    assert_tests_to_change_problem(content, "rewrite", "unknown action `rewrite`");
+}
+
+#[test]
+fn contract_9_9_quotes_the_fixture() {
+    let excerpt = contract_example("9.9");
+    let criterion = excerpt
+        .split_once("## Acceptance criteria\n")
+        .unwrap()
+        .1
+        .trim_end();
+    assert!(fixture_approved_under_1_5_0().contains(criterion));
 }

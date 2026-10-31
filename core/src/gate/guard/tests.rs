@@ -11,7 +11,7 @@ use super::{Verdict, decide};
 
 const APPROVED: &str = "---\nTicket: SHOP-214\nModule: orders\nStatus: approved\n\
     Approved-by: rade\nApproved-at: 2026-10-05\n\
-    Approved-checksum: sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44\n\
+    Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b\n\
     ---\n\n## Ticket\nSHOP-214\n";
 
 fn draft() -> String {

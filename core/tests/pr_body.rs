@@ -304,7 +304,7 @@ fn a_plan_edited_after_approval_is_refused_and_nothing_is_written() {
 fn an_approval_nobody_recorded_is_refused() {
     // plan-header.md example 9.3: `Status: approved`, and no checksum.
     let unrecorded = approved_plan().replace(
-        "Approved-checksum: sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44",
+        "Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b",
         "Approved-checksum:",
     );
     assert_ne!(unrecorded, approved_plan());

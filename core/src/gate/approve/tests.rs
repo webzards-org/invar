@@ -220,7 +220,7 @@ fn the_acceptance_criteria_are_the_section_without_surrounding_blank_lines() {
     let pending = pending(&root, &spec, false);
     let criteria = pending.acceptance_criteria();
     assert!(
-        criteria.starts_with("- Given a pending, unpaid order"),
+        criteria.starts_with("- AC1: Given a pending, unpaid order"),
         "{criteria}"
     );
     assert!(criteria.ends_with("with status `cancelled`."), "{criteria}");

@@ -33,8 +33,8 @@ Only `app/Actions/Orders`.
 - REJECTED-NOT-SHOWN
 
 ## Acceptance criteria
-- Given an unpaid order, when I cancel it, then it is cancelled.
-- Given another team's order, when I cancel it, then the response is 404.
+- AC1: Given an unpaid order, when I cancel it, then it is cancelled.
+- AC2: Given another team's order, when I cancel it, then the response is 404.
 
 ## Implementation context
 - BUSINESS_CONTEXT invariant: every query is scoped to the team.

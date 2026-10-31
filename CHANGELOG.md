@@ -23,6 +23,12 @@
 
 ### Added
 
+- **`## Acceptance tests to change`**, an optional Plan section right after
+  `## Acceptance criteria` (Plan contract 1.6.0): `- <path> — change — <reason>`
+  or `- <path> — delete — <reason>`. `plan validate` checks its form. It is how a
+  later ticket will be allowed to change another ticket's locked acceptance tests;
+  nothing reads the paths yet.
+
 - **`/invar:approve` starts Phase 2.** When `invar plan approve` records an
   approval it now ends with one fixed line, `approved <TICKET> checksum
   sha256:<hex>`, and on that line the session begins Phase 2 at once — no second
@@ -54,6 +60,18 @@
   of assuming their defaults. What it found goes into Scope.
 
 ### Changed
+
+- **Acceptance criteria are numbered** (Plan contract 1.6.0). Each criterion is a
+  list item that starts with its id, `- AC1: Given …, when …, then ….`; ids are
+  unique, contiguous from `AC1` and in order. `plan validate` and `plan approve`
+  refuse anything else, naming the line, and `/invar:review` reports by id.
+
+  **What a team has to do:** new Plans need ids, and the planner now writes them.
+  A draft written before this version needs ids added by hand, or by the planner,
+  before it can be approved. **Plans already approved keep working:** one whose
+  criteria have no ids passes `plan check` and `done` unchanged. Do not add ids to
+  it, because that changes the approved text. If it has to be approved again, with
+  `--reapprove` or after a `failed` entry, it needs ids first.
 
 - **`invar done [TICKET]` only deletes the Plan.** It checks that the Plan is
   approved and unchanged, deletes its directory and stages the deletion. It no

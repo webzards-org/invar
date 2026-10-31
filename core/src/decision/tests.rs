@@ -10,7 +10,7 @@ use super::{
     RecordError, Request, draft, existing_ids, log, new_id, new_id_from, order_key, record,
 };
 use crate::format::decision::{self, Type};
-use crate::format::plan::Mode;
+use crate::format::plan::{Mode, Plan};
 use crate::fs::ProjectRoot;
 use crate::git::Instant;
 
@@ -360,7 +360,7 @@ fn failed_returns_the_plan_to_draft_with_the_body_untouched() {
             ("Approved-by: rade", "Approved-by:"),
             ("Approved-at: 2026-10-05", "Approved-at:"),
             (
-                "Approved-checksum: sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44",
+                "Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b",
                 "Approved-checksum:"
             ),
         ]
@@ -370,6 +370,34 @@ fn failed_returns_the_plan_to_draft_with_the_body_untouched() {
         original.split_once("\n---\n").unwrap().1,
         "the body changed"
     );
+}
+
+#[test]
+fn failed_resets_a_plan_approved_before_criteria_had_ids() {
+    // Its body stays as it was, so it reads back as a draft with no ids. That is
+    // what it now is; it is no reason to undo the reset (plan-header.md D-16).
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../contracts/fixtures/plan/approved-1.5.0-no-ids.md");
+    let original = fs::read_to_string(path).unwrap();
+    let (_dir, root) = project(Some(&original));
+    let recorded = record(
+        &root,
+        request("SHOP-214", Type::Failed, None),
+        NOW,
+        Mode::Light,
+    )
+    .unwrap();
+    assert_eq!(recorded.reset.as_deref(), Some(spec(&root).as_path()));
+
+    let reset = fs::read_to_string(spec(&root)).unwrap();
+    assert!(reset.contains("\nStatus: draft\n"), "{reset}");
+    assert_eq!(
+        reset.split_once("\n---\n").unwrap().1,
+        original.split_once("\n---\n").unwrap().1,
+        "the body changed"
+    );
+    // ...and as a draft it now needs its ids before anyone approves it.
+    assert!(!Plan::check(&reset, Mode::Light).problems.is_empty());
 }
 
 #[test]

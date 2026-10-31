@@ -30,7 +30,7 @@ None were needed.
 None considered.
 
 ## Acceptance criteria
-- Given x, when y, then z.
+- AC1: Given x, when y, then z.
 
 ## Implementation context
 - AI_CONTEXT: do it this way
@@ -127,7 +127,7 @@ None considered.
 
 ## Acceptance criteria
 
-- Given x, when y, then z.
+- AC1: Given x, when y, then z.
 
 ## Implementation context
 

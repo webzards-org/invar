@@ -8,6 +8,7 @@ conformance suite and for any later reimplementation — which is what keeps
 | Set | Covers | Written for |
 |---|---|---|
 | `digest/` | Canonicalization and digests (§4d) | M1-1, M1-2 |
+| `plan/` | A Plan as an earlier contract version approved it (`plan-header.md` D-16) | AT-2 |
 
 Each set carries its own README with the rules for adding to it. Two apply
 everywhere:

@@ -29,7 +29,7 @@ criterion; which checks you ran and what each said>
 
 ```
 BLOCKED <the reason, in one line>
-<at most 8 lines: which part of the Plan, by section or criterion number; what
+<at most 8 lines: which part of the Plan, by section or criterion id; what
 you found in the code or the Plan that makes it impossible; what you did before
 you stopped>
 ```
@@ -51,8 +51,9 @@ in: the refusal is the answer.
 
 - **The Plan**: `.invar/plans/<TICKET>-<slug>/spec.md` (find it with `Glob`).
   Read all of it: Intent, Scope, Open questions / answers, Rejected alternatives,
-  **Acceptance criteria**, **Implementation context**. Number the criteria in the
-  order they are listed.
+  **Acceptance criteria**, **Implementation context**. Refer to each criterion by
+  its id (`AC2`). A Plan approved before ids existed has none: then number the
+  criteria in the order they are listed.
 - **The conventions**: how code is written in this project. They arrive in your
   context under `=== invar: conventions ===`. If you do not see that block, run
   `invar context show --conventions` once and read its output. Follow them in

@@ -21,7 +21,7 @@ fn plan_text(ticket: &str) -> String {
          ## Scope\n`orders` only.\n\n\
          ## Open questions / answers\nNone were needed.\n\n\
          ## Rejected alternatives\nNone considered.\n\n\
-         ## Acceptance criteria\n- Given an unpaid order, when I cancel it, then it is cancelled.\n\n\
+         ## Acceptance criteria\n- AC1: Given an unpaid order, when I cancel it, then it is cancelled.\n\n\
          ## Implementation context\n- AI_CONTEXT: controllers stay thin\n"
     )
 }
@@ -109,7 +109,7 @@ fn every_category_is_reported_in_one_run() {
         .replace("## Intent\n", "## intent\n")
         .replace("## Rejected alternatives\nNone considered.\n", "")
         .replace(
-            "- Given an unpaid order, when I cancel it, then it is cancelled.\n",
+            "- AC1: Given an unpaid order, when I cancel it, then it is cancelled.\n",
             "_none_\n",
         )
         .replace(
@@ -137,7 +137,7 @@ fn missing_or_empty_acceptance_criteria_and_implementation_context_fail() {
     let (_dir, root) = project();
     let missing = plan_text("PROJ-1")
         .replace(
-            "## Acceptance criteria\n- Given an unpaid order, when I cancel it, then it is cancelled.\n\n",
+            "## Acceptance criteria\n- AC1: Given an unpaid order, when I cancel it, then it is cancelled.\n\n",
             "",
         )
         .replace("## Implementation context\n- AI_CONTEXT: controllers stay thin\n", "");
@@ -152,7 +152,7 @@ fn missing_or_empty_acceptance_criteria_and_implementation_context_fail() {
 
     let empty = plan_text("PROJ-2")
         .replace(
-            "- Given an unpaid order, when I cancel it, then it is cancelled.\n",
+            "- AC1: Given an unpaid order, when I cancel it, then it is cancelled.\n",
             "",
         )
         .replace("- AI_CONTEXT: controllers stay thin\n", "\n");

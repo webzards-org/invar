@@ -145,6 +145,20 @@ these exact headings, in this order:
 - **Acceptance criteria** and **Implementation context**: see the two sections
   below. They are where Plans succeed or fail.
 
+One section is optional and comes right after `## Acceptance criteria`:
+`## Acceptance tests to change`. Write it **only when the ticket must change or
+delete another ticket's locked acceptance tests**, which are the test files with
+an `invar-lock:` line near the top. It is how such a change gets past the lock: a
+person approves it. One line per file, never wrapped:
+
+```
+- <path from the project root> — change — <why, in a sentence>
+- <path from the project root> — delete — <why, in a sentence>
+```
+
+The action is exactly `change` or `delete`, and the reason is required. Otherwise
+leave the section out; do not write it empty.
+
 This is **light mode**: acceptance criteria live in the Plan. Write no
 `## Scenarios` sections and no `.feature` files.
 
@@ -224,15 +238,18 @@ the **negative case**, with a concrete outcome.
 
 For every criterion:
 
-- One behavior, as `- Given <state>, when <action>, then <observable outcome>.`
-  A list item may wrap across lines.
+- One behavior, as `- AC1: Given <state>, when <action>, then <observable outcome>.`
+  The id comes first, and everything downstream refers to the criterion by it. Ids
+  run `AC1`, `AC2`, `AC3`, with no gap, no repeat and in order. An item may wrap
+  across lines; indent the continuation by two spaces. Every line of real text in
+  the section belongs to a numbered item: no introductions, no sub-headings.
 - Observable from outside the code: a response and its status, what is stored,
   what a user sees. A person who has not read the implementation must be able to
   check it, and a test must be writable from it.
 - Concrete: real values, real statuses, real roles. Not "works", "correctly",
   "properly" or "as expected".
 - Never a placeholder. `TBD`, `n/a`, `none` and an empty list item do not count
-  as a criterion, and `plan validate` refuses them.
+  as a criterion, with or without an id, and `plan validate` refuses them.
 
 Cover, in this order: the happy path; each refusal and error the ticket or the
 answers describe; one criterion per invariant, as above; each regional variant
@@ -294,17 +311,17 @@ scheduled exports, sending the file by e-mail.
 
 ## Acceptance criteria
 
-- Given a customer with issued and paid invoices in October 2026, when I export
-  2026-10, then the CSV has one row per invoice with number, issue date, net,
-  tax, gross, currency and status, and no invoice from another month.
-- Given an invoice issued at 23:30 UTC on 2026-09-30, when I export 2026-10, then
-  it is in the file, because that is 01:30 on 1 October in Europe/Berlin.
-- Given a customer with a draft invoice in the month, when I export it, then the
-  draft is not in the file.
-- Given a customer who belongs to another account, when I request its export,
+- AC1: Given a customer with issued and paid invoices in October 2026, when I
+  export 2026-10, then the CSV has one row per invoice with number, issue date,
+  net, tax, gross, currency and status, and no invoice from another month.
+- AC2: Given an invoice issued at 23:30 UTC on 2026-09-30, when I export 2026-10,
+  then it is in the file, because that is 01:30 on 1 October in Europe/Berlin.
+- AC3: Given a customer with a draft invoice in the month, when I export it, then
+  the draft is not in the file.
+- AC4: Given a customer who belongs to another account, when I request its export,
   then the response is 404 and no file is produced.
-- Given a user without the accountant role, when they request an export, then the
-  response is 403.
+- AC5: Given a user without the accountant role, when they request an export, then
+  the response is 403.
 
 ## Implementation context
 
@@ -315,8 +332,8 @@ scheduled exports, sending the file by e-mail.
   customer through the scoped model and never with `withoutGlobalScopes()`.
 ```
 
-The fourth criterion is the invariant's: it fails if the route loads the customer
-without the account scope. The second comes from a question's answer.
+`AC4` is the invariant's criterion: it fails if the route loads the customer
+without the account scope. `AC2` comes from a question's answer.
 
 ## A Plan that came back
 
@@ -328,8 +345,9 @@ given the failure.
 Read the existing Plan and the failure. **Revise that draft in place** — do not
 start a second directory. Put the failure into Open questions / answers (what was
 required, why it could not be done, what was decided now), and into Rejected
-alternatives if an approach turned out to be wrong. Then validate and return as
-usual. The developer approves the revised Plan again.
+alternatives if an approach turned out to be wrong. If its criteria have no ids,
+which is how a Plan approved before ids existed comes back, number them. Then
+validate and return as usual. The developer approves the revised Plan again.
 
 ## What you never do
 

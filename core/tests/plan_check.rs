@@ -10,7 +10,7 @@ use predicates::str::contains;
 use tempfile::TempDir;
 
 const SPEC: &str = ".invar/plans/SHOP-214-cancel-unpaid-order/spec.md";
-const CHECKSUM: &str = "sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44";
+const CHECKSUM: &str = "sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b";
 
 fn contract_example(number: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/plan-header.md");
@@ -165,4 +165,69 @@ fn a_missing_plan_is_an_error() {
         .check_in(&project.root(), "SHOP-999")
         .failure()
         .stderr(contains("no Plan for `SHOP-999`"));
+}
+
+// --- a Plan approved before criteria had ids (plan-header.md D-16) ----------------
+
+const CHECKSUM_1_5_0: &str =
+    "sha256:f3689f4ddfed1a683df95a45a12d36a7eaab8d49f6a077abfc5b5ecae13bff44";
+
+fn approved_under_1_5_0() -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../contracts/fixtures/plan/approved-1.5.0-no-ids.md");
+    fs::read_to_string(path).unwrap()
+}
+
+/// The same Plan with an id in front of every criterion.
+fn numbered_after_the_fact() -> String {
+    let mut number = 0;
+    approved_under_1_5_0()
+        .lines()
+        .map(|line| match line.strip_prefix("- Given") {
+            Some(rest) => {
+                number += 1;
+                format!("- AC{number}: Given{rest}\n")
+            }
+            None => format!("{line}\n"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_plan_approved_under_1_5_0_with_no_ids_still_passes() {
+    Project::new(&approved_under_1_5_0())
+        .check()
+        .success()
+        .stdout(contains(CHECKSUM_1_5_0))
+        .stderr("");
+}
+
+#[test]
+fn adding_ids_to_a_plan_approved_under_1_5_0_stales_its_approval() {
+    Project::new(&numbered_after_the_fact())
+        .check()
+        .failure()
+        .stderr(contains("changed after it was approved"));
+}
+
+#[test]
+fn an_approved_plan_with_some_ids_and_a_broken_rule_is_refused() {
+    let text = approved_under_1_5_0().replacen(
+        "- Given a pending, unpaid order",
+        "- AC1: Given a pending, unpaid order",
+        1,
+    );
+    Project::new(&text)
+        .check()
+        .failure()
+        .stdout(contains("this criterion has no id"));
+}
+
+#[test]
+fn claiming_approval_to_escape_the_ids_gets_no_further_than_validate() {
+    let text = approved_under_1_5_0().replace(CHECKSUM_1_5_0, "");
+    Project::new(&text)
+        .check()
+        .failure()
+        .stderr(contains("recorded this approval"));
 }

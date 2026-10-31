@@ -1,6 +1,6 @@
 //! The Plan: `.invar/plans/<TICKET>-<slug>/spec.md` (§4a).
 //!
-//! Implements `contracts/formats/plan-header.md` v1.4.1; section numbers and
+//! Implements `contracts/formats/plan-header.md` v1.6.0; section numbers and
 //! decision ids below (`§4.1`, `D-2`) point into it.
 //!
 //! **Reading** splits the file into four parts — opening delimiter, header,
@@ -34,6 +34,7 @@
     )
 )]
 
+mod criteria;
 mod header;
 mod sections;
 
@@ -93,10 +94,33 @@ pub struct Plan {
     sections: Vec<Section>,
 }
 
+/// When criteria with no ids at all are valid (D-16).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unnumbered {
+    /// The rule of the contract: when the Plan says it is approved.
+    IfApproved,
+    /// A new approval is about to be issued.
+    Never,
+    /// A Plan just returned to draft, whose body must not change.
+    Always,
+}
+
 impl Plan {
     /// Parse a Plan's text, checking every rule of the contract for `mode`.
     pub fn parse(text: &str, mode: Mode) -> Result<Self, Diagnostics> {
-        let analysis = analyze(text, mode);
+        Self::parse_with(text, mode, Unnumbered::IfApproved)
+    }
+
+    /// Parse a Plan that `reset_to_draft` just wrote. It may be an approval from
+    /// before ids existed: its body stays as it was, so the draft it is now has
+    /// no ids until a person revises it, and reading it back is no reason to
+    /// call that a failure (D-16).
+    pub fn parse_reset(text: &str, mode: Mode) -> Result<Self, Diagnostics> {
+        Self::parse_with(text, mode, Unnumbered::Always)
+    }
+
+    fn parse_with(text: &str, mode: Mode, unnumbered: Unnumbered) -> Result<Self, Diagnostics> {
+        let analysis = analyze(text, mode, unnumbered);
         match analysis.plan {
             Some(plan) if analysis.checked.problems.is_empty() => Ok(plan),
             _ => Err(analysis.checked.problems),
@@ -108,7 +132,13 @@ impl Plan {
     /// `plan validate` (M1-8), which reports a header that disagrees with its
     /// directory in the same run as a missing section.
     pub fn check(text: &str, mode: Mode) -> Checked {
-        analyze(text, mode).checked
+        analyze(text, mode, Unnumbered::IfApproved).checked
+    }
+
+    /// Every problem the text has as a draft, whatever its `Status` says: what
+    /// a new approval requires of it (D-16).
+    pub fn problems_as_draft(text: &str, mode: Mode) -> Diagnostics {
+        analyze(text, mode, Unnumbered::Never).checked.problems
     }
 
     /// Read and parse a Plan file.
@@ -276,7 +306,7 @@ struct Analysis {
 }
 
 /// Split the file into its four parts and check every rule (§4–§6).
-fn analyze(text: &str, mode: Mode) -> Analysis {
+fn analyze(text: &str, mode: Mode, unnumbered: Unnumbered) -> Analysis {
     let mut found = Diagnostics::new();
     let stop = |found| Analysis {
         plan: None,
@@ -357,7 +387,12 @@ fn analyze(text: &str, mode: Mode) -> Analysis {
         offset += line.len() + eol.len();
     }
 
-    let sections = sections::scan(&rest, rest_first_line, mode, &mut found);
+    let unnumbered_allowed = match unnumbered {
+        Unnumbered::IfApproved => parsed.status == Some(Status::Approved),
+        Unnumbered::Never => false,
+        Unnumbered::Always => true,
+    };
+    let sections = sections::scan(&rest, rest_first_line, mode, unnumbered_allowed, &mut found);
 
     let plan = parsed.header.map(|header| Plan {
         header,

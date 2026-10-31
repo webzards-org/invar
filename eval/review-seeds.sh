@@ -199,10 +199,11 @@ None were needed.
 None considered.
 
 ## Acceptance criteria
-- Given three cancelled orders and one pending order, when I export, then the CSV
-  has three rows with the order number, status and date, and the pending order is
-  not in it.
-- Given no cancelled orders, when I export, then the CSV has only its header row.
+- AC1: Given three cancelled orders and one pending order, when I export, then the
+  CSV has three rows with the order number, status and date, and the pending order
+  is not in it.
+- AC2: Given no cancelled orders, when I export, then the CSV has only its header
+  row.
 
 ## Implementation context
 - AI_CONTEXT: the logic lives in `App\Actions\Orders\ExportCancelledOrders`; the

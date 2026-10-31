@@ -31,14 +31,14 @@ orders. Out of scope: refunds, cancellation by staff, e-mail notifications.
 
 ## Acceptance criteria
 
-- Given a pending, unpaid order of mine, when I cancel it, then its status is
-  `cancelled` and its reserved stock is available for sale again.
-- Given a paid order of mine, when I try to cancel it, then the request is
+- AC1: Given a pending, unpaid order of mine, when I cancel it, then its status
+  is `cancelled` and its reserved stock is available for sale again.
+- AC2: Given a paid order of mine, when I try to cancel it, then the request is
   refused with 403 and the order is unchanged.
-- Given an order that belongs to another team, when I send a cancel request
+- AC3: Given an order that belongs to another team, when I send a cancel request
   with its id, then the response is 404 and the order is unchanged.
-- Given an order I cancelled, when I open my order history, then it is listed
-  with status `cancelled`.
+- AC4: Given an order I cancelled, when I open my order history, then it is
+  listed with status `cancelled`.
 
 ## Implementation context
 

@@ -15,6 +15,8 @@
 //! - **A changed approval is never silently renewed** (D-12, resolving OQ-1).
 //!   An `approved` Plan whose body no longer matches its checksum — or whose
 //!   approval values are missing — is refused unless `--reapprove` is given.
+//! - **A new approval needs numbered criteria** (D-16). `plan validate` lets an
+//!   approval from before ids existed stand; it does not let one be issued.
 
 use std::fmt;
 use std::io;
@@ -98,6 +100,14 @@ pub fn prepare(
                     prior,
                     current: checksum,
                 });
+            }
+            let problems = Plan::problems_as_draft(&original, mode);
+            if !problems.is_empty() {
+                return Err(ApproveError::Unnumbered(Report {
+                    spec: spec.to_owned(),
+                    status: Some(Status::Approved),
+                    problems,
+                }));
             }
             Some(prior)
         }
@@ -225,6 +235,10 @@ pub enum ApproveError {
         prior: Prior,
         current: String,
     },
+    /// `--reapprove` on a Plan whose criteria have no ids (D-16). `plan validate`
+    /// accepts the Plan, because an earlier approval stands; a new one does not
+    /// inherit that. The report says what to fix.
+    Unnumbered(Report),
     /// The file changed between printing the criteria and writing.
     ChangedMeanwhile {
         spec: PathBuf,
@@ -254,6 +268,13 @@ impl fmt::Display for ApproveError {
                      then approve again"
                 )
             }
+            Self::Unnumbered(report) => write!(
+                f,
+                "{}: criteria with no ids are valid only under the approval that accepted \
+                 them, and this would be a new one (plan-header.md D-16). Give every \
+                 criterion its id, as listed above, then approve again with `--reapprove`",
+                report.spec.display()
+            ),
             Self::Read { spec, source } => write!(f, "cannot read {}: {source}", spec.display()),
             Self::NeedsReapprove {
                 spec,
