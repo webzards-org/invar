@@ -10,7 +10,7 @@ use predicates::str::contains;
 use tempfile::TempDir;
 
 const SPEC: &str = ".invar/plans/SHOP-214-cancel-unpaid-order/spec.md";
-const CHECKSUM: &str = "sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b";
+const CHECKSUM: &str = "sha256:b017737bb6bfa67784b6eb2979946c4703c7e28f37ee363501ca0b886978aea5";
 
 fn contract_example(number: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/plan-header.md");

@@ -9,7 +9,7 @@ use super::{CheckError, check};
 use crate::digest::{canonicalize, digest};
 use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
-use crate::gate::approve::{Decision, prepare};
+use crate::gate::approve::{Decision, choose_acceptance, prepare};
 
 fn contract_example(number: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/plan-header.md");
@@ -32,7 +32,9 @@ fn project(text: &str) -> (TempDir, ProjectRoot, PathBuf) {
 
 /// Approve the Plan the way `plan approve` does.
 fn approve(root: &ProjectRoot, spec: &Path) {
-    let Decision::Approve(pending) = prepare(root, spec, Mode::Light, false).unwrap() else {
+    let Decision::Approve(pending) =
+        prepare(root, spec, Mode::Light, false, choose_acceptance(None)).unwrap()
+    else {
         panic!("expected an approval");
     };
     pending.commit("rade".into(), "2026-10-05".into()).unwrap();
@@ -66,7 +68,7 @@ fn the_contracts_approved_example_passes() {
     assert_eq!(approved.at, "2026-10-05");
     assert_eq!(
         approved.checksum,
-        "sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b"
+        "sha256:b017737bb6bfa67784b6eb2979946c4703c7e28f37ee363501ca0b886978aea5"
     );
     assert_eq!(approved.spec, spec);
 }
@@ -88,7 +90,7 @@ fn an_approved_plan_checked_out_with_crlf_still_passes() {
     let approved = check(&root, &spec, Mode::Light).unwrap();
     assert_eq!(
         approved.checksum,
-        "sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b"
+        "sha256:b017737bb6bfa67784b6eb2979946c4703c7e28f37ee363501ca0b886978aea5"
     );
 }
 

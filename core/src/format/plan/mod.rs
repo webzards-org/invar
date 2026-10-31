@@ -249,19 +249,22 @@ impl Plan {
 
     // --- the command-written fields -----------------------------------------
 
-    /// Mark the Plan approved (M1-9): `Status: approved` and the three
-    /// approval fields. Only those four values change; every other byte of
-    /// the file stays as it was.
+    /// Mark the Plan approved (M1-9): `Status: approved`, the three approval
+    /// fields and `Acceptance`. Only those five values change, and an absent
+    /// `Acceptance` key is added right after `Approved-checksum` (§5.3); every
+    /// other byte of the file stays as it was.
     pub fn approve(&mut self, approval: Approval) -> Result<(), String> {
         approval.check()?;
         self.set(header::STATUS, Status::Approved.as_str());
         self.set(header::APPROVED_BY, &approval.by);
         self.set(header::APPROVED_AT, &approval.at);
         self.set(header::APPROVED_CHECKSUM, &approval.checksum);
+        self.set_or_add_acceptance(approval.acceptance);
         self.header.status = Status::Approved;
         self.header.approved_by = Some(approval.by);
         self.header.approved_at = Some(approval.at);
         self.header.approved_checksum = Some(approval.checksum);
+        self.header.acceptance = Some(approval.acceptance);
         Ok(())
     }
 
@@ -285,6 +288,22 @@ impl Plan {
         self.header.approved_checksum = None;
         self.header.lockfile_checksum = None;
         self.header.acceptance = None;
+    }
+
+    /// The one optional key a command adds: the planner does not write it, so
+    /// an approval usually finds it absent (§5.3).
+    fn set_or_add_acceptance(&mut self, value: Acceptance) {
+        let key = |wanted| {
+            self.header_lines
+                .iter()
+                .position(|line| line.key() == Some(wanted))
+        };
+        if key(header::ACCEPTANCE).is_some() {
+            self.set(header::ACCEPTANCE, value.as_str());
+        } else if let Some(index) = key(header::APPROVED_CHECKSUM) {
+            let line = self.header_lines[index].field_after(header::ACCEPTANCE, value.as_str());
+            self.header_lines.insert(index + 1, line);
+        }
     }
 
     /// Change a field's value in place. Absent keys stay absent: the parser
@@ -457,8 +476,10 @@ pub struct Approval {
     pub by: String,
     /// `YYYY-MM-DD`.
     pub at: String,
-    /// The §4d digest of the body.
+    /// The approval digest (§5.3, D-19).
     pub checksum: String,
+    /// What the digest covers along with the body.
+    pub acceptance: Acceptance,
 }
 
 impl Approval {

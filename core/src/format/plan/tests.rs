@@ -67,6 +67,7 @@ fn approval() -> Approval {
         by: "rade".to_owned(),
         at: "2026-10-05".to_owned(),
         checksum: format!("sha256:{}", "ab".repeat(32)),
+        acceptance: Acceptance::Required,
     }
 }
 
@@ -212,7 +213,10 @@ fn unknown_keys_and_comments_keep_their_positions_through_an_approval() {
         .replace("Approved-at:\n", "Approved-at: 2026-10-05\n")
         .replace(
             "Approved-checksum:\n",
-            &format!("Approved-checksum: sha256:{}\n", "ab".repeat(32)),
+            &format!(
+                "Approved-checksum: sha256:{}\nAcceptance: required\n",
+                "ab".repeat(32)
+            ),
         );
     assert_eq!(plan.to_text(), expected);
 }
@@ -259,8 +263,16 @@ fn reset_to_draft_restores_the_creation_form() {
     let mut plan = parse(&original);
     plan.approve(approval()).unwrap();
     plan.reset_to_draft();
-    // Back to exactly what the agent wrote.
-    assert_eq!(plan.to_text(), original);
+    // Back to what the agent wrote, and the key `plan approve` added stays,
+    // empty.
+    assert_eq!(
+        plan.to_text(),
+        replace(
+            &original,
+            "Approved-checksum:\n",
+            "Approved-checksum:\nAcceptance:\n"
+        )
+    );
     assert_eq!(plan.header().status, Status::Draft);
     assert_eq!(plan.header().approved_checksum, None);
 }
@@ -366,6 +378,44 @@ fn reset_to_draft_clears_acceptance_but_keeps_its_key() {
     plan.reset_to_draft();
     assert_eq!(plan.to_text(), original);
     assert_eq!(plan.header().acceptance, None);
+}
+
+#[test]
+fn approving_adds_the_key_right_after_the_checksum_with_its_line_ending() {
+    let crlf = valid().replace('\n', "\r\n");
+    let mut plan = parse(&crlf);
+    plan.approve(approval()).unwrap();
+    let text = plan.to_text();
+    assert!(
+        text.contains(&format!(
+            "Approved-checksum: sha256:{}\r\nAcceptance: required\r\n---\r\n",
+            "ab".repeat(32)
+        )),
+        "{text}"
+    );
+    assert_eq!(plan.header().acceptance, Some(Acceptance::Required));
+    assert_eq!(
+        parse(&text).header().acceptance,
+        Some(Acceptance::Required),
+        "the line must read back"
+    );
+}
+
+#[test]
+fn approving_fills_a_present_key_in_place() {
+    let draft = replace(
+        &valid(),
+        "Approved-checksum:\n",
+        "Approved-checksum:\nOwner: team\nAcceptance: # decided at the gate\n",
+    );
+    let mut plan = parse(&draft);
+    plan.approve(approval()).unwrap();
+    assert!(
+        plan.to_text()
+            .contains("\nOwner: team\nAcceptance: required # decided at the gate\n"),
+        "{}",
+        plan.to_text()
+    );
 }
 
 #[test]

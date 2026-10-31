@@ -9,9 +9,9 @@
 //! - **What is approved is what was shown.** The caller prints the acceptance
 //!   criteria between [`prepare`] and [`Pending::commit`], and the commit
 //!   refuses if the file changed in between.
-//! - **Only four values change** (plan-header.md §5.3): `Status`,
-//!   `Approved-by`, `Approved-at`, `Approved-checksum`. The write is checked
-//!   against the file read back: the body must be byte-identical.
+//! - **Only five values change** (plan-header.md §5.3): `Status`,
+//!   `Approved-by`, `Approved-at`, `Approved-checksum`, `Acceptance`. The write
+//!   is checked against the file read back: the body must be byte-identical.
 //! - **A changed approval is never silently renewed** (D-12, resolving OQ-1).
 //!   An `approved` Plan that no longer matches its checksum — or whose approval
 //!   values are missing — is refused unless `--reapprove` is given.
@@ -23,7 +23,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::diagnostics::Diagnostics;
-use crate::format::plan::{Approval, Mode, Plan, Status};
+use crate::format::plan::{Acceptance, Approval, Mode, Plan, Status};
 use crate::fs::ProjectRoot;
 
 use super::approval::{self, Prior, classify};
@@ -32,16 +32,71 @@ use super::validate::{self, Report};
 #[cfg(test)]
 mod tests;
 
+/// The value `Acceptance` will get, and where it came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Chosen {
+    pub value: Acceptance,
+    named_by_flag: bool,
+}
+
+impl Chosen {
+    /// The flag that names this value.
+    fn flag(self) -> &'static str {
+        match self.value {
+            Acceptance::Required => "--acceptance",
+            Acceptance::Skipped => "--no-acceptance",
+        }
+    }
+}
+
+impl fmt::Display for Chosen {
+    /// `required (from --acceptance)`, `skipped (default)`: what the person
+    /// approving is told (plan-header.md §5.3).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = self.value.as_str();
+        if self.named_by_flag {
+            write!(f, "{value} (from {})", self.flag())
+        } else {
+            write!(f, "{value} (default)")
+        }
+    }
+}
+
+/// Decide the value of `Acceptance` (plan-header.md §5.3): `flag` if one was
+/// given, else `acceptance.required` from `invar.yaml`, else `skipped`.
+///
+/// `--reapprove` takes the value this way too: it does not inherit the old one.
+pub fn choose_acceptance(flag: Option<Acceptance>) -> Chosen {
+    if let Some(value) = flag {
+        return Chosen {
+            value,
+            named_by_flag: true,
+        };
+    }
+    // AT-4: `acceptance.required` from `invar.yaml` plugs in here, ahead of the
+    // default, printed as `(from invar.yaml)`. `--acceptance` is then refused
+    // above when the config has no `acceptance:` section: there is no `run`
+    // command to test with, and the refusal says what to add.
+    Chosen {
+        value: Acceptance::Skipped,
+        named_by_flag: false,
+    }
+}
+
 /// What `plan approve` will do.
 #[derive(Debug)]
 pub enum Decision {
     /// Approve: print the acceptance criteria, then [`Pending::commit`].
     Approve(Box<Pending>),
-    /// Already approved, and the body is unchanged: nothing to write.
+    /// Already approved, and nothing changed since: nothing to write.
     AlreadyApproved {
         spec: PathBuf,
         by: String,
         at: String,
+        /// The value on record, and the flag that named another one, if any.
+        /// That flag changed nothing, and the person who gave it is told so.
+        recorded: Acceptance,
+        ignored_flag: Option<&'static str>,
     },
 }
 
@@ -54,20 +109,23 @@ pub struct Pending {
     original: String,
     plan: Plan,
     checksum: String,
+    acceptance: Chosen,
     /// The earlier approval being replaced, under `--reapprove`.
     replaces: Option<Prior>,
 }
 
 /// Check `spec` for approval.
 ///
-/// `reapprove` allows replacing an approval whose body changed or whose
-/// values are missing (D-12). It is not needed for a draft, and an approval
-/// that is still current is left alone with or without it.
+/// `reapprove` allows replacing an approval that changed or whose values are
+/// missing (D-12). It is not needed for a draft. An approval that is still
+/// current is left alone with or without it, unless `acceptance` is a flag that
+/// names another value than the one on record (D-20).
 pub fn prepare(
     root: &ProjectRoot,
     spec: &Path,
     mode: Mode,
     reapprove: bool,
+    acceptance: Chosen,
 ) -> Result<Decision, ApproveError> {
     let report = validate::file(root, spec, mode);
     if !report.is_valid() {
@@ -82,23 +140,28 @@ pub fn prepare(
             problems,
         })
     })?;
-    let checksum = approval::current_digest(&plan);
+    let current = approval::current_digest(&plan);
+    let checksum = approval::approval_digest(&plan, Some(acceptance.value));
+    let recorded = plan.header().recorded_acceptance();
+    let flag_differs = acceptance.named_by_flag && acceptance.value != recorded;
 
-    let replaces = match classify(plan.header(), &checksum) {
+    let replaces = match classify(plan.header(), &current) {
         Prior::Draft => None,
-        Prior::Current { by, at } => {
+        Prior::Current { by, at } if !(reapprove && flag_differs) => {
             return Ok(Decision::AlreadyApproved {
                 spec: spec.to_owned(),
                 by,
                 at,
+                recorded,
+                ignored_flag: flag_differs.then(|| acceptance.flag()),
             });
         }
-        prior @ (Prior::Changed { .. } | Prior::Unrecorded { .. }) => {
+        prior => {
             if !reapprove {
                 return Err(ApproveError::NeedsReapprove {
                     spec: spec.to_owned(),
                     prior,
-                    current: checksum,
+                    current,
                 });
             }
             let problems = Plan::problems_as_draft(&original, mode);
@@ -119,6 +182,7 @@ pub fn prepare(
         original,
         plan,
         checksum,
+        acceptance,
         replaces,
     })))
 }
@@ -135,6 +199,16 @@ impl Pending {
     /// The approval being replaced, under `--reapprove`.
     pub fn replaces(&self) -> Option<&Prior> {
         self.replaces.as_ref()
+    }
+
+    /// The value being written, and where it came from.
+    pub fn acceptance(&self) -> Chosen {
+        self.acceptance
+    }
+
+    /// The value on record in the approval being replaced.
+    pub fn recorded_acceptance(&self) -> Acceptance {
+        self.plan.header().recorded_acceptance()
     }
 
     /// `## Acceptance criteria` without the blank lines around it — what the
@@ -155,6 +229,7 @@ impl Pending {
             by: by.to_owned(),
             at: at.to_owned(),
             checksum: self.checksum.clone(),
+            acceptance: self.acceptance.value,
         }
         .check()
         .map_err(ApproveError::Unwritable)
@@ -172,6 +247,7 @@ impl Pending {
             by,
             at,
             checksum: self.checksum.clone(),
+            acceptance: self.acceptance.value,
         };
         self.plan
             .approve(approval.clone())
@@ -191,6 +267,7 @@ impl Pending {
                 reread.body() == body
                     && reread.header().status == Status::Approved
                     && reread.header().approved_checksum.as_deref() == Some(&self.checksum)
+                    && reread.header().acceptance == Some(self.acceptance.value)
             });
         if !preserved {
             return Err(ApproveError::NotPreserved { spec: self.spec });
@@ -303,8 +380,7 @@ impl fmt::Display for ApproveError {
                             .join(" and "),
                         if missing.len() == 1 { "is" } else { "are" }
                     ),
-                    // `prepare` never builds these with a draft or a current
-                    // approval.
+                    // `prepare` never refuses with a draft or a current approval.
                     Prior::Draft | Prior::Current { .. } => {
                         write!(f, "cannot be approved in its current state")
                     }

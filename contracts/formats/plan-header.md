@@ -771,9 +771,10 @@ answers in `## Open questions / answers`.
 
 Only the header changes; the body is untouched, which is what makes
 `Approved-checksum` verifiable later. Light mode writes no
-`Lockfile-checksum`. The checksum is the real §4d digest of example 9.1's
-body; the core's tests approve 9.1 as `rade` on 2026-10-05 and compare the
-result with this header.
+`Lockfile-checksum`. With no flag and nothing in `invar.yaml`, `Acceptance` is
+`skipped`. The checksum is the real approval digest of that value and example
+9.1's body (§5.3); the core's tests approve 9.1 as `rade` on 2026-10-05 and
+compare the result with this header.
 
 ```markdown
 ---
@@ -782,7 +783,8 @@ Module: orders
 Status: approved
 Approved-by: rade
 Approved-at: 2026-10-05
-Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b
+Approved-checksum: sha256:b017737bb6bfa67784b6eb2979946c4703c7e28f37ee363501ca0b886978aea5
+Acceptance: skipped
 ---
 ```
 

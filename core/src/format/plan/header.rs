@@ -143,6 +143,20 @@ impl HeaderLine {
         }
     }
 
+    /// A new `key: value` line right after this one, with its line ending.
+    pub(super) fn field_after(&self, key: &str, value: &str) -> Self {
+        let Self::Field { eol, .. } = self else {
+            unreachable!("only fields are followed by a new field");
+        };
+        Self::Field {
+            key: key.to_owned(),
+            sep: " ".to_owned(),
+            value: value.to_owned(),
+            trailing: String::new(),
+            eol: eol.clone(),
+        }
+    }
+
     pub(super) fn key(&self) -> Option<&str> {
         match self {
             Self::Field { key, .. } => Some(key),

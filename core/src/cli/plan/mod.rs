@@ -35,13 +35,15 @@ pub enum Command {
 
     /// Approve a Plan: the human gate.
     ///
-    /// Validates the Plan, prints its acceptance criteria, then sets
-    /// `Status: approved` and records `Approved-by` (`git config user.name`),
-    /// `Approved-at` (today) and `Approved-checksum` (the digest of the body).
-    /// Only those four values change; the body stays byte-identical.
+    /// Validates the Plan, prints its acceptance criteria and whether the
+    /// ticket needs acceptance tests, then sets `Status: approved` and records
+    /// `Approved-by` (`git config user.name`), `Approved-at` (today),
+    /// `Approved-checksum` (the digest of the body and that decision) and
+    /// `Acceptance`. Only those five values change; the body stays
+    /// byte-identical.
     ///
-    /// An approved Plan whose body changed since is refused unless
-    /// `--reapprove` is given; one that is unchanged is left as it is.
+    /// An approved Plan whose body or `Acceptance` changed since is refused
+    /// unless `--reapprove` is given; one that is unchanged is left as it is.
     ///
     /// Without a ticket, approves the one Plan under `.invar/plans/`. The
     /// developer's command — through `/invar:approve` in Claude Code, which
@@ -52,7 +54,7 @@ pub enum Command {
     /// code is written.
     ///
     /// Run by the agent at the start of Phase 2, and by `invar done`. Passes
-    /// only an approved Plan whose body still matches `Approved-checksum`;
+    /// only an approved Plan that still matches `Approved-checksum`;
     /// refuses a draft, a Plan changed after approval, and an approval no
     /// `invar plan approve` recorded. Exits non-zero on refusal.
     Check(check::Args),

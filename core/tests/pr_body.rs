@@ -304,7 +304,7 @@ fn a_plan_edited_after_approval_is_refused_and_nothing_is_written() {
 fn an_approval_nobody_recorded_is_refused() {
     // plan-header.md example 9.3: `Status: approved`, and no checksum.
     let unrecorded = approved_plan().replace(
-        "Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b",
+        "Approved-checksum: sha256:b017737bb6bfa67784b6eb2979946c4703c7e28f37ee363501ca0b886978aea5",
         "Approved-checksum:",
     );
     assert_ne!(unrecorded, approved_plan());
@@ -373,7 +373,7 @@ fn approved_with_tests_to_change(content: &str) -> String {
         .unwrap();
     let checksum = String::from_utf8(output.stdout).unwrap();
 
-    let header = contract_example("9.2")
+    let header = contract_example("9.12")
         .lines()
         .map(|line| match line.strip_prefix("Approved-checksum:") {
             Some(_) => format!("Approved-checksum: {}\n", checksum.trim()),

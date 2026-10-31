@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
-use super::{ApproveError, Decision, Pending, Prior, classify, prepare};
+use super::{ApproveError, Decision, Pending, Prior, choose_acceptance, classify, prepare};
 use crate::digest::{canonicalize, digest};
 use crate::format::plan::{Header, Mode, Status};
 use crate::fs::ProjectRoot;
@@ -42,7 +42,7 @@ fn project(text: &str) -> (TempDir, ProjectRoot, PathBuf) {
 }
 
 fn pending(root: &ProjectRoot, spec: &Path, reapprove: bool) -> Pending {
-    match prepare(root, spec, Mode::Light, reapprove) {
+    match prepare(root, spec, Mode::Light, reapprove, choose_acceptance(None)) {
         Ok(Decision::Approve(pending)) => *pending,
         Ok(other) => panic!("expected an approval, got {other:?}"),
         Err(err) => panic!("expected an approval, got: {err}"),
@@ -56,10 +56,24 @@ fn approve(root: &ProjectRoot, spec: &Path, reapprove: bool) {
 }
 
 fn refusal(root: &ProjectRoot, spec: &Path, reapprove: bool) -> ApproveError {
-    match prepare(root, spec, Mode::Light, reapprove) {
+    match prepare(root, spec, Mode::Light, reapprove, choose_acceptance(None)) {
         Err(err) => err,
         Ok(decision) => panic!("expected a refusal, got {decision:?}"),
     }
+}
+
+/// `text` as `plan approve` finds it once the key is there, so a comparison
+/// line by line lines up.
+fn with_empty_acceptance(text: &str) -> String {
+    let mut out = String::new();
+    for line in text.split_inclusive('\n') {
+        out.push_str(line);
+        if line.starts_with("Approved-checksum:") {
+            out.push_str("Acceptance:");
+            out.push_str(if line.ends_with("\r\n") { "\r\n" } else { "\n" });
+        }
+    }
+    out
 }
 
 /// Lines that differ between two texts of the same length in lines.
@@ -119,21 +133,24 @@ fn approving_example_9_1_produces_example_9_2() {
 // --- what is written -----------------------------------------------------------
 
 #[test]
-fn only_the_four_approval_values_change() {
-    let draft = contract_example("9.1");
+fn only_the_five_approval_values_change() {
+    let draft = with_empty_acceptance(&contract_example("9.1"));
     let (_dir, root, spec) = project(&draft);
     let pending = pending(&root, &spec, false);
-    let body_digest = digest(&canonicalize(
-        draft
-            .split_once("\n---\n")
-            .unwrap()
-            .1
-            .trim_start_matches('\n'),
+    let approval_digest = digest(&format!(
+        "Acceptance: skipped\n{}",
+        canonicalize(
+            draft
+                .split_once("\n---\n")
+                .unwrap()
+                .1
+                .trim_start_matches('\n'),
+        )
     ));
     let approval = pending
         .commit("Rade Brković".into(), "2026-10-05".into())
         .unwrap();
-    assert_eq!(approval.checksum, body_digest);
+    assert_eq!(approval.checksum, approval_digest);
 
     let written = fs::read_to_string(&spec).unwrap();
     assert_eq!(
@@ -147,8 +164,9 @@ fn only_the_four_approval_values_change() {
             ("Approved-at:\n".into(), "Approved-at: 2026-10-05\n".into()),
             (
                 "Approved-checksum:\n".into(),
-                format!("Approved-checksum: {body_digest}\n")
+                format!("Approved-checksum: {approval_digest}\n")
             ),
+            ("Acceptance:\n".into(), "Acceptance: skipped\n".into()),
         ]
     );
 }
@@ -165,12 +183,13 @@ fn crlf_a_bom_comments_unknown_keys_and_the_body_survive_byte_for_byte() {
             .replace("## Scope\n", "## Scope  \n")
             .replace('\n', "\r\n")
     );
+    let draft = with_empty_acceptance(&draft);
     let (_dir, root, spec) = project(&draft);
     approve(&root, &spec, false);
     let written = fs::read_to_string(&spec).unwrap();
 
     let changed = changed_lines(&draft, &written);
-    assert_eq!(changed.len(), 4, "{changed:#?}");
+    assert_eq!(changed.len(), 5, "{changed:#?}");
     assert_eq!(
         changed[0],
         (
@@ -204,7 +223,7 @@ fn crlf_a_bom_comments_unknown_keys_and_the_body_survive_byte_for_byte() {
 
 #[test]
 fn a_lockfile_checksum_is_left_as_it_is() {
-    let draft = contract_example("9.1").replace(
+    let draft = with_empty_acceptance(&contract_example("9.1")).replace(
         "Approved-checksum:\n",
         &format!("Approved-checksum:\nLockfile-checksum: {SUM_A}\n"),
     );
@@ -212,7 +231,7 @@ fn a_lockfile_checksum_is_left_as_it_is() {
     approve(&root, &spec, false);
     let written = fs::read_to_string(&spec).unwrap();
     assert!(written.contains(&format!("Lockfile-checksum: {SUM_A}\n")));
-    assert_eq!(changed_lines(&draft, &written).len(), 4);
+    assert_eq!(changed_lines(&draft, &written).len(), 5);
 }
 
 #[test]
@@ -305,7 +324,15 @@ fn an_approved_plan_whose_body_is_unchanged_is_left_alone() {
     approve(&root, &spec, false);
     let approved = fs::read_to_string(&spec).unwrap();
     for reapprove in [false, true] {
-        match prepare(&root, &spec, Mode::Light, reapprove).unwrap() {
+        match prepare(
+            &root,
+            &spec,
+            Mode::Light,
+            reapprove,
+            choose_acceptance(None),
+        )
+        .unwrap()
+        {
             Decision::AlreadyApproved { by, at, .. } => {
                 assert_eq!((by.as_str(), at.as_str()), ("rade", "2026-10-05"));
             }
@@ -388,7 +415,8 @@ fn a_draft_with_leftover_approval_values_is_approved_and_they_are_replaced() {
     // plan-header.md §5.1 and §5.3: while `Status` says `draft` the approval
     // values mean nothing. `plan approve` overwrites whatever the keys hold,
     // without `--reapprove`, and the body is untouched.
-    let draft = contract_example("9.1")
+    let draft = with_empty_acceptance(&contract_example("9.1"))
+        .replace("Acceptance:\n", "Acceptance: required\n")
         .replace("Approved-by:\n", "Approved-by: someone-else\n")
         .replace("Approved-at:\n", "Approved-at: 2020-01-01\n")
         .replace(
@@ -423,6 +451,10 @@ fn a_draft_with_leftover_approval_values_is_approved_and_they_are_replaced() {
             (
                 format!("Approved-checksum: {SUM_A}\n"),
                 format!("Approved-checksum: {}\n", approval.checksum)
+            ),
+            (
+                "Acceptance: required\n".into(),
+                "Acceptance: skipped\n".into()
             ),
         ]
     );

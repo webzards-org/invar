@@ -16,7 +16,7 @@ pub fn current_digest(plan: &Plan) -> String {
 /// `Acceptance: <value>`, a newline, then the canonical body; so changing,
 /// removing or clearing the value stales the approval. Without one, the digest
 /// of the body alone, which keeps an approval from before the field existed.
-fn approval_digest(plan: &Plan, acceptance: Option<Acceptance>) -> String {
+pub fn approval_digest(plan: &Plan, acceptance: Option<Acceptance>) -> String {
     let body = digest::canonicalize(plan.body());
     match acceptance {
         Some(value) => digest::digest(&format!("Acceptance: {}\n{body}", value.as_str())),
