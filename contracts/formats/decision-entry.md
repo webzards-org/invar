@@ -1,7 +1,7 @@
 # Contract: Decision entry
 
-**Version:** 1.3.0 — every entry is the developer's: a draft is recorded by
-`invar decision approve`; see §8 and §13
+**Version:** 1.3.1 — a `failed` entry clears `Acceptance` too; see §7 and the
+version history
 **Status:** stable
 **Implements:** §7 (Decision log), §4c (a `failed` entry resets the cycle),
 §12 (the entry survives the Plan); light mode L-1, L-4 (`docs/TASKS-M1.md`)
@@ -120,8 +120,8 @@ Writing a `failed` entry for a ticket also returns that ticket's Plan to
 `draft` (§4c, light-mode form):
 
 1. `Status` becomes `draft`, and `Approved-by`, `Approved-at` and
-   `Approved-checksum` become empty. `Lockfile-checksum`, when present,
-   becomes empty too. The keys stay (plan-header.md D-3).
+   `Approved-checksum` become empty. `Lockfile-checksum` and `Acceptance`,
+   when present, become empty too. The keys stay (plan-header.md D-3).
 2. The body is not touched — nothing is reverted, only de-approved.
 3. There are no `.feature` files to reset in light mode.
 
@@ -404,6 +404,16 @@ not a draft type (D-11); and the draft names `SHOP-300` in the Plan directory of
 `SHOP-214`.
 
 ## 13. Version history
+
+**1.3.1 — a `failed` entry clears `Acceptance` (AT-3).**
+
+- §7: `Acceptance`, new in `plan-header.md` 1.7.0, is cleared with the other
+  approval values, and its key stays.
+
+**Why:** a `failed` entry promises that the approval it disproves is gone, and that
+decision was part of the approval.
+
+**Compatibility:** nothing changes for a Plan without the field.
 
 **1.3.0 — the developer approves the draft.**
 
