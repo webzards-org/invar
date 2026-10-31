@@ -26,7 +26,7 @@ use crate::diagnostics::Diagnostics;
 use crate::format::plan::{Acceptance, Approval, Mode, Plan, Status};
 use crate::fs::ProjectRoot;
 
-use super::approval::{self, Prior, classify};
+use super::approval::{self, ApprovedValue, Prior, classify};
 use super::validate::{self, Report};
 
 #[cfg(test)]
@@ -43,7 +43,24 @@ pub struct Chosen {
 enum Source {
     Flag,
     EarlierApproval,
-    Default,
+    UnconfirmedHeader,
+    /// With the value in the header, if any, that the approval did not cover.
+    Default(Option<Acceptance>),
+}
+
+/// What the approval being replaced gives `Acceptance` to go on (D-20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Earlier {
+    /// Nothing to keep: a draft, an approval no command recorded, or a header
+    /// with no value.
+    Nothing,
+    /// The digest shows the approval had this value.
+    Confirmed(Acceptance),
+    /// The body changed too, so the digest cannot say; this is what the header
+    /// holds.
+    Unconfirmed(Acceptance),
+    /// The digest shows the approval had no value, and the header holds this.
+    NotApproved(Acceptance),
 }
 
 /// The flag that names `value`.
@@ -55,46 +72,60 @@ fn flag_for(value: Acceptance) -> &'static str {
 }
 
 impl fmt::Display for Chosen {
-    /// `required (from --acceptance)`, `required (kept from the earlier
-    /// approval)`, `skipped (default)`: what the person approving is told
-    /// (plan-header.md §5.3).
+    /// What the person approving is told (plan-header.md §5.3). A label claims
+    /// only what the digest showed (D-20).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = self.value.as_str();
         match self.source {
             Source::Flag => write!(f, "{value} (from {})", flag_for(self.value)),
             Source::EarlierApproval => write!(f, "{value} (kept from the earlier approval)"),
-            Source::Default => write!(f, "{value} (default)"),
+            Source::UnconfirmedHeader => write!(
+                f,
+                "{value} (from the header; the earlier approval cannot confirm it)"
+            ),
+            Source::Default(None) => write!(f, "{value} (default)"),
+            Source::Default(Some(header)) => write!(
+                f,
+                "{value} (default; the `{}` in the header was not part of the approval)",
+                header.as_str()
+            ),
         }
     }
 }
 
 /// Decide the value of `Acceptance` (plan-header.md §5.3, D-20): `flag` if one
-/// was given, else `recorded`, else `acceptance.required` from `invar.yaml`,
-/// else `skipped`.
-///
-/// `recorded` is the value of the approval being replaced. It is `None` for a
-/// draft, including one reset by a `failed` entry, and for an approval that
-/// holds no value, such as one from before 1.7.0.
-pub fn choose_acceptance(flag: Option<Acceptance>, recorded: Option<Acceptance>) -> Chosen {
+/// was given, else what `earlier` has to keep, else `acceptance.required` from
+/// `invar.yaml`, else `skipped`.
+pub fn choose_acceptance(flag: Option<Acceptance>, earlier: Earlier) -> Chosen {
     if let Some(value) = flag {
         return Chosen {
             value,
             source: Source::Flag,
         };
     }
-    if let Some(value) = recorded {
-        return Chosen {
-            value,
-            source: Source::EarlierApproval,
-        };
-    }
+    let in_header = match earlier {
+        Earlier::Confirmed(value) => {
+            return Chosen {
+                value,
+                source: Source::EarlierApproval,
+            };
+        }
+        Earlier::Unconfirmed(value) => {
+            return Chosen {
+                value,
+                source: Source::UnconfirmedHeader,
+            };
+        }
+        Earlier::NotApproved(value) => Some(value),
+        Earlier::Nothing => None,
+    };
     // AT-4: `acceptance.required` from `invar.yaml` plugs in here, ahead of the
     // default, printed as `(from invar.yaml)`. `--acceptance` is then refused
     // above when the config has no `acceptance:` section: there is no `run`
     // command to test with, and the refusal says what to add.
     Chosen {
         value: Acceptance::Skipped,
-        source: Source::Default,
+        source: Source::Default(in_header),
     }
 }
 
@@ -192,12 +223,28 @@ pub fn prepare(
     };
 
     // A draft's value means nothing (§5.1), and an approval no command recorded
-    // has nothing to keep (example 9.3).
-    let kept = match replaces {
-        Some(Prior::Changed { .. }) => plan.header().acceptance,
-        _ => None,
+    // has nothing to keep (example 9.3). A flag settles it without asking.
+    let earlier = match (&replaces, flag) {
+        (Some(Prior::Changed { by, at, recorded }), None) => {
+            let in_header = plan.header().acceptance;
+            match approval::approved_value(&plan, recorded) {
+                ApprovedValue::Confirmed(value) => Earlier::Confirmed(value),
+                ApprovedValue::Changed(approved) => {
+                    return Err(ApproveError::AcceptanceChanged {
+                        spec: spec.to_owned(),
+                        by: by.clone(),
+                        at: at.clone(),
+                        approved,
+                        in_header,
+                    });
+                }
+                ApprovedValue::None => in_header.map_or(Earlier::Nothing, Earlier::NotApproved),
+                ApprovedValue::Unknown => in_header.map_or(Earlier::Nothing, Earlier::Unconfirmed),
+            }
+        }
+        _ => Earlier::Nothing,
     };
-    let acceptance = choose_acceptance(flag, kept);
+    let acceptance = choose_acceptance(flag, earlier);
     let checksum = approval::approval_digest(&plan, Some(acceptance.value));
 
     Ok(Decision::Approve(Box::new(Pending {
@@ -340,6 +387,15 @@ pub enum ApproveError {
     /// accepts the Plan, because an earlier approval stands; a new one does not
     /// inherit that. The report says what to fix.
     Unnumbered(Report),
+    /// `--reapprove` with no flag, and the digest shows that the body is what
+    /// was approved and `Acceptance` is not (D-20): a person chooses the value.
+    AcceptanceChanged {
+        spec: PathBuf,
+        by: String,
+        at: String,
+        approved: Acceptance,
+        in_header: Option<Acceptance>,
+    },
     /// The file changed between printing the criteria and writing.
     ChangedMeanwhile {
         spec: PathBuf,
@@ -409,6 +465,34 @@ impl fmt::Display for ApproveError {
                         write!(f, "cannot be approved in its current state")
                     }
                 }
+            }
+            Self::AcceptanceChanged {
+                spec,
+                by,
+                at,
+                approved,
+                in_header,
+            } => {
+                let other = match approved {
+                    Acceptance::Required => Acceptance::Skipped,
+                    Acceptance::Skipped => Acceptance::Required,
+                };
+                let now = match in_header {
+                    Some(value) => format!("the header now says `{}`", value.as_str()),
+                    None => "the header now has no value".to_owned(),
+                };
+                write!(
+                    f,
+                    "{}: `Acceptance` was `{}` when {by} approved it on {at}, and {now}. Choose \
+                     explicitly: re-approve with `--reapprove {}` to keep `{}`, or \
+                     `--reapprove {}` to record `{}`",
+                    spec.display(),
+                    approved.as_str(),
+                    flag_for(*approved),
+                    approved.as_str(),
+                    flag_for(other),
+                    other.as_str()
+                )
             }
             Self::ChangedMeanwhile { spec } => write!(
                 f,

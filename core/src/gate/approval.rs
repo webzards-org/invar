@@ -24,6 +24,40 @@ pub fn approval_digest(plan: &Plan, acceptance: Option<Acceptance>) -> String {
     }
 }
 
+/// What a recorded checksum shows about the `Acceptance` value it was computed
+/// over, given the body as it is now (plan-header.md D-20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovedValue {
+    /// The checksum matches the value in the header.
+    Confirmed(Acceptance),
+    /// The checksum matches another value: the body is what was approved, and
+    /// the value was this one until the header changed.
+    Changed(Acceptance),
+    /// The checksum matches the body alone: the approval had no value.
+    None,
+    /// The checksum matches nothing: the body changed too, so it cannot say.
+    Unknown,
+}
+
+/// Compare `recorded` with the digest of every value the approval could have had.
+pub fn approved_value(plan: &Plan, recorded: &str) -> ApprovedValue {
+    let in_header = plan.header().acceptance;
+    if let Some(value) = in_header
+        && approval_digest(plan, Some(value)) == recorded
+    {
+        return ApprovedValue::Confirmed(value);
+    }
+    for value in [Acceptance::Required, Acceptance::Skipped] {
+        if in_header != Some(value) && approval_digest(plan, Some(value)) == recorded {
+            return ApprovedValue::Changed(value);
+        }
+    }
+    if approval_digest(plan, None) == recorded {
+        return ApprovedValue::None;
+    }
+    ApprovedValue::Unknown
+}
+
 /// What the header says about earlier approvals, against the Plan as it is
 /// now.
 #[derive(Debug, Clone, PartialEq, Eq)]

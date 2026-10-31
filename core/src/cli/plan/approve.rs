@@ -38,10 +38,10 @@ pub struct Args {
 
     /// This ticket needs acceptance tests: records `Acceptance: required`.
     ///
-    /// Without either flag, an approval being replaced keeps its value;
-    /// otherwise the value comes from `invar.yaml`, and is `skipped` when nothing
-    /// there sets it. On a Plan already approved it changes nothing unless
-    /// `--reapprove` is given as well.
+    /// Without either flag, an approval being replaced keeps the value in its
+    /// header; otherwise the value comes from `invar.yaml`, and is `skipped` when
+    /// nothing there sets it. On a Plan already approved it changes nothing
+    /// unless `--reapprove` is given as well.
     #[arg(long, conflicts_with = "no_acceptance")]
     pub acceptance: bool,
 
@@ -60,8 +60,10 @@ pub struct Args {
     ///
     /// Without it such a Plan is refused: a silent re-approval would look
     /// exactly like the edit the checksum exists to catch (plan-header.md
-    /// D-12). The recorded value of `Acceptance` is kept unless `--acceptance`
-    /// or `--no-acceptance` names another (D-20).
+    /// D-12). The value of `Acceptance` in the header is kept unless
+    /// `--acceptance` or `--no-acceptance` names another. If the checksum shows
+    /// that value is not the approved one, one of those flags is required
+    /// (D-20).
     #[arg(long)]
     pub reapprove: bool,
 

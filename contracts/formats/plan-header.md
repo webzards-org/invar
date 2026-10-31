@@ -215,11 +215,13 @@ In order:
    **The value of `Acceptance` is decided here**, once it is known which approval
    is being replaced, and before anything is printed. In this order: `--acceptance`
    (`required`) or `--no-acceptance` (`skipped`), which exclude each other; the value
-   of the approval being replaced; `acceptance.required` from `invar.yaml`, once that
-   key exists (AT-4); `skipped`. A draft replaces no approval, whatever its key holds
-   (§5.1), so a draft reset by a `failed` entry goes on to `invar.yaml`. So does an
-   approval with no value, such as one from before 1.7.0, and one with approval
-   values missing, which no command recorded (example 9.3).
+   of the approval being replaced, as far as D-20 allows; `acceptance.required` from
+   `invar.yaml`, once that key exists (AT-4); `skipped`. A draft replaces no approval,
+   whatever its key holds (§5.1), so a draft reset by a `failed` entry goes on to
+   `invar.yaml`. So does an approval with no value, such as one from before 1.7.0,
+   and one with approval values missing, which no command recorded (example 9.3).
+   With no flag, a value changed since approval while the body stayed the same is
+   **refused** here, naming both values and both flags (D-20).
 3. **Read the approver and the date from git**, before anything is shown:
    - `Approved-by` is `git config user.name`, run in the project root, with
      surrounding whitespace trimmed. Unset or empty is an error, never an
@@ -234,7 +236,10 @@ In order:
    `Acceptance: required (from --acceptance)`,
    `Acceptance: skipped (from --no-acceptance)`,
    `Acceptance: required (kept from the earlier approval)`,
-   `Acceptance: required (from invar.yaml)` or `Acceptance: skipped (default)`.
+   `Acceptance: required (from the header; the earlier approval cannot confirm it)`,
+   `Acceptance: required (from invar.yaml)` or `Acceptance: skipped (default)`. When
+   the header holds a value the approval did not cover, the line says so:
+   ``Acceptance: skipped (default; the `required` in the header was not part of the approval)``.
 5. **Write.** `Status` becomes `approved`; `Approved-by`, `Approved-at`,
    `Approved-checksum` and `Acceptance` get their values. If the header has no
    `Acceptance` key, it is added right after `Approved-checksum`, with that line's
@@ -686,10 +691,33 @@ changed, so `--reapprove` with a flag naming another value replaces a current ap
 too. Without `--reapprove`, a flag never writes, because re-running the command is
 harmless (D-12).
 
-The value kept is the one in the header, and a changed approval is one whose header
-may have changed too: the digest does not say what the value was. That is why the
-value is printed with the criteria, and why a Plan that lost its value goes on to
-`invar.yaml` and the default, as one with nothing recorded does.
+A changed approval is one whose header may have changed too, so its value is kept
+only as far as the digest confirms it. With no flag, `plan approve` compares
+`Approved-checksum` with the approval digest of the body as it is now, in four cases:
+
+1. **It matches the value in the header.** The value is confirmed, and is printed as
+   `kept from the earlier approval`. A Plan in this state is a current approval, so
+   this path does not reach it in practice; the case is here so that the label has
+   one meaning.
+2. **It matches another value.** The body is what was approved, and the value is not:
+   someone changed it, or removed or cleared the line, which is exactly the change the
+   approval exists to catch. Renewing it as a matter of course would launder that
+   change, so the command **refuses**, before the criteria are shown, naming what was
+   approved, what the header says now, and both flags. A person chooses.
+3. **It matches the body alone.** The Plan was approved before 1.7.0 and a value was
+   added later. Nothing was recorded, so the value comes from `invar.yaml` or the
+   default, and the printed line says that the one in the header was not part of the
+   approval.
+4. **It matches nothing.** The body changed as well, and the digest cannot say which
+   value was approved. The header's value is kept, because dropping `required` when a
+   developer fixes a sentence is the failure this decision exists to prevent, and it is
+   printed as `from the header; the earlier approval cannot confirm it`, because that
+   is all that is known. With no value in the header there is nothing to keep, and it
+   goes on to `invar.yaml` and the default.
+
+So a value changed together with the body is not caught here: the digest cannot tell it
+from an honest edit, and the line printed with the criteria is the only signal. A label
+never claims what the digest did not show.
 
 ## 8. Open questions
 
@@ -1038,9 +1066,9 @@ Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece8
   `plan approve`. A `failed` entry clears its value and keeps its key.
 - §5.1: what the value means for a draft and for an approved Plan; no value on an
   approved Plan is `skipped`.
-- §5.3: where the value comes from (a flag, the approval being replaced,
-  `invar.yaml`, `skipped`), what is printed, what is written, the approval digest,
-  and the line `plan check` prints. New D-19 and D-20.
+- §5.3: where the value comes from (a flag, the approval being replaced as far as
+  the digest confirms it, `invar.yaml`, `skipped`), what is printed, what is written,
+  the approval digest, and the line `plan check` prints. New D-19 and D-20.
 - §4.3: the body's first line may not be an `Acceptance` line (D-19).
 - Example 9.2 shows the field and its digest; examples 9.10 to 9.12 are new.
 

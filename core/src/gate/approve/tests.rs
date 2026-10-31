@@ -6,10 +6,13 @@ use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
-use super::{ApproveError, Decision, Pending, Prior, choose_acceptance, classify, prepare};
+use super::{
+    ApproveError, Decision, Earlier, Pending, Prior, choose_acceptance, classify, prepare,
+};
 use crate::digest::{canonicalize, digest};
-use crate::format::plan::{Acceptance, Header, Mode, Status};
+use crate::format::plan::{Acceptance, Header, Mode, Plan, Status};
 use crate::fs::ProjectRoot;
+use crate::gate::approval::{ApprovedValue, approved_value};
 
 // --- fixtures ---------------------------------------------------------------
 
@@ -537,45 +540,84 @@ fn classify_covers_every_state() {
 // --- where `Acceptance` comes from (plan-header.md §5.3, D-20) -----------------------
 
 #[test]
-fn the_value_comes_from_the_flag_then_the_earlier_approval_then_the_default() {
+fn every_label_claims_only_what_the_digest_showed() {
     use Acceptance::{Required, Skipped};
-    for (flag, recorded, value, shown) in [
+    for (flag, earlier, value, shown) in [
         (
             Some(Skipped),
-            Some(Required),
+            Earlier::Confirmed(Required),
             Skipped,
             "skipped (from --no-acceptance)",
         ),
         (
             Some(Required),
-            Some(Skipped),
-            Required,
-            "required (from --acceptance)",
-        ),
-        (
-            Some(Required),
-            None,
+            Earlier::Nothing,
             Required,
             "required (from --acceptance)",
         ),
         (
             None,
-            Some(Required),
+            Earlier::Confirmed(Required),
             Required,
             "required (kept from the earlier approval)",
         ),
         (
             None,
-            Some(Skipped),
-            Skipped,
-            "skipped (kept from the earlier approval)",
+            Earlier::Unconfirmed(Required),
+            Required,
+            "required (from the header; the earlier approval cannot confirm it)",
         ),
-        (None, None, Skipped, "skipped (default)"),
+        (
+            None,
+            Earlier::NotApproved(Required),
+            Skipped,
+            "skipped (default; the `required` in the header was not part of the approval)",
+        ),
+        (None, Earlier::Nothing, Skipped, "skipped (default)"),
     ] {
-        let chosen = choose_acceptance(flag, recorded);
+        let chosen = choose_acceptance(flag, earlier);
         assert_eq!(chosen.value, value);
         assert_eq!(chosen.to_string(), shown);
     }
+}
+
+/// Example `number`'s header on example 9.1's body.
+fn parsed(number: &str) -> Plan {
+    let draft = contract_example("9.1");
+    let text = contract_example(number) + draft.split_once("\n---\n").unwrap().1;
+    Plan::parse(&text, Mode::Light).unwrap()
+}
+
+#[test]
+fn the_digest_says_what_it_can_about_the_approved_value() {
+    use Acceptance::{Required, Skipped};
+    let required = parsed("9.10");
+    let recorded = required.header().approved_checksum.clone().unwrap();
+    assert_eq!(
+        approved_value(&required, &recorded),
+        ApprovedValue::Confirmed(Required)
+    );
+    // Example 9.2 is the same body under `skipped`.
+    let skipped = parsed("9.2");
+    assert_eq!(
+        approved_value(&skipped, &recorded),
+        ApprovedValue::Changed(Required)
+    );
+    let old = parsed("9.12");
+    assert_eq!(
+        approved_value(&required, old.header().approved_checksum.as_ref().unwrap()),
+        ApprovedValue::None
+    );
+    assert_eq!(approved_value(&required, SUM_A), ApprovedValue::Unknown);
+    // No value in the header: the digest still shows what the approval had.
+    assert_eq!(
+        approved_value(&old, &recorded),
+        ApprovedValue::Changed(Required)
+    );
+    assert_eq!(
+        approved_value(&old, skipped.header().approved_checksum.as_ref().unwrap()),
+        ApprovedValue::Changed(Skipped)
+    );
 }
 
 /// `text` with its `Acceptance` key, if any, holding `line` instead.
