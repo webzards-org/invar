@@ -87,7 +87,7 @@ pub struct Header {
     pub approved_by: Option<String>,
     /// `YYYY-MM-DD` (D-6).
     pub approved_at: Option<String>,
-    /// `sha256:` + 64 lowercase hex, over the body.
+    /// `sha256:` + 64 lowercase hex, over the body and `Acceptance` (§5.3).
     pub approved_checksum: Option<String>,
     /// Absent and empty both mean no observation (§5.2, D-7).
     pub lockfile_checksum: Option<String>,

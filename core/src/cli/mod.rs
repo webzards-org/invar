@@ -44,8 +44,8 @@ pub enum Command {
     ///
     /// The whole file is hashed: its entire content is canonicalized (UTF-8,
     /// BOM, line endings, trailing whitespace) and run through SHA-256. A
-    /// `Confirmed-checksum` or `Approved-checksum` covers only the body below a
-    /// header, so this command run on a `.feature` or a Plan does not
+    /// `Confirmed-checksum` or `Approved-checksum` covers the body below a
+    /// header, not the whole file, so this command run on a `.feature` or a Plan does not
     /// reproduce that field.
     Hash(hash::Args),
     /// Work with the Plan of a ticket: `.invar/plans/<TICKET>-<slug>/spec.md`.

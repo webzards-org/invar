@@ -18,7 +18,7 @@
 //! trip drops comments and unknown keys.
 //!
 //! **The body** is everything from the first non-blank line after the closing
-//! delimiter (§4.3, D-1). It is what `Approved-checksum` covers, so its
+//! delimiter (§4.3, D-1). `Approved-checksum` covers it (§5.3), so its
 //! boundary is the delicate part: blank lines added or removed between the
 //! header and the body must not change it.
 
@@ -205,7 +205,7 @@ impl Plan {
         &self.header
     }
 
-    /// The body: what `Approved-checksum` is computed over, after
+    /// The body: what the approval digest is computed over (§5.3), after
     /// canonicalization (§4d). Starts at the first non-blank line after the
     /// closing delimiter (D-1).
     pub fn body(&self) -> &str {

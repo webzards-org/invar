@@ -23,6 +23,18 @@
 
 ### Added
 
+- **`Acceptance: required | skipped`**, a new Plan header field (Plan contract
+  1.7.0) that records whether a ticket needs acceptance tests. `plan approve`
+  writes it: `--acceptance` or `--no-acceptance` if given, otherwise `skipped`
+  (`invar.yaml` joins that order with its `acceptance:` section). The value is
+  printed with the criteria, and `--reapprove` decides it again instead of
+  inheriting it. On a Plan already approved and unchanged, a flag changes nothing
+  unless `--reapprove` is given too. The planner does not write the field, and a
+  `failed` entry clears it. Nothing acts on the value yet.
+
+- **`plan check` prints one more line** on success: `acceptance: required` or
+  `acceptance: skipped`. Every existing line stays as it was.
+
 - **`## Acceptance tests to change`**, an optional Plan section right after
   `## Acceptance criteria` (Plan contract 1.6.0): `- <path> — change — <reason>`
   or `- <path> — delete — <reason>`. `plan validate` checks its form. It is how a
@@ -61,6 +73,16 @@
   of assuming their defaults. What it found goes into Scope.
 
 ### Changed
+
+- **`Approved-checksum` covers the `Acceptance` value too** (Plan contract 1.7.0):
+  it is the digest of the line `Acceptance: <value>` and the body, so changing,
+  removing or clearing the value after approval makes `plan check` and `done`
+  refuse. `plan approve` always writes a value, so a new approval's checksum is no
+  longer what `invar hash` gives for the body alone. **Plans already approved keep
+  working:** with no value, the checksum stays that of the body, and the field
+  reads as `skipped`. Adding a value to one by hand makes it stale. `plan validate`
+  now refuses any other value under an `Acceptance` key, and a body whose first
+  line is an `Acceptance` line.
 
 - **Acceptance criteria are numbered** (Plan contract 1.6.0). Each criterion is a
   list item that starts with its id, `- AC1: Given …, when …, then ….`; ids are
