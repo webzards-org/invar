@@ -9,7 +9,8 @@ components meet (§14.3, §15).
 
 - `formats/` — the on-disk formats as written specifications: the `.feature`
   metadata block (§4), the Plan header and required sections (§4a), the
-  decision-entry format (§7), `invar.yaml` (§6). Precise enough that two
+  decision-entry format (§7), `invar.yaml` (§6), the `invar-lock:` line of an
+  acceptance test. Precise enough that two
   independent implementations split the same file at the same byte.
 - `schemas/` — JSON Schema for the machine-readable contracts: the adapter
   protocol (§14.2), `invar.yaml`, decision entries.
@@ -48,3 +49,4 @@ deliberately, never automatically.
 |---|---|---|
 | `fixtures/digest/` | Canonicalization and digests (§4d) | M1-1, M1-2 |
 | `fixtures/plan/` | A Plan as an earlier contract version approved it (`plan-header.md` D-16) | AT-2 |
+| `fixtures/acceptance/` | The `invar-lock:` line and the digest of a locked file (`acceptance-lock.md`) | AT-5 |

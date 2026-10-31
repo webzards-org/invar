@@ -45,6 +45,12 @@
   warning. `invar init` writes the section commented out, because its values depend
   on the project.
 
+- **The `invar-lock:` line** (new contract `acceptance-lock.md` 1.0.0, with fixtures
+  in `contracts/fixtures/acceptance/`): one line near the top of an acceptance test,
+  with any comment prefix, naming its ticket and, once locked, the digest of the file
+  without that line. `invar hash --lock <file>` prints that digest and says what the
+  line records. Nothing writes or enforces the line yet.
+
 - **`plan check` prints one more line** on success: `acceptance: required` or
   `acceptance: skipped`. Every existing line stays as it was.
 

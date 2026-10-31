@@ -9,6 +9,7 @@ conformance suite and for any later reimplementation — which is what keeps
 |---|---|---|
 | `digest/` | Canonicalization and digests (§4d) | M1-1, M1-2 |
 | `plan/` | A Plan as an earlier contract version approved it (`plan-header.md` D-16) | AT-2 |
+| `acceptance/` | The `invar-lock:` line and the digest of a locked file (`acceptance-lock.md`) | AT-5 |
 
 Each set carries its own README with the rules for adding to it. Two apply
 everywhere:
