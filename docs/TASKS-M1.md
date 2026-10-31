@@ -59,7 +59,9 @@ of every config written before scenarios exist — the compatibility rule of
 tooling (PHPStan/Larastan, Deptrac, PHP_CodeSniffer, ESLint, Pest/PHPUnit,
 Vitest) stays where it is and is run the way the team already runs it. `invar`
 neither wraps nor replaces it. Consequently the core stays language-neutral and
-Laravel + Vue support needs no adapter at all.
+Laravel + Vue support needs no adapter at all. Reopened narrowly by A-2 in
+[`TASKS-AT.md`](TASKS-AT.md): the core runs one configured acceptance command
+and reads its JUnit report; everything else here still holds.
 
 **L-4 — `invar done` replaces `invar generate` for M1.** With no tests to run,
 closing a cycle means: verify the approved Plan was not changed, write the
