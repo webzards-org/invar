@@ -297,6 +297,7 @@ fn reset_plan(spec: &Path, original: &str, mode: Mode) -> Result<(), RecordError
                 reread.body() == body
                     && reread.header().status == Status::Draft
                     && reread.header().approved_checksum.is_none()
+                    && reread.header().acceptance.is_none()
             })
     });
     if preserved {

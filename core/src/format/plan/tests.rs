@@ -1,5 +1,5 @@
 //! Tests for Plan parsing and writing (M1-6), against
-//! `contracts/formats/plan-header.md` v1.6.0.
+//! `contracts/formats/plan-header.md` v1.7.0.
 //!
 //! The valid Plan used throughout is the contract's own example 9.1, read out
 //! of the Markdown, so the contract and the parser cannot drift apart.
@@ -7,6 +7,7 @@
 use std::fs;
 use std::path::Path;
 
+use super::header::Acceptance;
 use super::{Approval, Mode, Plan, PlanError, Status};
 use crate::diagnostics::Diagnostics;
 
@@ -288,6 +289,99 @@ fn reset_to_draft_clears_a_lockfile_observation_but_keeps_its_key() {
     assert!(plan.header().lockfile_checksum.is_some());
     plan.reset_to_draft();
     assert_eq!(plan.to_text(), original);
+}
+
+// --- `Acceptance` (§5, §5.1) --------------------------------------------------
+
+#[test]
+fn acceptance_may_be_absent_or_empty_and_both_mean_not_decided() {
+    assert_eq!(parse(&valid()).header().acceptance, None);
+    let empty = replace(
+        &valid(),
+        "Approved-checksum:\n",
+        "Approved-checksum:\nAcceptance:\n",
+    );
+    assert_eq!(parse(&empty).header().acceptance, None);
+    assert_eq!(
+        parse(&empty).header().recorded_acceptance(),
+        Acceptance::Skipped
+    );
+}
+
+#[test]
+fn acceptance_reads_both_values() {
+    for (value, expected) in [
+        ("required", Acceptance::Required),
+        ("skipped", Acceptance::Skipped),
+    ] {
+        let text = replace(
+            &valid(),
+            "Approved-checksum:\n",
+            &format!("Approved-checksum:\nAcceptance: {value}\n"),
+        );
+        assert_eq!(parse(&text).header().acceptance, Some(expected));
+        assert_eq!(parse(&text).header().recorded_acceptance(), expected);
+    }
+}
+
+#[test]
+fn any_other_acceptance_value_is_an_error_naming_the_line() {
+    for value in ["optional", "Required", "SKIPPED", "yes"] {
+        let text = replace(
+            &valid(),
+            "Approved-checksum:\n",
+            &format!("Approved-checksum:\nAcceptance: {value}\n"),
+        );
+        let problems = Plan::parse(&text, Mode::Light).unwrap_err();
+        let line = text
+            .lines()
+            .position(|l| l.starts_with("Acceptance:"))
+            .unwrap()
+            + 1;
+        let rendered = problems.render(Path::new("spec.md"));
+        assert!(
+            rendered.contains(&format!("spec.md:{line}: `Acceptance` must be `required`"))
+                && rendered.contains(&format!("found `{value}`")),
+            "{rendered}"
+        );
+    }
+}
+
+#[test]
+fn reset_to_draft_clears_acceptance_but_keeps_its_key() {
+    let original = replace(
+        &valid(),
+        "Approved-checksum:\n",
+        "Approved-checksum:\nAcceptance:\n",
+    );
+    let approved = original
+        .replace("Status: draft", "Status: approved")
+        .replace("Approved-by:", "Approved-by: rade")
+        .replace("Approved-at:", "Approved-at: 2026-10-05")
+        .replace(
+            "Approved-checksum:",
+            &format!("Approved-checksum: sha256:{}", "cd".repeat(32)),
+        )
+        .replace("Acceptance:", "Acceptance: required");
+    let mut plan = parse(&approved);
+    plan.reset_to_draft();
+    assert_eq!(plan.to_text(), original);
+    assert_eq!(plan.header().acceptance, None);
+}
+
+#[test]
+fn reset_to_draft_adds_no_acceptance_key() {
+    let approved = valid()
+        .replace("Status: draft", "Status: approved")
+        .replace("Approved-by:", "Approved-by: rade")
+        .replace("Approved-at:", "Approved-at: 2026-10-05")
+        .replace(
+            "Approved-checksum:",
+            &format!("Approved-checksum: sha256:{}", "cd".repeat(32)),
+        );
+    let mut plan = parse(&approved);
+    plan.reset_to_draft();
+    assert_eq!(plan.to_text(), valid());
 }
 
 #[test]

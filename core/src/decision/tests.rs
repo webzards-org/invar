@@ -334,6 +334,38 @@ fn the_order_key_compares_trailing_numbers_as_numbers() {
 // --- `failed` resets the cycle ---------------------------------------------------------
 
 #[test]
+fn failed_clears_acceptance_and_keeps_its_key() {
+    // plan-header.md §5, decision-entry.md §7.
+    let original: String = approved_plan()
+        .lines()
+        .filter(|line| !line.starts_with("Acceptance:"))
+        .map(|line| match line.starts_with("Approved-checksum:") {
+            true => format!("{line}\nAcceptance: required\n"),
+            false => format!("{line}\n"),
+        })
+        .collect();
+    let (_dir, root) = project(Some(&original));
+    record(
+        &root,
+        request("SHOP-214", Type::Failed, None),
+        NOW,
+        Mode::Light,
+    )
+    .unwrap();
+
+    let reset = fs::read_to_string(spec(&root)).unwrap();
+    assert!(
+        reset.contains("\nApproved-checksum:\nAcceptance:\n---\n"),
+        "{reset}"
+    );
+    assert_eq!(
+        reset.split_once("\n---\n").unwrap().1,
+        original.split_once("\n---\n").unwrap().1,
+        "the body changed"
+    );
+}
+
+#[test]
 fn failed_returns_the_plan_to_draft_with_the_body_untouched() {
     let original = approved_plan();
     let (_dir, root) = project(Some(&original));

@@ -1,6 +1,6 @@
 //! The Plan: `.invar/plans/<TICKET>-<slug>/spec.md` (§4a).
 //!
-//! Implements `contracts/formats/plan-header.md` v1.6.0; section numbers and
+//! Implements `contracts/formats/plan-header.md` v1.7.0; section numbers and
 //! decision ids below (`§4.1`, `D-2`) point into it.
 //!
 //! **Reading** splits the file into four parts — opening delimiter, header,
@@ -275,6 +275,7 @@ impl Plan {
             header::APPROVED_AT,
             header::APPROVED_CHECKSUM,
             header::LOCKFILE_CHECKSUM,
+            header::ACCEPTANCE,
         ] {
             self.set(key, "");
         }
@@ -283,11 +284,12 @@ impl Plan {
         self.header.approved_at = None;
         self.header.approved_checksum = None;
         self.header.lockfile_checksum = None;
+        self.header.acceptance = None;
     }
 
     /// Change a field's value in place. Absent keys stay absent: the parser
-    /// guarantees the required ones exist, and `Lockfile-checksum` is only
-    /// ever cleared, never added.
+    /// guarantees the required ones exist, and the optional ones are only
+    /// cleared through here, never added.
     fn set(&mut self, key: &str, value: &str) {
         if let Some(line) = self
             .header_lines
