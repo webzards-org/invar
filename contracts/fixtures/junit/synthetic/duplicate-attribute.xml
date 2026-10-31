@@ -1,0 +1,3 @@
+<testsuite>
+  <testcase name="a" name="b" file="tests/A.php"/>
+</testsuite>

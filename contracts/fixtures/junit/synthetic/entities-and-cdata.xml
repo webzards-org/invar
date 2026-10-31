@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite>
+  <testcase name="AC1 &amp; &lt;b&gt; &#65;&#x42; &quot;q&quot; &apos;s&apos;" file="tests/A&amp;B.php">
+    <failure><![CDATA[<testcase name="inside cdata" file="x"/> & ]] not closed yet]]></failure>
+    <system-out><![CDATA[<error/>]]></system-out>
+  </testcase>
+  <testcase name='AC2 "single" quotes' file='tests/B.php'/>
+  <!-- <testcase name="in a comment" file="x"/> -->
+</testsuite>

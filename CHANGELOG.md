@@ -51,6 +51,13 @@
   without that line. `invar hash --lock <file>` prints that digest and says what the
   line records. Nothing writes or enforces the line yet.
 
+- **A reader for JUnit XML test results** (new contract `test-results.md` 1.0.0, with
+  real Pest and PHPUnit reports in `contracts/fixtures/junit/`): each test case's
+  outcome (`passed`, `failure`, `error`, `skipped`), its file relative to the project
+  root, and the `AC<n>` token in its name. The exit code of a run is never read, and
+  the ticket comes from the file's lock line, never from a name. Nothing runs tests
+  yet.
+
 - **`plan check` prints one more line** on success: `acceptance: required` or
   `acceptance: skipped`. Every existing line stays as it was.
 

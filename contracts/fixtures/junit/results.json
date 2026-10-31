@@ -1,0 +1,193 @@
+{
+  "schema": "invar.junit-fixtures/v1",
+  "version": "1.0.0",
+  "contract": "contracts/formats/test-results.md. Every report must read as listed here, with the root given. This table is written by hand, never from a reader's output.",
+  "reports": [
+    {
+      "report": "real/phpunit-13.4.5.xml",
+      "root": "/project",
+      "cases": [
+        { "name": "test_vacuum_and_acme_are_not_tokens", "file": "tests/Acceptance/CancelOrderTest.php", "outcome": "passed", "criterion": null },
+        { "name": "test_ac1_warns_then_fails", "file": "tests/Acceptance/CancelOrderTest.php", "outcome": "failure", "criterion": "AC1" },
+        { "name": "test_ac1_passes", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "passed", "criterion": "AC1" },
+        { "name": "test_ac_2_fails_on_an_assertion", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "failure", "criterion": "AC2" },
+        { "name": "test_ac3_errors_on_a_missing_class", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "error", "criterion": "AC3" },
+        { "name": "test_ac4_is_skipped", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "skipped", "criterion": "AC4" },
+        { "name": "test_ac5_is_incomplete", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "skipped", "criterion": "AC5" },
+        { "name": "test_with_no_token", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "failure", "criterion": null },
+        { "name": "test_ac6_and_ac7_two_tokens", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "failure", "criterion": ["AC6", "AC7"] },
+        { "name": "test_ac8_with_a_data_set with data set \"two\"", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "passed", "criterion": "AC8" },
+        { "name": "test_ac8_with_a_data_set with data set \"three \"quoted\" <x>\"", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "failure", "criterion": "AC8" },
+        { "name": "test_ac8_with_a_data_set with data set \"unnamed\"", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "failure", "criterion": "AC8" },
+        { "name": "test_ac9_risky_no_assertions", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "passed", "criterion": "AC9" }
+      ]
+    },
+    {
+      "report": "real/phpunit-13.4.5-one-file.xml",
+      "root": "/project",
+      "cases": [
+        { "name": "test_vacuum_and_acme_are_not_tokens", "file": "tests/Acceptance/CancelOrderTest.php", "outcome": "passed", "criterion": null },
+        { "name": "test_ac1_warns_then_fails", "file": "tests/Acceptance/CancelOrderTest.php", "outcome": "failure", "criterion": "AC1" }
+      ]
+    },
+    { "report": "real/phpunit-13.4.5-load-failure.xml", "root": "/project", "error": { "kind": "empty" } },
+    { "report": "real/phpunit-13.4.5-no-tests.xml", "root": "/project", "cases": [] },
+    {
+      "report": "real/pest-4.7.8.xml",
+      "root": "/project",
+      "cases": [
+        { "name": "it vacuum and ACME are not tokens", "file": "tests/Acceptance/CancelOrderTest.php", "outcome": "passed", "criterion": null },
+        { "name": "it AC1 ünïcödé & ampersand", "file": "tests/Acceptance/CancelOrderTest.php", "outcome": "failure", "criterion": "AC1" },
+        { "name": "it AC1: reserves stock", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "passed", "criterion": "AC1" },
+        { "name": "it ac_2 fails on an assertion", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "failure", "criterion": "AC2" },
+        { "name": "it AC-3 errors on a missing class", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "error", "criterion": "AC3" },
+        { "name": "it ac4 is skipped", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "skipped", "criterion": "AC4" },
+        { "name": "it ac5 is todo", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "skipped", "criterion": "AC5" },
+        { "name": "it has no token", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "failure", "criterion": null },
+        { "name": "it AC6 and AC7, two tokens", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "failure", "criterion": ["AC6", "AC7"] },
+        { "name": "it AC8 with a data set with data set \"dataset \"two\"\"", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "passed", "criterion": "AC8" },
+        { "name": "it AC8 with a data set with data set \"dataset \"three \"quoted\" <x>\"\"", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "failure", "criterion": "AC8" },
+        { "name": "it AC8 with a data set with data set \"(4)\"", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "failure", "criterion": "AC8" },
+        { "name": "test_ac9_snake_case", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "failure", "criterion": "AC9" },
+        { "name": "`ordering AC10` → it fails inside a describe", "file": "tests/Acceptance/ReserveStockTest.php", "outcome": "failure", "criterion": "AC10" }
+      ]
+    },
+    {
+      "report": "real/pest-4.7.8-one-file.xml",
+      "root": "/project",
+      "cases": [
+        { "name": "it vacuum and ACME are not tokens", "file": "tests/Acceptance/CancelOrderTest.php", "outcome": "passed", "criterion": null },
+        { "name": "it AC1 ünïcödé & ampersand", "file": "tests/Acceptance/CancelOrderTest.php", "outcome": "failure", "criterion": "AC1" }
+      ]
+    },
+    { "report": "real/pest-4.7.8-load-failure.xml", "root": "/project", "error": { "kind": "empty" } },
+    { "report": "real/pest-4.7.8-no-tests.xml", "root": "/project", "cases": [] },
+    { "report": "real/pest-3.8.7.xml", "root": "/project", "same_cases_as": "real/pest-4.7.8.xml" },
+    { "report": "real/pest-3.8.7-one-file.xml", "root": "/project", "same_cases_as": "real/pest-4.7.8-one-file.xml" },
+    { "report": "real/pest-3.8.7-load-failure.xml", "root": "/project", "error": { "kind": "empty" } },
+    { "report": "real/pest-3.8.7-no-tests.xml", "root": "/project", "cases": [] },
+
+    { "report": "synthetic/missing-file.xml", "root": "/project", "error": { "kind": "no-file", "name": "AC1 has no file", "line": 5 } },
+    { "report": "synthetic/empty-file-attribute.xml", "root": "/project", "error": { "kind": "no-file", "name": "AC1 empty file", "line": 2 } },
+    { "report": "synthetic/suffix-only-file.xml", "root": "/project", "error": { "kind": "no-file", "name": "AC1", "line": 2 } },
+    { "report": "synthetic/missing-name.xml", "root": "/project", "error": { "kind": "no-name", "line": 2 } },
+    { "report": "synthetic/empty-name.xml", "root": "/project", "error": { "kind": "no-name", "line": 3 } },
+    {
+      "report": "synthetic/several-outcomes.xml",
+      "root": "/project",
+      "cases": [
+        { "name": "failure then error", "file": "tests/A.php", "outcome": "error", "criterion": null },
+        { "name": "error then failure", "file": "tests/A.php", "outcome": "error", "criterion": null },
+        { "name": "skipped then failure", "file": "tests/A.php", "outcome": "failure", "criterion": null },
+        { "name": "failure then skipped", "file": "tests/A.php", "outcome": "failure", "criterion": null },
+        { "name": "skipped then error", "file": "tests/A.php", "outcome": "error", "criterion": null },
+        { "name": "all three", "file": "tests/A.php", "outcome": "error", "criterion": null },
+        { "name": "two failures", "file": "tests/A.php", "outcome": "failure", "criterion": null }
+      ]
+    },
+    {
+      "report": "synthetic/nested-testsuite.xml",
+      "root": "/project",
+      "cases": [
+        { "name": "AC1 at the root", "file": "tests/A.php", "outcome": "passed", "criterion": "AC1" },
+        { "name": "AC2 deep", "file": "tests/B.php", "outcome": "failure", "criterion": "AC2" },
+        { "name": "AC3 after", "file": "tests/C.php", "outcome": "error", "criterion": "AC3" }
+      ]
+    },
+    { "report": "synthetic/not-xml.xml", "root": "/project", "error": { "kind": "not-xml" } },
+    { "report": "synthetic/empty.xml", "root": "/project", "error": { "kind": "empty" } },
+    { "report": "synthetic/whitespace-only.xml", "root": "/project", "error": { "kind": "empty" } },
+    { "report": "synthetic/bom-only.xml", "root": "/project", "error": { "kind": "empty" } },
+    { "report": "synthetic/wrong-root.xml", "root": "/project", "error": { "kind": "wrong-root", "name": "html" } },
+    { "report": "synthetic/unclosed.xml", "root": "/project", "error": { "kind": "not-xml" } },
+    { "report": "synthetic/mismatched-end.xml", "root": "/project", "error": { "kind": "not-xml" } },
+    { "report": "synthetic/second-root.xml", "root": "/project", "error": { "kind": "not-xml" } },
+    { "report": "synthetic/text-after-root.xml", "root": "/project", "error": { "kind": "not-xml" } },
+    { "report": "synthetic/duplicate-attribute.xml", "root": "/project", "error": { "kind": "not-xml" } },
+    { "report": "synthetic/unquoted-attribute.xml", "root": "/project", "error": { "kind": "not-xml" } },
+    { "report": "synthetic/invalid-utf8.xml", "root": "/project", "error": { "kind": "not-xml" } },
+    { "report": "synthetic/external-entity.xml", "root": "/project", "error": { "kind": "not-xml" } },
+    {
+      "report": "synthetic/entities-and-cdata.xml",
+      "root": "/project",
+      "cases": [
+        { "name": "AC1 & <b> AB \"q\" 's'", "file": "tests/A&B.php", "outcome": "failure", "criterion": "AC1" },
+        { "name": "AC2 \"single\" quotes", "file": "tests/B.php", "outcome": "passed", "criterion": "AC2" }
+      ]
+    },
+    {
+      "report": "synthetic/ignored.xml",
+      "root": "/project",
+      "cases": [
+        { "name": "AC1 has a wrapped failure", "file": "tests/A.php", "outcome": "passed", "criterion": "AC1" }
+      ]
+    },
+    {
+      "report": "synthetic/bom.xml",
+      "root": "/project",
+      "cases": [ { "name": "AC1", "file": "tests/A.php", "outcome": "passed", "criterion": "AC1" } ]
+    },
+    {
+      "report": "synthetic/crlf.xml",
+      "root": "/project",
+      "cases": [ { "name": "AC1", "file": "tests/A.php", "outcome": "passed", "criterion": "AC1" } ]
+    },
+    { "report": "synthetic/no-tests-testsuite.xml", "root": "/project", "cases": [] },
+    {
+      "report": "synthetic/paths.xml",
+      "root": "/project",
+      "cases": [
+        { "name": "absolute", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "relative", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "dot", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "dotdot inside", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "absolute dotdot inside", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "double slash", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "backslashes", "file": "tests/Win/A.php", "outcome": "passed", "criterion": null },
+        { "name": "pest suffix", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "absolute with suffix", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "name :: with colons", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "another suffix", "file": "tests/A.php::something else", "outcome": "passed", "criterion": null },
+        { "name": "spaces in path", "file": "tests/my dir/A.php", "outcome": "passed", "criterion": null }
+      ]
+    },
+    { "report": "synthetic/outside-absolute.xml", "root": "/project", "error": { "kind": "outside-root", "name": "AC1" } },
+    { "report": "synthetic/outside-prefix.xml", "root": "/project", "error": { "kind": "outside-root", "name": "AC1" } },
+    { "report": "synthetic/outside-dotdot.xml", "root": "/project", "error": { "kind": "outside-root", "name": "AC1" } },
+    { "report": "synthetic/outside-climbs-out.xml", "root": "/project", "error": { "kind": "outside-root", "name": "AC1" } },
+    { "report": "synthetic/outside-the-root-itself.xml", "root": "/project", "error": { "kind": "outside-root", "name": "AC1" } },
+    {
+      "report": "synthetic/tokens.xml",
+      "root": "/project",
+      "cases": [
+        { "name": "AC1", "file": "tests/A.php", "outcome": "passed", "criterion": "AC1" },
+        { "name": "ac1", "file": "tests/A.php", "outcome": "passed", "criterion": "AC1" },
+        { "name": "Ac_1", "file": "tests/A.php", "outcome": "passed", "criterion": "AC1" },
+        { "name": "aC-12", "file": "tests/A.php", "outcome": "passed", "criterion": "AC12" },
+        { "name": "it('AC3: rejects')", "file": "tests/A.php", "outcome": "passed", "criterion": "AC3" },
+        { "name": "test_ac3_rejects", "file": "tests/A.php", "outcome": "passed", "criterion": "AC3" },
+        { "name": "[AC3]", "file": "tests/A.php", "outcome": "passed", "criterion": "AC3" },
+        { "name": "x.ac2,y", "file": "tests/A.php", "outcome": "passed", "criterion": "AC2" },
+        { "name": "AC10", "file": "tests/A.php", "outcome": "passed", "criterion": "AC10" },
+        { "name": "AC-3-4", "file": "tests/A.php", "outcome": "passed", "criterion": "AC3" },
+        { "name": "AC3_4", "file": "tests/A.php", "outcome": "passed", "criterion": "AC3" },
+        { "name": "ACME", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "vac3", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "AC3x", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "AC03", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "AC0", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "AC", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "AC_", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "AC__3", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "AC 3", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "AC_-3", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "éac3", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "aC3é", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "ac1ac2", "file": "tests/A.php", "outcome": "passed", "criterion": null },
+        { "name": "AC3 and ac_3", "file": "tests/A.php", "outcome": "passed", "criterion": "AC3" },
+        { "name": "AC3 and AC4", "file": "tests/A.php", "outcome": "passed", "criterion": ["AC3", "AC4"] },
+        { "name": "AC4 AC3 ac-4", "file": "tests/A.php", "outcome": "passed", "criterion": ["AC4", "AC3"] }
+      ]
+    }
+  ]
+}

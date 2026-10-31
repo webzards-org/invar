@@ -1,0 +1,9 @@
+<testsuite>
+  <testcase name="failure then error" file="tests/A.php"><failure/><error/></testcase>
+  <testcase name="error then failure" file="tests/A.php"><error/><failure/></testcase>
+  <testcase name="skipped then failure" file="tests/A.php"><skipped/><failure/></testcase>
+  <testcase name="failure then skipped" file="tests/A.php"><failure/><skipped/></testcase>
+  <testcase name="skipped then error" file="tests/A.php"><skipped/><error/></testcase>
+  <testcase name="all three" file="tests/A.php"><skipped/><failure/><error/></testcase>
+  <testcase name="two failures" file="tests/A.php"><failure/><failure/></testcase>
+</testsuite>

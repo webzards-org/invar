@@ -1,0 +1,9 @@
+# JUnit fixtures: git must not touch a single byte (see ../digest/.gitattributes).
+* -text -diff
+
+# Keep the tooling and metadata in this directory normal, and readable in a diff.
+results.json text eol=lf diff
+sums.json text eol=lf diff
+README.md text eol=lf diff
+tools/check.py text eol=lf diff
+.gitattributes text eol=lf diff

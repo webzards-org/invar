@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="CLI Arguments" tests="14" assertions="11" errors="1" failures="8" skipped="2" time="0.015482">
+    <testsuite name="Tests\Acceptance\CancelOrderTest" file="tests/Acceptance/CancelOrderTest.php" tests="2" assertions="2" errors="0" failures="1" skipped="0" time="0.007797">
+      <testcase name="it vacuum and ACME are not tokens" file="tests/Acceptance/CancelOrderTest.php::it vacuum and ACME are not tokens" class="Tests\Acceptance\CancelOrderTest" classname="Tests.Acceptance.CancelOrderTest" assertions="1" time="0.004314"/>
+      <testcase name="it AC1 ünïcödé &amp; ampersand" file="tests/Acceptance/CancelOrderTest.php::it AC1 ünïcödé &amp; ampersand" class="Tests\Acceptance\CancelOrderTest" classname="Tests.Acceptance.CancelOrderTest" assertions="1" time="0.003483">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">it AC1 ünïcödé &amp; ampersandFailed asserting that true is false.
+at tests/Acceptance/CancelOrderTest.php:10</failure>
+      </testcase>
+    </testsuite>
+    <testsuite name="Tests\Acceptance\ReserveStockTest" file="tests/Acceptance/ReserveStockTest.php" tests="12" assertions="9" errors="1" failures="7" skipped="2" time="0.007685">
+      <testcase name="it AC1: reserves stock" file="tests/Acceptance/ReserveStockTest.php::it AC1: reserves stock" class="Tests\Acceptance\ReserveStockTest" classname="Tests.Acceptance.ReserveStockTest" assertions="1" time="0.004034"/>
+      <testcase name="it ac_2 fails on an assertion" file="tests/Acceptance/ReserveStockTest.php::it ac_2 fails on an assertion" class="Tests\Acceptance\ReserveStockTest" classname="Tests.Acceptance.ReserveStockTest" assertions="1" time="0.000373">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">it ac_2 fails on an assertionFailed asserting that 1 is identical to 2.
+at tests/Acceptance/ReserveStockTest.php:10</failure>
+      </testcase>
+      <testcase name="it AC-3 errors on a missing class" file="tests/Acceptance/ReserveStockTest.php::it AC-3 errors on a missing class" class="Tests\Acceptance\ReserveStockTest" classname="Tests.Acceptance.ReserveStockTest" assertions="0" time="0.000299">
+        <error type="Error">it AC-3 errors on a missing classError: Class "App\DoesNotExist" not found
+at tests/Acceptance/ReserveStockTest.php:14</error>
+      </testcase>
+      <testcase name="it ac4 is skipped" file="tests/Acceptance/ReserveStockTest.php::it ac4 is skipped" class="Tests\Acceptance\ReserveStockTest" classname="Tests.Acceptance.ReserveStockTest" assertions="0" time="0.000446">
+        <skipped/>
+      </testcase>
+      <testcase name="it ac5 is todo" file="tests/Acceptance/ReserveStockTest.php::it ac5 is todo" class="Tests\Acceptance\ReserveStockTest" classname="Tests.Acceptance.ReserveStockTest" assertions="0" time="0.000257">
+        <skipped/>
+      </testcase>
+      <testcase name="it has no token" file="tests/Acceptance/ReserveStockTest.php::it has no token" class="Tests\Acceptance\ReserveStockTest" classname="Tests.Acceptance.ReserveStockTest" assertions="1" time="0.000309">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">it has no tokenFailed asserting that true is false.
+at tests/Acceptance/ReserveStockTest.php:24</failure>
+      </testcase>
+      <testcase name="it AC6 and AC7, two tokens" file="tests/Acceptance/ReserveStockTest.php::it AC6 and AC7, two tokens" class="Tests\Acceptance\ReserveStockTest" classname="Tests.Acceptance.ReserveStockTest" assertions="1" time="0.000303">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">it AC6 and AC7, two tokensFailed asserting that true is false.
+at tests/Acceptance/ReserveStockTest.php:28</failure>
+      </testcase>
+      <testsuite name="it AC8 with a data set" tests="3" assertions="3" errors="0" failures="2" skipped="0" time="0.001009">
+        <testcase name="it AC8 with a data set with data set &quot;dataset &quot;two&quot;&quot;" file="tests/Acceptance/ReserveStockTest.php::it AC8 with a data set with data set &quot;dataset &quot;two&quot;&quot;" class="Tests\Acceptance\ReserveStockTest" classname="Tests.Acceptance.ReserveStockTest" assertions="1" time="0.000291"/>
+        <testcase name="it AC8 with a data set with data set &quot;dataset &quot;three &quot;quoted&quot; &lt;x&gt;&quot;&quot;" file="tests/Acceptance/ReserveStockTest.php::it AC8 with a data set with data set &quot;dataset &quot;three &quot;quoted&quot; &lt;x&gt;&quot;&quot;" class="Tests\Acceptance\ReserveStockTest" classname="Tests.Acceptance.ReserveStockTest" assertions="1" time="0.000345">
+          <failure type="PHPUnit\Framework\ExpectationFailedException">it AC8 with a data set with data set "dataset "three "quoted" &lt;x&gt;""Failed asserting that 3 is identical to 2.
+at tests/Acceptance/ReserveStockTest.php:32</failure>
+        </testcase>
+        <testcase name="it AC8 with a data set with data set &quot;(4)&quot;" file="tests/Acceptance/ReserveStockTest.php::it AC8 with a data set with data set &quot;(4)&quot;" class="Tests\Acceptance\ReserveStockTest" classname="Tests.Acceptance.ReserveStockTest" assertions="1" time="0.000372">
+          <failure type="PHPUnit\Framework\ExpectationFailedException">it AC8 with a data set with data set "(4)"Failed asserting that 4 is identical to 2.
+at tests/Acceptance/ReserveStockTest.php:32</failure>
+        </testcase>
+      </testsuite>
+      <testcase name="test_ac9_snake_case" file="tests/Acceptance/ReserveStockTest.php::test_ac9_snake_case" class="Tests\Acceptance\ReserveStockTest" classname="Tests.Acceptance.ReserveStockTest" assertions="1" time="0.000352">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">test_ac9_snake_caseFailed asserting that true is false.
+at tests/Acceptance/ReserveStockTest.php:36</failure>
+      </testcase>
+      <testcase name="`ordering AC10` → it fails inside a describe" file="tests/Acceptance/ReserveStockTest.php::`ordering AC10` → it fails inside a describe" class="Tests\Acceptance\ReserveStockTest" classname="Tests.Acceptance.ReserveStockTest" assertions="1" time="0.000303">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">`ordering AC10` → it fails inside a describeFailed asserting that true is false.
+at tests/Acceptance/ReserveStockTest.php:41</failure>
+      </testcase>
+    </testsuite>
+  </testsuite>
+</testsuites>

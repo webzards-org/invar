@@ -42,6 +42,12 @@ jobs:
         run: python3 tools/generate.py --check
         working-directory: contracts/fixtures/acceptance
 
+      # The reports came from the real runners and cannot be regenerated, so this
+      # checks their bytes, and the hand-written table against them.
+      - name: JUnit fixtures
+        run: python3 tools/check.py --check
+        working-directory: contracts/fixtures/junit
+
   core:
     name: core (Linux)
     runs-on: ubuntu-latest

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Acceptance\CancelOrderTest" file="/project/tests/Acceptance/CancelOrderTest.php" tests="2" assertions="2" errors="0" failures="1" skipped="0" time="0.001584">
+    <testcase name="test_vacuum_and_acme_are_not_tokens" file="/project/tests/Acceptance/CancelOrderTest.php" line="11" class="Tests\Acceptance\CancelOrderTest" classname="Tests.Acceptance.CancelOrderTest" assertions="1" time="0.000182"/>
+    <testcase name="test_ac1_warns_then_fails" file="/project/tests/Acceptance/CancelOrderTest.php" line="16" class="Tests\Acceptance\CancelOrderTest" classname="Tests.Acceptance.CancelOrderTest" assertions="1" time="0.001403">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">Tests\Acceptance\CancelOrderTest::test_ac1_warns_then_fails
+Failed asserting that false is true.
+
+/project/tests/Acceptance/CancelOrderTest.php:19</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
