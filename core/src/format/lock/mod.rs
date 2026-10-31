@@ -50,6 +50,46 @@ pub fn read(bytes: &[u8]) -> Result<Option<LockLine>, LockError> {
     parse(&canonical)
 }
 
+/// `bytes` with the digest of [`read`] written into the pending line of `ticket`,
+/// right after the ticket (§4).
+///
+/// Everything before the marker, any trailing text and the line's own ending stay,
+/// and no other byte changes: this works on the file as it is, not on its canonical
+/// form, so its line endings, BOM and trailing whitespace survive. Refuses a file
+/// with no line, a line for another ticket, and a line already locked.
+// `invar acceptance lock` is the caller (AT-8); remove this with its arrival.
+#[allow(dead_code)]
+pub fn with_digest(bytes: &[u8], ticket: &str) -> Result<Vec<u8>, LockError> {
+    let lock = read(bytes)?.ok_or(LockError::NoLine)?;
+    if lock.ticket != ticket {
+        return Err(LockError::OtherTicket {
+            line: lock.line,
+            found: lock.ticket,
+            wanted: ticket.to_owned(),
+        });
+    }
+    if lock.recorded.is_some() {
+        return Err(LockError::AlreadyLocked {
+            line: lock.line,
+            ticket: lock.ticket,
+        });
+    }
+
+    // Valid UTF-8, and one line holds the marker, or `read` would have refused; so
+    // the first marker in the raw text is the one it read, whatever the line endings.
+    let text = String::from_utf8_lossy(bytes);
+    let marker = text.find(MARKER).unwrap_or_default() + MARKER.len();
+    let spaces = text[marker..].len() - text[marker..].trim_start_matches(' ').len();
+    let at = marker + spaces + lock.ticket.len();
+
+    let mut written = Vec::with_capacity(bytes.len() + lock.digest.len() + 1);
+    written.extend_from_slice(&bytes[..at]);
+    written.push(b' ');
+    written.extend_from_slice(lock.digest.as_bytes());
+    written.extend_from_slice(&bytes[at..]);
+    Ok(written)
+}
+
 /// Canonical text keeps every line number of the file above its trailing blank
 /// lines, and a lock line is never blank, so the numbers here are the file's (§3).
 fn parse(canonical: &str) -> Result<Option<LockLine>, LockError> {
@@ -149,10 +189,33 @@ fn covered(canonical: &str, line: usize) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LockError {
     InvalidUtf8(InvalidUtf8),
-    MoreThanOne { lines: Vec<usize> },
-    AfterWindow { line: usize },
-    Ticket { line: usize, found: String },
-    Digest { line: usize, found: String },
+    MoreThanOne {
+        lines: Vec<usize>,
+    },
+    AfterWindow {
+        line: usize,
+    },
+    Ticket {
+        line: usize,
+        found: String,
+    },
+    Digest {
+        line: usize,
+        found: String,
+    },
+    /// [`with_digest`] on a file with no lock line.
+    NoLine,
+    /// [`with_digest`] for another ticket than the one on the line.
+    OtherTicket {
+        line: usize,
+        found: String,
+        wanted: String,
+    },
+    /// [`with_digest`] on a line that already records a digest.
+    AlreadyLocked {
+        line: usize,
+        ticket: String,
+    },
 }
 
 impl fmt::Display for LockError {
@@ -185,6 +248,24 @@ impl fmt::Display for LockError {
                 f,
                 "line {line}: `{found}` is not a recorded digest, which is `{DIGEST_PREFIX}` and \
                  64 lowercase hex characters, right after the ticket and separated by spaces"
+            ),
+            Self::NoLine => write!(
+                f,
+                "no `{MARKER}` line to write a digest into; a test is locked from a pending line"
+            ),
+            Self::OtherTicket {
+                line,
+                found,
+                wanted,
+            } => write!(
+                f,
+                "line {line}: the `{MARKER}` line names `{found}`, not `{wanted}`, so `{wanted}` \
+                 cannot lock this file"
+            ),
+            Self::AlreadyLocked { line, ticket } => write!(
+                f,
+                "line {line}: the `{MARKER}` line is already locked for `{ticket}`, and a digest \
+                 is written only into a pending line"
             ),
         }
     }

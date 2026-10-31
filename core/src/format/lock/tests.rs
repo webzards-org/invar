@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::{LockError, LockLine, read};
+use super::{LockError, LockLine, read, with_digest};
 use crate::digest::{canonicalize, digest};
 
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -103,6 +103,7 @@ fn every_fixture_reads_as_locks_json_says() {
                         assert_eq!(kind, "digest", "{path}: {err}");
                         lines(&[*line]);
                     }
+                    other => panic!("{path}: `read` never returns {other:?}"),
                 }
             }
             (expected, got) => panic!("{path}: expected {expected}, got {got:?}"),
@@ -426,6 +427,148 @@ fn matches_needs_a_recorded_digest_equal_to_the_files() {
     assert!(!lock(&edited).matches());
 }
 
+// --- with_digest ----------------------------------------------------------------
+
+/// Check that `written` is `original` with only ` <digest>` added, right after
+/// the ticket, and that it now reads as locked and matching.
+fn assert_only_the_digest_was_added(original: &[u8], written: &[u8], ticket: &str) {
+    let before = read(original).unwrap().unwrap();
+    let inserted = format!(" {}", before.digest);
+    let original_text = std::str::from_utf8(original).unwrap();
+    let written_text = std::str::from_utf8(written).unwrap();
+
+    let at = written_text.find(&inserted).unwrap();
+    assert_eq!(written.len(), original.len() + inserted.len());
+    assert_eq!(&written[..at], &original[..at]);
+    assert_eq!(&written[at + inserted.len()..], &original[at..]);
+    assert!(original_text[..at].ends_with(ticket), "{original_text:?}");
+
+    let after = read(written).unwrap().unwrap();
+    assert!(after.matches(), "{written_text:?}");
+    assert_eq!(after.ticket, ticket);
+    assert_eq!(after.line, before.line);
+    assert_eq!(after.digest, before.digest);
+}
+
+#[test]
+fn with_digest_round_trips_every_pending_fixture() {
+    let manifest = manifest();
+    let pending: Vec<&Value> = manifest["fixtures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|fixture| fixture["result"] == "pending")
+        .collect();
+    assert!(!pending.is_empty());
+    for fixture in pending {
+        let bytes = fs::read(fixtures_dir().join(fixture["path"].as_str().unwrap())).unwrap();
+        let ticket = fixture["ticket"].as_str().unwrap();
+        let written = with_digest(&bytes, ticket).unwrap();
+        assert_only_the_digest_was_added(&bytes, &written, ticket);
+    }
+}
+
+#[test]
+fn with_digest_keeps_every_other_byte() {
+    for text in [
+        // CRLF, on the line and off it.
+        "<?php\r\n// invar-lock: SHOP-214\r\n\r\nbody\r\n",
+        // A BOM.
+        "\u{FEFF}# invar-lock: SHOP-214\nbody\n",
+        // A BOM, mixed line endings, lone CR, trailing whitespace and blank lines.
+        "\u{FEFF}a  \r\n# invar-lock: SHOP-214\rb\t\nc \r\n\n\n",
+        // Trailing whitespace on the line itself, no final newline.
+        "# invar-lock: SHOP-214   \nbody",
+        "# invar-lock: SHOP-214",
+        // Spaces inside the line stay as they were.
+        "#   invar-lock:     SHOP-214\nbody\n",
+    ] {
+        let written = with_digest(text.as_bytes(), "SHOP-214").unwrap();
+        assert_only_the_digest_was_added(text.as_bytes(), &written, "SHOP-214");
+    }
+}
+
+#[test]
+fn with_digest_keeps_the_prefix_and_the_trailing_text() {
+    let digest = digest("body\n");
+    for (before, after) in [
+        (
+            "/* invar-lock: SHOP-214 */\r\nbody\r\n".to_owned(),
+            format!("/* invar-lock: SHOP-214 {digest} */\r\nbody\r\n"),
+        ),
+        (
+            "<!-- invar-lock: SHOP-214 -->\nbody\n".to_owned(),
+            format!("<!-- invar-lock: SHOP-214 {digest} -->\nbody\n"),
+        ),
+        (
+            " * invar-lock: SHOP-214\twritten by hand\nbody\n".to_owned(),
+            format!(" * invar-lock: SHOP-214 {digest}\twritten by hand\nbody\n"),
+        ),
+    ] {
+        let written = with_digest(before.as_bytes(), "SHOP-214").unwrap();
+        assert_eq!(String::from_utf8(written).unwrap(), after);
+    }
+}
+
+#[test]
+fn with_digest_is_not_confused_by_a_ticket_in_the_prefix() {
+    let text = "SHOP-214 invar-lock: SHOP-214\nbody\n";
+    let written = with_digest(text.as_bytes(), "SHOP-214").unwrap();
+    assert_eq!(
+        String::from_utf8(written).unwrap(),
+        format!("SHOP-214 invar-lock: SHOP-214 {}\nbody\n", digest("body\n"))
+    );
+}
+
+#[test]
+fn with_digest_refuses_what_it_cannot_lock() {
+    assert_eq!(with_digest(b"body\n", "SHOP-214"), Err(LockError::NoLine));
+    assert_eq!(with_digest(b"", "SHOP-214"), Err(LockError::NoLine));
+    assert_eq!(
+        with_digest(b"x\n# invar-lock: OTHER-1\n", "SHOP-214"),
+        Err(LockError::OtherTicket {
+            line: 2,
+            found: "OTHER-1".to_owned(),
+            wanted: "SHOP-214".to_owned(),
+        })
+    );
+    // Already locked, whether or not the digest still holds.
+    for recorded in [digest("body\n"), DIGEST.to_owned()] {
+        let text = format!("# invar-lock: SHOP-214 {recorded}\nbody\n");
+        assert_eq!(
+            with_digest(text.as_bytes(), "SHOP-214"),
+            Err(LockError::AlreadyLocked {
+                line: 1,
+                ticket: "SHOP-214".to_owned(),
+            })
+        );
+    }
+    // Locked for another ticket: the ticket is what is wrong first.
+    let text = format!("# invar-lock: OTHER-1 {DIGEST}\nbody\n");
+    assert!(matches!(
+        with_digest(text.as_bytes(), "SHOP-214"),
+        Err(LockError::OtherTicket { .. })
+    ));
+    // What `read` refuses, this refuses too.
+    assert!(matches!(
+        with_digest(&at_line(11).into_bytes(), "SHOP-214"),
+        Err(LockError::AfterWindow { line: 11 })
+    ));
+    assert!(matches!(
+        with_digest(b"# invar-lock: SHOP-214\n\xE9\n", "SHOP-214"),
+        Err(LockError::InvalidUtf8(_))
+    ));
+}
+
+#[test]
+fn a_file_cannot_be_locked_twice() {
+    let once = with_digest(b"# invar-lock: SHOP-214\nbody\n", "SHOP-214").unwrap();
+    assert!(matches!(
+        with_digest(&once, "SHOP-214"),
+        Err(LockError::AlreadyLocked { .. })
+    ));
+}
+
 // --- messages -----------------------------------------------------------------
 
 #[test]
@@ -446,6 +589,22 @@ fn every_error_names_its_line_and_what_to_do() {
         (
             lock_error("invar-lock: A-1 sha256:abc\n"),
             &["line 1", "`sha256:abc`", "64 lowercase hex"],
+        ),
+        (LockError::NoLine, &["no `invar-lock:` line"]),
+        (
+            LockError::OtherTicket {
+                line: 2,
+                found: "OTHER-1".to_owned(),
+                wanted: "SHOP-214".to_owned(),
+            },
+            &["line 2", "`OTHER-1`", "`SHOP-214` cannot lock"],
+        ),
+        (
+            LockError::AlreadyLocked {
+                line: 3,
+                ticket: "SHOP-214".to_owned(),
+            },
+            &["line 3", "already locked", "`SHOP-214`"],
         ),
     ] {
         let message = error.to_string();
