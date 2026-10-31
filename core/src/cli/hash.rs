@@ -5,7 +5,7 @@
 //! be answerable without a debugger.
 //!
 //! It hashes the **whole file**. A `Confirmed-checksum` or an
-//! `Approved-checksum` covers only the body below a header, so `invar hash`
+//! `Approved-checksum` covers the body below a header, not the file, so `invar hash`
 //! run on a `.feature` or a Plan does not reproduce that field. Body
 //! extraction is format knowledge and stays in `format/`; this command stays
 //! a plain view of canonicalization plus SHA-256.

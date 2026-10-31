@@ -237,8 +237,10 @@ A new Plan header field, `Acceptance: required | skipped`, written **only** by
 `invar plan approve`, together with the other approval fields.
 
 - `invar plan approve <TICKET> --acceptance` / `--no-acceptance` sets it; without
-  either flag it takes `acceptance.required` from `invar.yaml` (AT-4). Flag beats
-  config beats the default.
+  either flag it takes the value of the approval being replaced, then
+  `acceptance.required` from `invar.yaml` (AT-4), then `skipped`
+  (`plan-header.md` §5.3). `--reapprove` keeps the recorded value only as far as
+  the digest confirms it (D-20).
 - The field is part of the approval: an agent that changes `required` to
   `skipped` after approval must be detected. Decide and document how (open
   question in AT-1): recommended is that `Approved-checksum` covers the body plus

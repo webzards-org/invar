@@ -378,7 +378,7 @@ fn approved_with_tests_to_change(content: &str) -> String {
         .unwrap();
     let checksum = String::from_utf8(output.stdout).unwrap();
 
-    let header = contract_example("9.2")
+    let header = contract_example("9.12")
         .lines()
         .map(|line| match line.strip_prefix("Approved-checksum:") {
             Some(_) => format!("Approved-checksum: {}\n", checksum.trim()),

@@ -1,6 +1,6 @@
 //! The Plan: `.invar/plans/<TICKET>-<slug>/spec.md` (§4a).
 //!
-//! Implements `contracts/formats/plan-header.md` v1.6.0; section numbers and
+//! Implements `contracts/formats/plan-header.md` v1.7.0; section numbers and
 //! decision ids below (`§4.1`, `D-2`) point into it.
 //!
 //! **Reading** splits the file into four parts — opening delimiter, header,
@@ -18,7 +18,7 @@
 //! trip drops comments and unknown keys.
 //!
 //! **The body** is everything from the first non-blank line after the closing
-//! delimiter (§4.3, D-1). It is what `Approved-checksum` covers, so its
+//! delimiter (§4.3, D-1). `Approved-checksum` covers it (§5.3), so its
 //! boundary is the delicate part: blank lines added or removed between the
 //! header and the body must not change it.
 
@@ -46,7 +46,7 @@ use std::fs::{self, File};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
-pub use header::{Header, Status};
+pub use header::{Acceptance, Header, Status};
 pub use sections::{ACCEPTANCE_TESTS_TO_CHANGE, Section};
 
 use crate::diagnostics::Diagnostics;
@@ -205,7 +205,7 @@ impl Plan {
         &self.header
     }
 
-    /// The body: what `Approved-checksum` is computed over, after
+    /// The body: what the approval digest is computed over (§5.3), after
     /// canonicalization (§4d). Starts at the first non-blank line after the
     /// closing delimiter (D-1).
     pub fn body(&self) -> &str {
@@ -249,19 +249,22 @@ impl Plan {
 
     // --- the command-written fields -----------------------------------------
 
-    /// Mark the Plan approved (M1-9): `Status: approved` and the three
-    /// approval fields. Only those four values change; every other byte of
-    /// the file stays as it was.
+    /// Mark the Plan approved (M1-9): `Status: approved`, the three approval
+    /// fields and `Acceptance`. Only those five values change, and an absent
+    /// `Acceptance` key is added right after `Approved-checksum` (§5.3); every
+    /// other byte of the file stays as it was.
     pub fn approve(&mut self, approval: Approval) -> Result<(), String> {
         approval.check()?;
         self.set(header::STATUS, Status::Approved.as_str());
         self.set(header::APPROVED_BY, &approval.by);
         self.set(header::APPROVED_AT, &approval.at);
         self.set(header::APPROVED_CHECKSUM, &approval.checksum);
+        self.set_or_add_acceptance(approval.acceptance);
         self.header.status = Status::Approved;
         self.header.approved_by = Some(approval.by);
         self.header.approved_at = Some(approval.at);
         self.header.approved_checksum = Some(approval.checksum);
+        self.header.acceptance = Some(approval.acceptance);
         Ok(())
     }
 
@@ -275,6 +278,7 @@ impl Plan {
             header::APPROVED_AT,
             header::APPROVED_CHECKSUM,
             header::LOCKFILE_CHECKSUM,
+            header::ACCEPTANCE,
         ] {
             self.set(key, "");
         }
@@ -283,11 +287,28 @@ impl Plan {
         self.header.approved_at = None;
         self.header.approved_checksum = None;
         self.header.lockfile_checksum = None;
+        self.header.acceptance = None;
+    }
+
+    /// The one optional key a command adds: the planner does not write it, so
+    /// an approval usually finds it absent (§5.3).
+    fn set_or_add_acceptance(&mut self, value: Acceptance) {
+        let key = |wanted| {
+            self.header_lines
+                .iter()
+                .position(|line| line.key() == Some(wanted))
+        };
+        if key(header::ACCEPTANCE).is_some() {
+            self.set(header::ACCEPTANCE, value.as_str());
+        } else if let Some(index) = key(header::APPROVED_CHECKSUM) {
+            let line = self.header_lines[index].field_after(header::ACCEPTANCE, value.as_str());
+            self.header_lines.insert(index + 1, line);
+        }
     }
 
     /// Change a field's value in place. Absent keys stay absent: the parser
-    /// guarantees the required ones exist, and `Lockfile-checksum` is only
-    /// ever cleared, never added.
+    /// guarantees the required ones exist, and the optional ones are only
+    /// cleared through here, never added.
     fn set(&mut self, key: &str, value: &str) {
         if let Some(line) = self
             .header_lines
@@ -396,9 +417,24 @@ fn analyze(text: &str, mode: Mode, unnumbered: Unnumbered) -> Analysis {
     // §4.3, D-1: the body starts at the first non-blank line.
     let mut body_start = rest.len();
     let mut offset = 0;
-    for (line, eol) in split_lines(&rest) {
+    for (index, (line, eol)) in split_lines(&rest).into_iter().enumerate() {
         if !line.trim().is_empty() {
             body_start = offset;
+            // The approval digest hashes this line and the body as one text,
+            // so here it would stand in for the header's value (D-19). What
+            // canonicalization strips does not count: a BOM in front of it, and
+            // whitespace after it.
+            let line = line.strip_prefix('\u{FEFF}').unwrap_or(line).trim_end();
+            if matches!(line, "Acceptance: required" | "Acceptance: skipped") {
+                found.at(
+                    rest_first_line + index,
+                    format!(
+                        "the body cannot start with `{line}`: that line belongs in the \
+                         header, where `plan approve` writes it (plan-header.md D-19). \
+                         Remove it"
+                    ),
+                );
+            }
             break;
         }
         offset += line.len() + eol.len();
@@ -440,8 +476,10 @@ pub struct Approval {
     pub by: String,
     /// `YYYY-MM-DD`.
     pub at: String,
-    /// The §4d digest of the body.
+    /// The approval digest (§5.3, D-19).
     pub checksum: String,
+    /// What the digest covers along with the body.
+    pub acceptance: Acceptance,
 }
 
 impl Approval {

@@ -96,6 +96,14 @@ impl Project {
         self.approve_in(&self.root(), args)
     }
 
+    fn check(&self) -> assert_cmd::assert::Assert {
+        Command::cargo_bin("invar")
+            .unwrap()
+            .current_dir(self.root())
+            .args(["plan", "check", "PROJ-412"])
+            .assert()
+    }
+
     fn approve_in(&self, cwd: &Path, args: &[&str]) -> assert_cmd::assert::Assert {
         Command::cargo_bin("invar")
             .unwrap()
@@ -110,16 +118,16 @@ impl Project {
     }
 }
 
-/// The digest `invar hash` gives the body alone, as an independent check of
-/// `Approved-checksum`.
-fn body_digest(text: &str, scratch: &Path) -> String {
+/// The digest `invar hash` gives the line `Acceptance: <value>` and the body, as
+/// an independent check of `Approved-checksum` (plan-header.md §5.3).
+fn approval_digest(text: &str, value: &str, scratch: &Path) -> String {
     let body = text
         .split_once("\n---\n")
         .unwrap()
         .1
         .trim_start_matches('\n');
     let file = scratch.join("body.md");
-    fs::write(&file, body).unwrap();
+    fs::write(&file, format!("Acceptance: {value}\n{body}")).unwrap();
     let output = Command::cargo_bin("invar")
         .unwrap()
         .arg("hash")
@@ -161,7 +169,10 @@ fn approves_a_draft_printing_the_criteria_first() {
     assert_eq!(header_value(&written, "Approved-by"), "Rade Brković");
     assert_eq!(header_value(&written, "Approved-at"), "2026-10-05");
     let checksum = header_value(&written, "Approved-checksum");
-    assert_eq!(checksum, body_digest(&draft, project.dir.path()));
+    assert_eq!(
+        checksum,
+        approval_digest(&draft, "skipped", project.dir.path())
+    );
     assert!(stdout.contains(&format!("Approved-checksum: {checksum}")));
     // The last line is the fixed one `/invar:approve` starts Phase 2 on.
     assert_eq!(
@@ -317,7 +328,7 @@ fn a_body_changed_after_approval_needs_reapprove() {
         .failure()
         .stdout("")
         .stderr(contains(
-            "the body changed after rade approved it on 2026-10-05",
+            "the body or `Acceptance` changed after rade approved it on 2026-10-05",
         ))
         .stderr(contains("--reapprove"));
     assert_eq!(project.read_spec(), edited, "a refusal must not write");
@@ -327,14 +338,14 @@ fn a_body_changed_after_approval_needs_reapprove() {
         .approve(&["PROJ-412", "--reapprove"])
         .success()
         .stdout(contains(
-            "re-approving: the body changed after rade approved it",
+            "re-approving: the body or `Acceptance` changed after rade approved it",
         ))
         .stdout(contains("then the order waits for stock"));
     let written = project.read_spec();
     assert_eq!(header_value(&written, "Approved-by"), "mila");
     assert_eq!(
         header_value(&written, "Approved-checksum"),
-        body_digest(&edited, project.dir.path())
+        approval_digest(&edited, "skipped", project.dir.path())
     );
 }
 
@@ -567,4 +578,553 @@ fn reapproving_a_plan_with_no_ids_is_refused_until_it_has_them() {
         .success()
         .stdout(contains("- AC1: Given a pending"));
     assert_eq!(header_value(&project.read_spec(), "Status"), "approved");
+}
+
+// --- `Acceptance` (plan-header.md §5.3, D-19, D-20) ------------------------------
+
+fn stdout_of(assert: assert_cmd::assert::Assert) -> String {
+    String::from_utf8(assert.get_output().stdout.clone()).unwrap()
+}
+
+#[test]
+fn the_value_comes_from_the_flag_else_the_default_and_names_its_source() {
+    for (args, value, line) in [
+        (
+            &["PROJ-412", "--acceptance"][..],
+            "required",
+            "Acceptance: required (from --acceptance)\n",
+        ),
+        (
+            &["PROJ-412", "--no-acceptance"][..],
+            "skipped",
+            "Acceptance: skipped (from --no-acceptance)\n",
+        ),
+        (
+            &["PROJ-412"][..],
+            "skipped",
+            "Acceptance: skipped (default)\n",
+        ),
+    ] {
+        let project = Project::new(Some("rade"));
+        let draft = project.read_spec();
+        let stdout = stdout_of(project.approve(args).success().stderr(""));
+
+        // Shown with the criteria, and before the result.
+        let shown = stdout.find(line).unwrap_or_else(|| panic!("{stdout}"));
+        assert!(
+            stdout.find("- AC2: Given 1 in stock").unwrap() < shown,
+            "{stdout}"
+        );
+        assert!(shown < stdout.find("approved: ").unwrap(), "{stdout}");
+
+        let written = project.read_spec();
+        assert_eq!(header_value(&written, "Acceptance"), value);
+        let checksum = header_value(&written, "Approved-checksum");
+        assert_eq!(checksum, approval_digest(&draft, value, project.dir.path()));
+        // The fixed line is as it was, and shows the new digest.
+        assert_eq!(
+            stdout.lines().last(),
+            Some(format!("approved PROJ-412 checksum {checksum}").as_str()),
+            "{stdout}"
+        );
+        assert_eq!(
+            written.split_once("\n---\n").unwrap().1,
+            draft.split_once("\n---\n").unwrap().1,
+            "the body changed"
+        );
+    }
+}
+
+#[test]
+fn the_key_is_added_after_the_checksum_and_nothing_else_moves() {
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let written = project.read_spec();
+    let header: Vec<&str> = written.lines().skip(1).take(7).collect();
+    assert_eq!(
+        header
+            .iter()
+            .map(|l| l.split(':').next().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "Ticket",
+            "Module",
+            "Status",
+            "Approved-by",
+            "Approved-at",
+            "Approved-checksum",
+            "Acceptance"
+        ],
+    );
+}
+
+#[test]
+fn a_value_left_in_a_draft_means_nothing_and_is_replaced() {
+    let project = Project::new(Some("rade"));
+    project.write_spec(&plan_text("PROJ-412").replace(
+        "Approved-checksum:\n",
+        "Approved-checksum:\nAcceptance: required\n",
+    ));
+    project
+        .approve(&["PROJ-412"])
+        .success()
+        .stdout(contains("Acceptance: skipped (default)"));
+    assert_eq!(header_value(&project.read_spec(), "Acceptance"), "skipped");
+}
+
+#[test]
+fn an_unknown_value_in_a_draft_is_refused_naming_the_line() {
+    let project = Project::new(Some("rade"));
+    let draft = plan_text("PROJ-412").replace(
+        "Approved-checksum:\n",
+        "Approved-checksum:\nAcceptance: maybe\n",
+    );
+    project.write_spec(&draft);
+    project
+        .approve(&["PROJ-412", "--acceptance"])
+        .failure()
+        .stdout(contains(format!("{SPEC}:8: `Acceptance` must be")));
+    assert_eq!(project.read_spec(), draft);
+}
+
+#[test]
+fn both_flags_together_are_refused_and_nothing_is_written() {
+    let project = Project::new(Some("rade"));
+    let draft = project.read_spec();
+    for args in [
+        &["PROJ-412", "--acceptance", "--no-acceptance"][..],
+        &["PROJ-412", "--no-acceptance", "--acceptance"][..],
+    ] {
+        project
+            .approve(args)
+            .failure()
+            .code(1)
+            .stdout("")
+            .stderr(contains("cannot be used with"));
+    }
+    assert_eq!(project.read_spec(), draft);
+}
+
+#[test]
+fn skill_passes_both_flags_through() {
+    for (flag, value) in [("--acceptance", "required"), ("--no-acceptance", "skipped")] {
+        let project = Project::new(Some("rade"));
+        project
+            .approve(&["--skill", "PROJ-412", flag])
+            .success()
+            .stdout(contains("approved PROJ-412 checksum sha256:"));
+        assert_eq!(header_value(&project.read_spec(), "Acceptance"), value);
+    }
+}
+
+/// With a changed body, the digest cannot say which value was approved (D-20).
+const UNCONFIRMED_REQUIRED: &str =
+    "Acceptance: required (from the header; the earlier approval cannot confirm it)\n";
+
+#[test]
+fn reapprove_keeps_a_recorded_required() {
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let edited = project
+        .read_spec()
+        .replace("then the order is refused", "then the order waits");
+    project.write_spec(&edited);
+
+    project
+        .approve(&["PROJ-412", "--reapprove"])
+        .success()
+        .stdout(contains(UNCONFIRMED_REQUIRED))
+        .stdout(contains("kept from the earlier approval").not());
+    let written = project.read_spec();
+    assert_eq!(header_value(&written, "Acceptance"), "required");
+    assert_eq!(
+        header_value(&written, "Approved-checksum"),
+        approval_digest(&edited, "required", project.dir.path())
+    );
+    project
+        .check()
+        .success()
+        .stdout(contains("\nacceptance: required\n"));
+}
+
+#[test]
+fn reapprove_with_a_flag_changes_the_value_of_a_changed_approval() {
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let edited = project
+        .read_spec()
+        .replace("then the order is refused", "then the order waits");
+    project.write_spec(&edited);
+
+    project
+        .approve(&["PROJ-412", "--reapprove", "--no-acceptance"])
+        .success()
+        .stdout(contains("Acceptance: skipped (from --no-acceptance)\n"));
+    let written = project.read_spec();
+    assert_eq!(header_value(&written, "Acceptance"), "skipped");
+    assert_eq!(
+        header_value(&written, "Approved-checksum"),
+        approval_digest(&edited, "skipped", project.dir.path())
+    );
+
+    // And a flag gets it back, in place.
+    let edited = written.replace("then the order waits", "then the order is queued");
+    project.write_spec(&edited);
+    project
+        .approve(&["PROJ-412", "--reapprove", "--acceptance"])
+        .success()
+        .stdout(contains("Acceptance: required (from --acceptance)\n"));
+    assert_eq!(header_value(&project.read_spec(), "Acceptance"), "required");
+}
+
+#[test]
+fn replacing_an_approval_from_before_the_field_takes_the_default() {
+    let project = Project::new(Some("rade"));
+    let edited =
+        approved_under_1_6_0().replace("then the order is refused", "then the order waits");
+    project.write_spec(&edited);
+    project
+        .approve(&["PROJ-412", "--reapprove"])
+        .success()
+        .stdout(contains("Acceptance: skipped (default)\n"));
+    assert_eq!(header_value(&project.read_spec(), "Acceptance"), "skipped");
+}
+
+#[test]
+fn a_value_flipped_since_approval_is_refused_until_a_flag_chooses() {
+    for (first, approved, now, keep, record) in [
+        (
+            "--acceptance",
+            "required",
+            "skipped",
+            "--acceptance",
+            "--no-acceptance",
+        ),
+        (
+            "--no-acceptance",
+            "skipped",
+            "required",
+            "--no-acceptance",
+            "--acceptance",
+        ),
+    ] {
+        let project = Project::new(Some("rade"));
+        project.approve(&["PROJ-412", first]).success();
+        let flipped = project.read_spec().replace(
+            &format!("Acceptance: {approved}"),
+            &format!("Acceptance: {now}"),
+        );
+        project.write_spec(&flipped);
+
+        // Refused before the criteria are shown, naming both values and flags.
+        project
+            .approve(&["PROJ-412", "--reapprove"])
+            .failure()
+            .stdout("")
+            .stderr(contains(format!(
+                "`Acceptance` was `{approved}` when rade approved it on 2026-10-05, and the \
+                 header now says `{now}`"
+            )))
+            .stderr(contains(format!(
+                "re-approve with `--reapprove {keep}` to keep `{approved}`, or \
+                 `--reapprove {record}` to record `{now}`"
+            )));
+        assert_eq!(project.read_spec(), flipped, "a refusal must not write");
+
+        // The way the refusal names works, either way.
+        project
+            .approve(&["PROJ-412", "--reapprove", record])
+            .success();
+        assert_eq!(header_value(&project.read_spec(), "Acceptance"), now);
+        project.write_spec(&flipped);
+        project
+            .approve(&["PROJ-412", "--reapprove", keep])
+            .success();
+        assert_eq!(header_value(&project.read_spec(), "Acceptance"), approved);
+    }
+}
+
+#[test]
+fn a_value_removed_or_cleared_since_approval_is_refused_too() {
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let approved = project.read_spec();
+    for edited in [
+        approved.replace("Acceptance: required\n", ""),
+        approved.replace("Acceptance: required", "Acceptance:"),
+    ] {
+        project.write_spec(&edited);
+        project
+            .approve(&["PROJ-412", "--reapprove"])
+            .failure()
+            .stdout("")
+            .stderr(contains(
+                "`Acceptance` was `required` when rade approved it on 2026-10-05, and the \
+                 header now has no value",
+            ));
+        assert_eq!(project.read_spec(), edited, "a refusal must not write");
+    }
+}
+
+#[test]
+fn skill_reports_the_flipped_value_refusal_on_stdout() {
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let flipped = project
+        .read_spec()
+        .replace("Acceptance: required", "Acceptance: skipped");
+    project.write_spec(&flipped);
+    project
+        .approve(&["PROJ-412", "--reapprove", "--skill"])
+        .success()
+        .stdout(contains("error: "))
+        .stdout(contains("`Acceptance` was `required`"))
+        .stdout(contains("Acceptance criteria of").not())
+        .stdout(contains("approved PROJ-412 checksum").not());
+    assert_eq!(project.read_spec(), flipped);
+}
+
+#[test]
+fn a_value_flipped_and_a_body_changed_keep_the_header_with_an_honest_label() {
+    // The digest cannot tell this from an honest edit (D-20), so the value is
+    // not refused, and the label does not say it was approved.
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let edited = project
+        .read_spec()
+        .replace("Acceptance: required", "Acceptance: skipped")
+        .replace("then the order is refused", "then the order waits");
+    project.write_spec(&edited);
+    project
+        .approve(&["PROJ-412", "--reapprove"])
+        .success()
+        .stdout(contains(
+            "Acceptance: skipped (from the header; the earlier approval cannot confirm it)\n",
+        ));
+    assert_eq!(header_value(&project.read_spec(), "Acceptance"), "skipped");
+}
+
+#[test]
+fn a_value_added_to_an_approval_from_before_the_field_was_not_part_of_it() {
+    for (value, shown) in [
+        (
+            "required",
+            "Acceptance: skipped (default; the `required` in the header was not part of the \
+             approval)\n",
+        ),
+        (
+            "skipped",
+            "Acceptance: skipped (default; the `skipped` in the header was not part of the \
+             approval)\n",
+        ),
+    ] {
+        let project = Project::new(Some("rade"));
+        let added: String = approved_under_1_6_0()
+            .lines()
+            .map(|line| match line.starts_with("Approved-checksum:") {
+                true => format!("{line}\nAcceptance: {value}\n"),
+                false => format!("{line}\n"),
+            })
+            .collect();
+        project.write_spec(&added);
+        project
+            .approve(&["PROJ-412", "--reapprove"])
+            .success()
+            .stdout(contains(shown));
+        assert_eq!(header_value(&project.read_spec(), "Acceptance"), "skipped");
+    }
+}
+
+#[test]
+fn a_value_changed_by_hand_needs_reapprove() {
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let edited = project
+        .read_spec()
+        .replace("Acceptance: required", "Acceptance: skipped");
+    project.write_spec(&edited);
+    project
+        .approve(&["PROJ-412"])
+        .failure()
+        .stderr(contains("the body or `Acceptance` changed after rade"))
+        .stderr(contains("--reapprove"));
+    assert_eq!(project.read_spec(), edited, "a refusal must not write");
+}
+
+#[test]
+fn already_approved_with_another_flag_writes_nothing_and_says_so() {
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412"]).success();
+    let approved = project.read_spec();
+    project
+        .approve(&["PROJ-412", "--acceptance"])
+        .success()
+        .stdout(contains("already approved"))
+        .stdout(contains(
+            "`--acceptance` changed nothing: this approval records `Acceptance: skipped`",
+        ))
+        .stdout(contains("`--reapprove --acceptance`"))
+        .stdout(contains("approved PROJ-412 checksum").not());
+    assert_eq!(project.read_spec(), approved);
+}
+
+#[test]
+fn already_approved_with_the_same_flag_has_nothing_to_say() {
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let approved = project.read_spec();
+    project
+        .approve(&["PROJ-412", "--acceptance"])
+        .success()
+        .stdout(contains("already approved"))
+        .stdout(contains("changed nothing").not());
+    assert_eq!(project.read_spec(), approved);
+}
+
+#[test]
+fn reapprove_with_another_flag_changes_a_current_approval() {
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let before = project.read_spec();
+    project.git(&["config", "--global", "user.name", "mila"]);
+
+    let stdout = stdout_of(
+        project
+            .approve(&["PROJ-412", "--reapprove", "--no-acceptance"])
+            .success(),
+    );
+    assert!(
+        stdout.contains("re-approving: rade approved it on 2026-10-05 with `Acceptance: required`"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("- AC1: Given 3 in stock"), "{stdout}");
+    assert!(
+        stdout.contains("approved PROJ-412 checksum sha256:"),
+        "{stdout}"
+    );
+
+    let written = project.read_spec();
+    assert_eq!(header_value(&written, "Acceptance"), "skipped");
+    assert_eq!(header_value(&written, "Approved-by"), "mila");
+    assert_eq!(
+        written.split_once("\n---\n").unwrap().1,
+        before.split_once("\n---\n").unwrap().1
+    );
+}
+
+#[test]
+fn reapprove_without_a_flag_or_with_the_same_one_leaves_a_current_approval_alone() {
+    // D-20: `required` must not fall back to the default when nobody named a
+    // value and the text did not change.
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    let approved = project.read_spec();
+    for args in [
+        &["PROJ-412", "--reapprove"][..],
+        &["PROJ-412", "--reapprove", "--acceptance"],
+    ] {
+        project
+            .approve(args)
+            .success()
+            .stdout(contains("already approved"));
+        assert_eq!(project.read_spec(), approved, "{args:?}");
+    }
+}
+
+/// Example 9.1 and its approval as 1.6.0 wrote them: no `Acceptance`.
+fn approved_under_1_6_0() -> String {
+    let project = Project::new(Some("rade"));
+    let draft = project.read_spec();
+    let digest = {
+        let body = draft
+            .split_once("\n---\n")
+            .unwrap()
+            .1
+            .trim_start_matches('\n');
+        let file = project.dir.path().join("body.md");
+        fs::write(&file, body).unwrap();
+        let output = Command::cargo_bin("invar")
+            .unwrap()
+            .arg("hash")
+            .arg(&file)
+            .output()
+            .unwrap();
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    };
+    draft
+        .replace("Status: draft", "Status: approved")
+        .replace("Approved-by:", "Approved-by: rade")
+        .replace("Approved-at:", "Approved-at: 2026-10-05")
+        .replace(
+            "Approved-checksum:",
+            &format!("Approved-checksum: {digest}"),
+        )
+}
+
+#[test]
+fn an_approval_from_before_the_field_is_left_alone_and_reads_as_skipped() {
+    let project = Project::new(Some("rade"));
+    let old = approved_under_1_6_0();
+    project.write_spec(&old);
+    for args in [
+        &["PROJ-412"][..],
+        &["PROJ-412", "--no-acceptance"],
+        &["PROJ-412", "--reapprove"],
+        &["PROJ-412", "--reapprove", "--no-acceptance"],
+    ] {
+        project
+            .approve(args)
+            .success()
+            .stdout(contains("already approved"))
+            .stdout(contains("changed nothing").not());
+        assert_eq!(project.read_spec(), old, "{args:?}");
+    }
+    project
+        .approve(&["PROJ-412", "--acceptance"])
+        .success()
+        .stdout(contains("`Acceptance: skipped`"));
+    assert_eq!(project.read_spec(), old);
+
+    // Asked for, the decision is recorded, and the key is added.
+    project
+        .approve(&["PROJ-412", "--reapprove", "--acceptance"])
+        .success();
+    assert_eq!(header_value(&project.read_spec(), "Acceptance"), "required");
+}
+
+#[test]
+fn a_new_value_on_a_plan_with_no_ids_still_needs_the_ids() {
+    // D-16: replacing the approval is a new approval, whatever the reason.
+    let project = Project::new(Some("rade"));
+    project.write_spec(&approved_under_1_5_0());
+    project
+        .approve(&["PROJ-412", "--reapprove", "--acceptance"])
+        .failure()
+        .stderr(contains("this would be a new one"));
+    assert_eq!(project.read_spec(), approved_under_1_5_0());
+}
+
+#[test]
+fn a_draft_reset_by_a_failed_entry_takes_the_default_and_fills_its_key_in_place() {
+    // A `failed` entry clears the value (§5), so there is nothing to keep, and
+    // the key `plan approve` added stays for the new approval to fill.
+    let project = Project::new(Some("rade"));
+    project.approve(&["PROJ-412", "--acceptance"]).success();
+    Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(project.root())
+        .envs(project.git_env())
+        .args(["decision", "record", "--ticket", "PROJ-412"])
+        .args(["--type", "failed", "-m", "Reservations moved."])
+        .assert()
+        .success();
+    assert_eq!(header_value(&project.read_spec(), "Status"), "draft");
+
+    project
+        .approve(&["PROJ-412"])
+        .success()
+        .stdout(contains("Acceptance: skipped (default)\n"));
+    let written = project.read_spec();
+    assert_eq!(written.matches("Acceptance:").count(), 1, "{written}");
+    assert_eq!(header_value(&written, "Acceptance"), "skipped");
 }

@@ -247,7 +247,9 @@ fn failed_resets_the_plan_to_draft_and_plan_check_then_refuses() {
         .stdout(contains(format!("reset: {SPEC} is `draft` again")));
 
     let reset = project.read(SPEC);
-    assert!(reset.contains("Status: draft\nApproved-by:\nApproved-at:\nApproved-checksum:\n---\n"));
+    assert!(reset.contains(
+        "Status: draft\nApproved-by:\nApproved-at:\nApproved-checksum:\nAcceptance:\n---\n"
+    ));
     assert_eq!(
         reset.split_once("\n---\n").unwrap().1,
         original.split_once("\n---\n").unwrap().1,

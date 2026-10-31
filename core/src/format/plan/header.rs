@@ -18,6 +18,7 @@ pub(super) const APPROVED_BY: &str = "Approved-by";
 pub(super) const APPROVED_AT: &str = "Approved-at";
 pub(super) const APPROVED_CHECKSUM: &str = "Approved-checksum";
 pub(super) const LOCKFILE_CHECKSUM: &str = "Lockfile-checksum";
+pub(super) const ACCEPTANCE: &str = "Acceptance";
 
 /// Keys that must be present, even with an empty value (§5, D-3).
 const REQUIRED_KEYS: [&str; 6] = [
@@ -31,7 +32,7 @@ const REQUIRED_KEYS: [&str; 6] = [
 
 /// Every key the contract defines. Anything else is an unknown key:
 /// permitted, preserved, and otherwise ignored (D-2).
-const KNOWN_KEYS: [&str; 7] = [
+const KNOWN_KEYS: [&str; 8] = [
     TICKET,
     MODULE,
     STATUS,
@@ -39,6 +40,7 @@ const KNOWN_KEYS: [&str; 7] = [
     APPROVED_AT,
     APPROVED_CHECKSUM,
     LOCKFILE_CHECKSUM,
+    ACCEPTANCE,
 ];
 
 // --- the typed view ---------------------------------------------------------
@@ -59,6 +61,22 @@ impl Status {
     }
 }
 
+/// `Acceptance` (§5): exactly `required` or `skipped`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Acceptance {
+    Required,
+    Skipped,
+}
+
+impl Acceptance {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
 /// The header's known fields. An empty value is `None`: the key is present —
 /// the parser requires that — but nothing has been written into it yet.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,10 +87,20 @@ pub struct Header {
     pub approved_by: Option<String>,
     /// `YYYY-MM-DD` (D-6).
     pub approved_at: Option<String>,
-    /// `sha256:` + 64 lowercase hex, over the body.
+    /// `sha256:` + 64 lowercase hex, over the body and `Acceptance` (§5.3).
     pub approved_checksum: Option<String>,
     /// Absent and empty both mean no observation (§5.2, D-7).
     pub lockfile_checksum: Option<String>,
+    /// Absent and empty both mean not decided yet (§5).
+    pub acceptance: Option<Acceptance>,
+}
+
+impl Header {
+    /// What the approval recorded. No value means the Plan was approved before
+    /// the field existed, when no test-writer did either (§5.1).
+    pub fn recorded_acceptance(&self) -> Acceptance {
+        self.acceptance.unwrap_or(Acceptance::Skipped)
+    }
 }
 
 // --- one header line, kept verbatim ------------------------------------------
@@ -112,6 +140,20 @@ impl HeaderLine {
                 out.push_str(eol);
             }
             Self::Verbatim(line) => line.write_to(out),
+        }
+    }
+
+    /// A new `key: value` line right after this one, with its line ending.
+    pub(super) fn field_after(&self, key: &str, value: &str) -> Self {
+        let Self::Field { eol, .. } = self else {
+            unreachable!("only fields are followed by a new field");
+        };
+        Self::Field {
+            key: key.to_owned(),
+            sep: " ".to_owned(),
+            value: value.to_owned(),
+            trailing: String::new(),
+            eol: eol.clone(),
         }
     }
 
@@ -372,6 +414,22 @@ pub(super) fn parse(lines: &[Line], first_line: usize, found: &mut Diagnostics) 
         }
     }
 
+    let acceptance = value_of(ACCEPTANCE).and_then(|(value, line)| match value {
+        "" => None,
+        "required" => Some(Acceptance::Required),
+        "skipped" => Some(Acceptance::Skipped),
+        other => {
+            found.at(
+                line,
+                format!(
+                    "`Acceptance` must be `required` or `skipped`, exactly, or empty; found \
+                     `{other}`. `plan approve` writes it, so leave it out of a draft"
+                ),
+            );
+            None
+        }
+    });
+
     let header = if found.len() == before {
         let filled = |key: &str| {
             value_of(key)
@@ -387,6 +445,7 @@ pub(super) fn parse(lines: &[Line], first_line: usize, found: &mut Diagnostics) 
             approved_at: filled(APPROVED_AT),
             approved_checksum: filled(APPROVED_CHECKSUM),
             lockfile_checksum: filled(LOCKFILE_CHECKSUM),
+            acceptance,
         })
     } else {
         None

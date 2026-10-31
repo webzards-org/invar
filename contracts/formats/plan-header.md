@@ -1,10 +1,10 @@
 # Contract: Plan header and required sections
 
-**Version:** 1.6.0 — numbered acceptance criteria and `## Acceptance tests to change`; see §10 for what changed and why
+**Version:** 1.7.0 — the `Acceptance` field, and what the approval digest covers; see §10 for what changed and why
 **Status:** stable
 **Implements:** §4a (Plan document structure), §4d (Checksums), §5c (Context
 delivery), §12 (Plan lifecycle); light mode L-1, L-2, L-5
-(`docs/TASKS-M1.md`); A-3, A-5 (`docs/TASKS-AT.md`)
+(`docs/TASKS-M1.md`); A-3, A-5, A-6 (`docs/TASKS-AT.md`)
 **Read by:** the core (`format/`), the planner and coder agents (as prose),
 `/invar:review` (M1-20), any later reimplementation
 
@@ -106,6 +106,9 @@ Everything from the **first non-blank line after the closing delimiter** to the
 end of the file. Blank lines between the delimiter and the first heading are not
 part of the body (see D-1).
 
+The body's first line may not read `Acceptance: required` or `Acceptance: skipped`
+once canonicalized (§4d), which ignores a BOM and trailing whitespace (D-19).
+
 ## 5. Header fields
 
 | Field | Required | Allowed values | Written by |
@@ -115,32 +118,38 @@ part of the body (see D-1).
 | `Status` | yes | `draft` or `approved`, lowercase, exactly | `plan approve` sets `approved`; `decision record --type failed` sets `draft`; the agent writes `draft` on creation |
 | `Approved-by` | key present always; value only when `Status: approved` | Non-empty; a git `user.name` | **Command only** (`plan approve`) |
 | `Approved-at` | key present always; value only when `Status: approved` | `YYYY-MM-DD` | **Command only** (`plan approve`) |
-| `Approved-checksum` | key present always; value only when `Status: approved` | `sha256:` + 64 lowercase hex, over the **body** | **Command only** (`plan approve`) |
+| `Approved-checksum` | key present always; value only when `Status: approved` | `sha256:` + 64 lowercase hex, over the **body**, and over the `Acceptance` value when there is one (§5.3, D-19) | **Command only** (`plan approve`) |
 | `Lockfile-checksum` | **optional** since 1.1.0 — absent and empty both mean no observation (§5.2) | `sha256:` + 64 lowercase hex, or empty | **Command only** (`plan approve`, from the milestone that introduces package context; never in light mode) |
+| `Acceptance` | **optional** since 1.7.0 — absent and empty both mean not decided yet | `required` or `skipped`, lowercase, exactly, or empty | **Command only** (`plan approve`, which adds the key if it is absent; a `failed` entry clears the value and keeps the key) |
 
 **The three approval keys — `Approved-by`, `Approved-at` and
 `Approved-checksum` — must be present as keys from the moment the agent creates
 the file**, with empty values (D-3). A missing key and an empty value would
 otherwise be indistinguishable, and `plan validate` could not tell a Plan that
 follows the convention from one that forgot half of it. `Lockfile-checksum` is
-exempt: it may be left out entirely (D-7).
+exempt: it may be left out entirely (D-7). So is `Acceptance`: the agent does
+not write it, and a Plan created before 1.7.0 does not have it.
 
 **"Command only" is a protocol rule, not an enforcement.** A misbehaving agent
 can write `Status: approved` itself. What makes the ordinary failure mode
-detectable is `Approved-checksum`: if the body changes after approval, the
-approval is stale, and `plan check` refuses — and with it `invar done`
+detectable is `Approved-checksum`: if the body or the `Acceptance` value changes
+after approval, the approval is stale, and `plan check` refuses — and with it `invar done`
 (M1-10, M1-12). With `scenarios: true`, `scenario confirm` refuses as well
 (§4a, honesty note).
 
 ### 5.1 Consistency rules
 
 - `Status: draft` — the three approval values are expected to be empty, and so
-  is `Lockfile-checksum` when the key is present. Nothing treats a draft that
+  are `Lockfile-checksum` and `Acceptance` when their keys are present. Nothing
+  treats a draft that
   holds some as an error: `plan check` refuses every draft for being one, and
   `plan approve` overwrites whatever the approval keys hold (§5.3). While
   `Status` says `draft` the values mean nothing.
 - `Status: approved` — `Approved-by`, `Approved-at` and `Approved-checksum`
   must be non-empty. `Lockfile-checksum` may be absent, empty, or a digest.
+  `Acceptance` is `required` or `skipped`, or has no value. No value means the
+  Plan was approved before 1.7.0, and it is treated as `skipped`, because no
+  test-writer existed then.
 - `Ticket` must equal the `<TICKET>` part of the directory name.
 - *When `scenarios: true`:* every `.feature` file confirmed against this Plan
   carries the same `Ticket`.
@@ -170,7 +179,8 @@ approval time. Which file that is, is an adapter concern (§14.2).
 
 It sits in the **header**, so it is not covered by `Approved-checksum`. That is
 intentional: it records an observation made at approval time, not part of the
-approved specification.
+approved specification. `Acceptance` sits in the header too, and is covered,
+because it is a decision and not an observation (D-19).
 
 Drift is a **warning, never a failure** (§4a). A dependency upgraded mid-cycle
 or a rebase onto a branch that upgraded one makes the Implementation context
@@ -180,7 +190,9 @@ on every routine rebase.
 
 ### 5.3 What `plan approve` writes
 
-`invar plan approve <TICKET | PATH>` is the human gate (§4a). In order:
+`invar plan approve <TICKET | PATH>` is the human gate (§4a).
+
+In order:
 
 1. **Validate.** A Plan that `plan validate` rejects is refused, with the same
    list of problems. A new approval must have numbered criteria (§6.4), so
@@ -190,12 +202,26 @@ on every routine rebase.
    - `Status: draft` — approve. Any values already in the approval keys are
      overwritten.
    - `Status: approved`, all three approval values present, and
-     `Approved-checksum` equal to the digest of the body — already approved;
-     nothing is written, and the command succeeds.
-   - `Status: approved` and the body's digest differs from `Approved-checksum`,
+     `Approved-checksum` equal to the approval digest (step 5) of the Plan as it
+     is — already approved; nothing is written, and the command succeeds. A flag
+     that names another value than the one recorded changes nothing, and the
+     command says so and names `--reapprove`. With `--reapprove`, and only with
+     such a flag, approve as for a draft, replacing the earlier values (D-20).
+   - `Status: approved` and the approval digest differs from `Approved-checksum`,
      or any of the three approval values is empty — **refused**, unless
      `--reapprove` is given; with it, approve as for a draft, replacing the
      earlier values.
+
+   **The value of `Acceptance` is decided here**, once it is known which approval
+   is being replaced, and before anything is printed. In this order: `--acceptance`
+   (`required`) or `--no-acceptance` (`skipped`), which exclude each other; the value
+   of the approval being replaced, as far as D-20 allows; `acceptance.required` from
+   `invar.yaml`, once that key exists (AT-4); `skipped`. A draft replaces no approval,
+   whatever its key holds (§5.1), so a draft reset by a `failed` entry goes on to
+   `invar.yaml`. So does an approval with no value, such as one from before 1.7.0,
+   and one with approval values missing, which no command recorded (example 9.3).
+   With no flag, a value changed since approval while the body stayed the same is
+   **refused** here, naming both values and both flags (D-20).
 3. **Read the approver and the date from git**, before anything is shown:
    - `Approved-by` is `git config user.name`, run in the project root, with
      surrounding whitespace trimmed. Unset or empty is an error, never an
@@ -205,13 +231,33 @@ on every routine rebase.
    - Both must be writable into a header line as they are — a name with a
      newline or a ` #` in it is not — and a pair that is not is refused here,
      before anything is shown.
-4. **Print `## Acceptance criteria`** — what the code will be judged against.
-5. **Write.** `Status` becomes `approved`; `Approved-by`, `Approved-at` and
-   `Approved-checksum` get their values. `Approved-checksum` is the §4d digest
-   of the body (§4.3). Nothing else changes — not the other header lines,
-   not their comments, not the line endings, not one byte of the body.
-   `Lockfile-checksum` is left as it is (§5.2). The file is replaced
-   atomically, and refused if it changed after the criteria were printed.
+4. **Print `## Acceptance criteria`** — what the code will be judged against —
+   and one line with the value of `Acceptance` and where it came from:
+   `Acceptance: required (from --acceptance)`,
+   `Acceptance: skipped (from --no-acceptance)`,
+   `Acceptance: required (kept from the earlier approval)`,
+   `Acceptance: required (from the header; the earlier approval cannot confirm it)`,
+   `Acceptance: required (from invar.yaml)` or `Acceptance: skipped (default)`. When
+   the header holds a value the approval did not cover, the line says so:
+   ``Acceptance: skipped (default; the `required` in the header was not part of the approval)``.
+5. **Write.** `Status` becomes `approved`; `Approved-by`, `Approved-at`,
+   `Approved-checksum` and `Acceptance` get their values. If the header has no
+   `Acceptance` key, it is added right after `Approved-checksum`, with that line's
+   line ending. Nothing else changes — not the other header lines, not their
+   comments, not the line endings, not one byte of the body. `Lockfile-checksum`
+   is left as it is (§5.2). The file is replaced atomically, and refused if it
+   changed after the criteria were printed.
+
+   `Approved-checksum` is the **approval digest**. When the header has an
+   `Acceptance` value, that is the §4d digest of the line `Acceptance: <value>`, a
+   newline (`\n`, whatever the file uses), then the canonical body (§4.3). When it
+   has none, it is the §4d digest of the body alone, as before 1.7.0 (D-19). A new
+   approval always has a value, so only a Plan approved before 1.7.0 has the
+   second form.
+
+`plan check` reads the field back: on success it prints, after its `ok:` line, one
+fixed line, `acceptance: required` or `acceptance: skipped`. A Plan with no value
+prints `skipped`.
 
 ## 6. Required sections
 
@@ -615,6 +661,64 @@ written. Wrapping is decided by indentation alone, and an indented list item wit
 criterion: otherwise a wrongly indented `AC2` would disappear into `AC1`, and no
 later check would know that it had existed.
 
+**D-19 — The approval digest covers `Acceptance`** (1.7.0, closes OQ-3 of
+`docs/TASKS-AT.md`). Whether a ticket gets acceptance tests is a person's decision
+(A-6), and skipping them is the weaker guarantee, so it must not change silently.
+The field sits in the header because every reader already looks there, and because
+the command writes it, as it writes the approval values; the body is the agent's
+text, and no place for a value only `plan approve` may set. It is still covered,
+unlike `Lockfile-checksum`, which is a deliberate observation outside the approval
+(§5.2): that one records what was installed, and this one records what was decided.
+So the digest takes the line `Acceptance: <value>` in front of the canonical body,
+and changing the value, removing the line or clearing it each stale the approval. A
+Plan with no value keeps the digest of its body alone, which is what keeps an
+approval from before 1.7.0 standing, and also why adding the line to such a Plan
+stales it. An empty value counts as no value, so a Plan approved before 1.7.0 that
+gains an empty key still stands, and still reads as `skipped`. Line and body are
+hashed as one text, so moving the line out of the header to the top of the body
+would give the same digest with no value in the header. §4.3 refuses a body that
+starts that way; it is the one body the digest cannot tell apart.
+
+**D-20 — An approval changes its `Acceptance` only when a flag asks for it**
+(1.7.0). One rule, for an approval that still holds and for one that changed:
+replacing an approval keeps its value unless `--acceptance` or `--no-acceptance`
+names another. A developer who fixes a sentence and re-approves must not lose the
+ticket's acceptance tests without asking, and neither the default nor a changed
+`invar.yaml` may undo a decision that was recorded. So `--reapprove` alone keeps the
+value of a changed approval, and does nothing to a current one, which D-12 leaves
+alone. A person may still decide to add or drop the tests of a Plan that has not
+changed, so `--reapprove` with a flag naming another value replaces a current approval
+too. Without `--reapprove`, a flag never writes, because re-running the command is
+harmless (D-12).
+
+A changed approval is one whose header may have changed too, so its value is kept
+only as far as the digest confirms it. With no flag, `plan approve` compares
+`Approved-checksum` with the approval digest of the body as it is now, in four cases:
+
+1. **It matches the value in the header.** The value is confirmed, and is printed as
+   `kept from the earlier approval`. A Plan in this state is a current approval, so
+   this path does not reach it in practice; the case is here so that the label has
+   one meaning.
+2. **It matches another value.** The body is what was approved, and the value is not:
+   someone changed it, or removed or cleared the line, which is exactly the change the
+   approval exists to catch. Renewing it as a matter of course would launder that
+   change, so the command **refuses**, before the criteria are shown, naming what was
+   approved, what the header says now, and both flags. A person chooses.
+3. **It matches the body alone.** The Plan was approved before 1.7.0 and a value was
+   added later. Nothing was recorded, so the value comes from `invar.yaml` or the
+   default, and the printed line says that the one in the header was not part of the
+   approval.
+4. **It matches nothing.** The body changed as well, and the digest cannot say which
+   value was approved. The header's value is kept, because dropping `required` when a
+   developer fixes a sentence is the failure this decision exists to prevent, and it is
+   printed as `from the header; the earlier approval cannot confirm it`, because that
+   is all that is known. With no value in the header there is nothing to keep, and it
+   goes on to `invar.yaml` and the default.
+
+So a value changed together with the body is not caught here: the digest cannot tell it
+from an honest edit, and the line printed with the criteria is the only signal. A label
+never claims what the digest did not show.
+
 ## 8. Open questions
 
 **OQ-1 — Re-approving an already approved Plan.** *Resolved in 1.3.0 by
@@ -629,7 +733,7 @@ Decide in the milestone that introduces `.feature` files; until then the
 
 ## 9. Examples
 
-Examples 9.1, 9.2, 9.3 and 9.5 to 9.9 are light mode. Example 9.4 applies when
+Examples 9.1, 9.2, 9.3 and 9.5 to 9.12 are light mode. Example 9.4 applies when
 `scenarios: true`.
 
 ### 9.1 Valid — a light-mode draft, as the agent creates it
@@ -705,9 +809,10 @@ answers in `## Open questions / answers`.
 
 Only the header changes; the body is untouched, which is what makes
 `Approved-checksum` verifiable later. Light mode writes no
-`Lockfile-checksum`. The checksum is the real §4d digest of example 9.1's
-body; the core's tests approve 9.1 as `rade` on 2026-10-05 and compare the
-result with this header.
+`Lockfile-checksum`. With no flag and nothing in `invar.yaml`, `Acceptance` is
+`skipped`. The checksum is the real approval digest of that value and example
+9.1's body (§5.3); the core's tests approve 9.1 as `rade` on 2026-10-05 and
+compare the result with this header.
 
 ```markdown
 ---
@@ -716,7 +821,8 @@ Module: orders
 Status: approved
 Approved-by: rade
 Approved-at: 2026-10-05
-Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b
+Approved-checksum: sha256:b017737bb6bfa67784b6eb2979946c4703c7e28f37ee363501ca0b886978aea5
+Acceptance: skipped
 ---
 ```
 
@@ -895,7 +1001,88 @@ as 1.5.0 wrote them: `Status: approved`, the real digest, and these criteria:
 (D-16). Adding ids would change the body and stale the approval. Under
 `Status: draft` the same text is invalid: every item lacks its id.
 
+### 9.10 Valid — example 9.1 approved with `--acceptance`
+
+The checksum is the §4d digest of `Acceptance: required`, a newline, and example
+9.1's body (§5.3).
+
+```markdown
+---
+Ticket: SHOP-214
+Module: orders
+Status: approved
+Approved-by: rade
+Approved-at: 2026-10-05
+Approved-checksum: sha256:d06d08d4c20d81e4d30b2240ed3307cb7973c07f7b4fb8e3fca30dfcc7e692e2
+Acceptance: required
+---
+```
+
+Changing the value to `skipped`, or removing the line, leaves the file valid in
+form, and `plan check` and `done` refuse it: the Plan changed after it was approved
+(D-19).
+
+### 9.11 Invalid — an unknown `Acceptance` value
+
+```markdown
+---
+Ticket: SHOP-214
+Module: orders
+Status: draft
+Approved-by:
+Approved-at:
+Approved-checksum:
+Acceptance: optional
+---
+```
+
+**Why:** the value is `required`, `skipped` or empty (§5). A later reader acts on
+the two words it knows. `plan validate` names the line and the word, whatever
+`Status` says.
+
+### 9.12 Valid — example 9.1 approved under 1.6.0, with no `Acceptance`
+
+The checksum is the digest of example 9.1's body alone.
+
+```markdown
+---
+Ticket: SHOP-214
+Module: orders
+Status: approved
+Approved-by: rade
+Approved-at: 2026-10-05
+Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b
+---
+```
+
+**Why valid:** the approval keeps its digest and stands, and `plan check` prints
+`acceptance: skipped` (§5.1, D-19). Adding `Acceptance: required` by hand stales it.
+
 ## 10. Version history
+
+**1.7.0 — the `Acceptance` field (AT-3).**
+
+- §5: new optional key `Acceptance: required | skipped`, written only by
+  `plan approve`. A `failed` entry clears its value and keeps its key.
+- §5.1: what the value means for a draft and for an approved Plan; no value on an
+  approved Plan is `skipped`.
+- §5.3: where the value comes from (a flag, the approval being replaced as far as
+  the digest confirms it, `invar.yaml`, `skipped`), what is printed, what is written,
+  the approval digest, and the line `plan check` prints. New D-19 and D-20.
+- §4.3: the body's first line may not be an `Acceptance` line (D-19).
+- Example 9.2 shows the field and its digest; examples 9.10 to 9.12 are new.
+
+**Why:** skipping acceptance tests is a weaker guarantee, so it has to be a person's
+decision, recorded where every later reader looks and impossible to flip silently
+(A-6). OQ-3 asked how the digest should cover it, and D-19 answers.
+
+**Compatibility:** every draft that was valid stays valid: the key is optional, and
+the planner does not write it. A Plan approved before 1.7.0 keeps its digest and
+stays approved, and an absent field reads as `skipped`. Two things that were
+accepted are now refused: a value other than `required` or `skipped` under an
+`Acceptance` key, which was an unknown key before, and a body whose first line is
+an `Acceptance` line. The success line of `plan approve` is unchanged, and
+the checksum it shows is the new digest. `plan check` prints one more line.
 
 **1.6.0 — numbered criteria and `## Acceptance tests to change` (AT-2).**
 

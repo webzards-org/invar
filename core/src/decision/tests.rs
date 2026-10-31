@@ -334,6 +334,38 @@ fn the_order_key_compares_trailing_numbers_as_numbers() {
 // --- `failed` resets the cycle ---------------------------------------------------------
 
 #[test]
+fn failed_clears_acceptance_and_keeps_its_key() {
+    // plan-header.md §5, decision-entry.md §7.
+    let original: String = approved_plan()
+        .lines()
+        .filter(|line| !line.starts_with("Acceptance:"))
+        .map(|line| match line.starts_with("Approved-checksum:") {
+            true => format!("{line}\nAcceptance: required\n"),
+            false => format!("{line}\n"),
+        })
+        .collect();
+    let (_dir, root) = project(Some(&original));
+    record(
+        &root,
+        request("SHOP-214", Type::Failed, None),
+        NOW,
+        Mode::Light,
+    )
+    .unwrap();
+
+    let reset = fs::read_to_string(spec(&root)).unwrap();
+    assert!(
+        reset.contains("\nApproved-checksum:\nAcceptance:\n---\n"),
+        "{reset}"
+    );
+    assert_eq!(
+        reset.split_once("\n---\n").unwrap().1,
+        original.split_once("\n---\n").unwrap().1,
+        "the body changed"
+    );
+}
+
+#[test]
 fn failed_returns_the_plan_to_draft_with_the_body_untouched() {
     let original = approved_plan();
     let (_dir, root) = project(Some(&original));
@@ -360,9 +392,10 @@ fn failed_returns_the_plan_to_draft_with_the_body_untouched() {
             ("Approved-by: rade", "Approved-by:"),
             ("Approved-at: 2026-10-05", "Approved-at:"),
             (
-                "Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b",
+                "Approved-checksum: sha256:b017737bb6bfa67784b6eb2979946c4703c7e28f37ee363501ca0b886978aea5",
                 "Approved-checksum:"
             ),
+            ("Acceptance: skipped", "Acceptance:"),
         ]
     );
     assert_eq!(
