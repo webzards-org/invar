@@ -1,8 +1,9 @@
 //! `invar review-input <TICKET | PATH>` (M1-20).
 //!
 //! Prints what the reviewer agent reads: the approved Plan's Intent, Scope,
-//! Acceptance criteria and Implementation context, the binding context, and
-//! the branch's diff against the base branch. stdout carries only that; what a
+//! Acceptance criteria, Acceptance tests to change when it declares any, and
+//! Implementation context, the binding context, and the branch's diff against
+//! the base branch. stdout carries only that; what a
 //! person needs to know and the reviewer does not goes to stderr.
 //!
 //! Advisory, like the review itself (L-7): no hook runs it, and `done` does not

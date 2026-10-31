@@ -242,3 +242,42 @@ fn an_unapproved_header_renders_a_placeholder_approval_line() {
         "{rendered}"
     );
 }
+
+// --- `## Acceptance tests to change` (plan-header.md §6.5) -----------------------
+
+const CONTEXT_HEADING: &str = "## Implementation context\n";
+
+fn with_tests_to_change(content: &str) -> String {
+    LIGHT.replacen(
+        CONTEXT_HEADING,
+        &format!("## Acceptance tests to change\n{content}\n{CONTEXT_HEADING}"),
+        1,
+    )
+}
+
+#[test]
+fn the_tests_to_change_come_right_after_the_criteria() {
+    let text = with_tests_to_change("- tests/A.php — delete — no longer applies\n");
+    let rendered = render(&plan(&text, Mode::Light), "SHOP-214", false);
+    assert!(
+        rendered.contains(
+            "- AC1: Given x, when y, then z.\n\n\
+             ## Acceptance tests to change\n\n\
+             - tests/A.php — delete — no longer applies\n\n\
+             ## Implementation context\n"
+        ),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn nothing_is_written_when_the_section_is_absent_or_says_none() {
+    let without = render(&plan(LIGHT, Mode::Light), "SHOP-214", false);
+    assert!(!without.contains("Acceptance tests to change"), "{without}");
+
+    let none = with_tests_to_change("_none_\n");
+    assert_eq!(
+        render(&plan(&none, Mode::Light), "SHOP-214", false),
+        without
+    );
+}

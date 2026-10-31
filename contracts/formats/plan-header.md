@@ -381,7 +381,8 @@ The number is the criterion's **id**, and these rules are checked (D-18):
 - An id is `AC` followed by a positive integer with no leading zero, then `:`
   and a space. It is the first token after the list marker, and after a checkbox
   if the item has one. `AC01`, `ac1`, `AC 1:` and `AC1` without the colon are
-  not ids.
+  not ids. An id is written plain, and emphasis around it (`**AC1:**`) is an
+  error; emphasis in the criterion's text is fine.
 - Ids are unique, contiguous from `AC1`, and appear in order. `AC1`, `AC3` is a
   gap; `AC2`, `AC1` is out of order.
 - A list item may wrap. A line indented by two spaces or a tab, under an item,
@@ -456,6 +457,10 @@ It comes right after `## Acceptance criteria`, and in any case before
   single line, as in §6.2.
 
 As with `## Acceptance criteria`, `Approved-checksum` covers it.
+
+The PR description and `invar review-input` show it right after the criteria,
+when it lists something: the point of the section is that a person sees the
+change. Absent or `_none_`, they show nothing, not even the heading.
 
 ## 7. Decisions and their reasons
 
@@ -604,8 +609,9 @@ milestone that introduces `.feature` files decides again, with OQ-2.
 **D-18 — The core reads the id and nothing after it** (1.6.0). A later command
 joins criteria to tests, to the review and to the PR by id (A-5), and that is a
 comparison of tokens. Matching prose to prose would be a judgement, which the
-core never makes, so the prose stays unparsed (D-14). Wrapping is decided by
-indentation alone, and an indented list item with an id still counts as a
+core never makes, so the prose stays unparsed (D-14). Emphasis around an id is
+refused by name rather than read through, because a token is compared as it is
+written. Wrapping is decided by indentation alone, and an indented list item with an id still counts as a
 criterion: otherwise a wrongly indented `AC2` would disappear into `AC1`, and no
 later check would know that it had existed.
 
@@ -896,7 +902,8 @@ as 1.5.0 wrote them: `Status: approved`, the real digest, and these criteria:
 - §6.4: every acceptance criterion is a list item that starts with its id, `AC<n>:`;
   ids are unique, contiguous from `AC1` and in order, and any other line of real
   text in the section is an error. New D-18.
-- New §6.5: `## Acceptance tests to change`, optional, in light mode. New D-17.
+- New §6.5: `## Acceptance tests to change`, optional, in light mode, shown by
+  the PR description and `invar review-input` when it lists something. New D-17.
 - §5.1, §5.3 and new D-16: criteria with no ids at all stay valid under an
   existing approval; a new approval, `--reapprove` included, needs ids.
 - Example 9.1 is numbered, so example 9.2 carries its new digest; examples 9.6 to

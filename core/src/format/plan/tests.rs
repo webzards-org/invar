@@ -1536,3 +1536,111 @@ fn contract_9_9_quotes_the_fixture() {
         .trim_end();
     assert!(fixture_approved_under_1_5_0().contains(criterion));
 }
+
+// --- an id written with emphasis (plan-header.md §6.4, D-18) ------------------
+
+#[test]
+fn an_emphasised_id_is_refused_naming_it_at_its_line() {
+    for (content, token) in [
+        ("- **AC1:** Given x, then y.", "`**AC1:**`"),
+        ("- **AC1**: Given x, then y.", "`**AC1**:`"),
+        ("- *AC1:* Given x, then y.", "`*AC1:*`"),
+        ("- *AC1*: Given x, then y.", "`*AC1*:`"),
+        ("- _AC1_: Given x, then y.", "`_AC1_:`"),
+        ("- __AC1:__ Given x, then y.", "`__AC1:__`"),
+        ("- `AC1:` Given x, then y.", "``AC1:``"),
+        ("- `AC1`: Given x, then y.", "``AC1`:`"),
+        ("- ***AC1:*** Given x, then y.", "`***AC1:***`"),
+        ("- [ ] **AC1:** Given x, then y.", "`**AC1:**`"),
+        // No colon, the wrong case, or emphasis over the whole criterion.
+        ("- **AC1** Given x, then y.", "`**AC1**`"),
+        ("- **ac1:** Given x, then y.", "`**ac1:**`"),
+        ("- **AC1: Given x, then y.**", "`**AC1:`"),
+    ] {
+        assert_criteria_problem(
+            content,
+            "Given x",
+            &format!("{token} is an id written with"),
+        );
+    }
+}
+
+#[test]
+fn emphasis_in_the_text_of_a_criterion_stays_fine() {
+    for content in [
+        "- AC1: Given a **paid** order, when I cancel it, then it is refused.",
+        "- AC1: **Given** a paid order, `when` I cancel it, then *it* is refused.",
+        "- AC1: _AC2_ is only a name here.",
+        "- AC1: Given a paid order,\n  **AC2** is its code, and it is refused.",
+    ] {
+        Plan::parse(&with_criteria(content), Mode::Light)
+            .unwrap_or_else(|problems| panic!("{content:?} was refused:\n{problems}"));
+    }
+}
+
+#[test]
+fn emphasis_with_no_id_inside_it_is_only_a_missing_id() {
+    for (content, at) in [
+        ("- **Given** x, then y.", "**Given**"),
+        ("- `AC` is shown.", "`AC` is shown"),
+        ("- _ACME_ is shown.", "_ACME_"),
+    ] {
+        assert_criteria_problem(content, at, "this criterion has no id");
+    }
+}
+
+#[test]
+fn an_emphasised_id_fills_a_gap() {
+    assert_criteria_problem(
+        "- AC1: First.\n- **AC2:** Second.\n- AC3: Third.",
+        "Second",
+        "`**AC2:**` is an id written with emphasis",
+    );
+}
+
+#[test]
+fn an_emphasised_id_counts_as_no_id_in_an_approved_plan() {
+    parse(&as_approved(&with_criteria("- **AC1:** Given x, then y.")));
+    // Beside a valid id the Plan is numbered, and it is an error like any other.
+    let found = messages(
+        &as_approved(&with_criteria("- AC1: First.\n- **AC2:** Second.")),
+        Mode::Light,
+    );
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found[0].contains("written with emphasis"), "{found:#?}");
+}
+
+// --- which Plans show `## Acceptance tests to change` --------------------------
+
+#[test]
+fn the_tests_to_change_are_there_only_when_the_plan_lists_some() {
+    assert_eq!(parse(&valid()).acceptance_tests_to_change(), None);
+    for none in ["_none_\n", "\n_none_\n\n", "<!-- nothing --> _none_\n"] {
+        assert_eq!(
+            parse(&with_tests_to_change(none)).acceptance_tests_to_change(),
+            None,
+            "{none:?}"
+        );
+    }
+    let item = "- tests/A.php — change — why\n";
+    let text = with_tests_to_change(item);
+    assert!(
+        parse(&text)
+            .acceptance_tests_to_change()
+            .is_some_and(|content| content.contains(item))
+    );
+    let none_crlf = with_tests_to_change("_none_\n").replace('\n', "\r\n");
+    assert_eq!(parse(&none_crlf).acceptance_tests_to_change(), None);
+}
+
+#[test]
+fn the_tests_to_change_are_ignored_with_scenarios() {
+    // An ordinary additional section there (D-17), whatever it holds.
+    let text = contract_example("9.4").replace(
+        "## Scenarios to delete\n",
+        "## Scenarios to delete\n_none_\n\n## Acceptance tests to change\nanything\n\n\
+         ## Implementation context\n- AI_CONTEXT: x\n",
+    );
+    let plan = Plan::parse(&text, Mode::Scenarios).unwrap();
+    assert_eq!(plan.acceptance_tests_to_change(), None);
+}

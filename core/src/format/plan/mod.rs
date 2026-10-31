@@ -47,7 +47,7 @@ use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 pub use header::{Header, Status};
-pub use sections::Section;
+pub use sections::{ACCEPTANCE_TESTS_TO_CHANGE, Section};
 
 use crate::diagnostics::Diagnostics;
 use crate::format::config::Config;
@@ -92,6 +92,7 @@ pub struct Plan {
     /// Where the body starts within `rest` (D-1).
     body_start: usize,
     sections: Vec<Section>,
+    mode: Mode,
 }
 
 /// When criteria with no ids at all are valid (D-16).
@@ -228,6 +229,22 @@ impl Plan {
     /// (M1-9).
     pub fn acceptance_criteria(&self) -> Option<&str> {
         self.section(sections::ACCEPTANCE_CRITERIA)
+    }
+
+    /// `## Acceptance tests to change`, when this Plan declares any (§6.5):
+    /// `None` when the section is absent or says `_none_`, and with
+    /// `scenarios: true`, where it is an ordinary additional section (D-17).
+    /// What a reader shows only when there is something to show.
+    pub fn acceptance_tests_to_change(&self) -> Option<&str> {
+        if self.mode != Mode::Light {
+            return None;
+        }
+        let content = self.section(ACCEPTANCE_TESTS_TO_CHANGE)?;
+        let mut in_comment = false;
+        let says_none = content.lines().any(|line| {
+            crate::format::values::without_comments(line, &mut in_comment).trim() == "_none_"
+        });
+        (!says_none).then_some(content)
     }
 
     // --- the command-written fields -----------------------------------------
@@ -403,6 +420,7 @@ fn analyze(text: &str, mode: Mode, unnumbered: Unnumbered) -> Analysis {
         rest,
         body_start,
         sections,
+        mode,
     });
     Analysis {
         plan,

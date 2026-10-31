@@ -267,3 +267,40 @@ fn numstat_lines_are_read_with_binaries_and_renames() {
         ]
     );
 }
+
+// --- `## Acceptance tests to change` (plan-header.md §6.5) -----------------------
+
+fn with_tests_to_change(content: &str) -> String {
+    PLAN.replacen(
+        "## Implementation context\n",
+        &format!("## Acceptance tests to change\n{content}\n## Implementation context\n"),
+        1,
+    )
+}
+
+#[test]
+fn the_tests_to_change_come_right_after_the_criteria() {
+    let text = with_tests_to_change("- tests/A.php — delete — no longer applies\n");
+    let out = render(&plan(&text), &no_binding(), "main", &Diff::Empty);
+    assert!(
+        out.contains(
+            "is 404.\n\n\
+             === Plan: Acceptance tests to change ===\n\n\
+             - tests/A.php — delete — no longer applies\n\n\
+             === Plan: Implementation context ===\n"
+        ),
+        "{out}"
+    );
+}
+
+#[test]
+fn nothing_is_written_when_the_section_is_absent_or_says_none() {
+    let without = render(&plan(PLAN), &no_binding(), "main", &Diff::Empty);
+    assert!(!without.contains("Acceptance tests to change"), "{without}");
+
+    let none = with_tests_to_change("_none_\n");
+    assert_eq!(
+        render(&plan(&none), &no_binding(), "main", &Diff::Empty),
+        without
+    );
+}

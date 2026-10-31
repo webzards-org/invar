@@ -27,7 +27,8 @@
   `## Acceptance criteria` (Plan contract 1.6.0): `- <path> — change — <reason>`
   or `- <path> — delete — <reason>`. `plan validate` checks its form. It is how a
   later ticket will be allowed to change another ticket's locked acceptance tests;
-  nothing reads the paths yet.
+  nothing reads the paths yet. The section reaches the PR description and the
+  review when present.
 
 - **`/invar:approve` starts Phase 2.** When `invar plan approve` records an
   approval it now ends with one fixed line, `approved <TICKET> checksum

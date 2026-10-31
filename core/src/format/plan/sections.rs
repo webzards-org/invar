@@ -14,7 +14,7 @@ use super::{Mode, criteria};
 pub(super) const ACCEPTANCE_CRITERIA: &str = "Acceptance criteria";
 
 /// Optional, in light mode only (§6.5, D-17).
-const ACCEPTANCE_TESTS_TO_CHANGE: &str = "Acceptance tests to change";
+pub const ACCEPTANCE_TESTS_TO_CHANGE: &str = "Acceptance tests to change";
 const IMPLEMENTATION_CONTEXT: &str = "Implementation context";
 
 /// Light mode, `scenarios: false` (§6).

@@ -26,11 +26,16 @@ enum Id<'a> {
     Malformed {
         token: &'a str,
     },
+    /// An id with emphasis around it: `**AC1:**`, `_AC1_:`, `` `AC1:` ``.
+    Emphasised {
+        token: &'a str,
+    },
     None,
 }
 
-/// `AC`, a positive integer with no leading zero, then `:` and a space (§6.4).
-fn parse_id(text: &str) -> Id<'_> {
+/// Where the digits of what looks like an id start and end in `text`: `AC`, in
+/// any case, perhaps a separator, then digits.
+fn id_digits(text: &str) -> Option<(usize, usize)> {
     let bytes = text.as_bytes();
     let separated = usize::from(matches!(bytes.get(2), Some(b' ' | b'-' | b'_')));
     let start = 2 + separated;
@@ -41,11 +46,46 @@ fn parse_id(text: &str) -> Id<'_> {
         .get(..2)
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case("ac"))
         && digits > 0;
-    if !meant_as_id {
-        return Id::None;
-    }
+    meant_as_id.then_some((start, start + digits))
+}
 
-    let end = start + digits;
+fn is_emphasis(byte: &u8) -> bool {
+    matches!(byte, b'*' | b'_' | b'`')
+}
+
+/// An id inside emphasis: the opening marks and what looks like an id, then any
+/// colon and closing marks, in the order they come. The closing marks may be
+/// further on, when the emphasis covers the whole criterion.
+fn emphasised_id(text: &str, opening: usize) -> Id<'_> {
+    let Some((_, digits_end)) = id_digits(&text[opening..]) else {
+        return Id::None;
+    };
+    let bytes = text.as_bytes();
+    let mut end = opening + digits_end;
+    let mut colon = bytes.get(end) == Some(&b':');
+    end += usize::from(colon);
+    while bytes.get(end).is_some_and(is_emphasis) {
+        end += 1;
+    }
+    colon = !colon && bytes.get(end) == Some(&b':');
+    end += usize::from(colon);
+    Id::Emphasised {
+        token: &text[..end],
+    }
+}
+
+/// `AC`, a positive integer with no leading zero, then `:` and a space (§6.4).
+fn parse_id(text: &str) -> Id<'_> {
+    let bytes = text.as_bytes();
+    let opening = bytes.iter().take_while(|b| is_emphasis(b)).count();
+    if opening > 0 {
+        return emphasised_id(text, opening);
+    }
+    let Some((start, end)) = id_digits(text) else {
+        return Id::None;
+    };
+    let separated = start - 2;
+
     let colon = usize::from(bytes.get(end) == Some(&b':'));
     let malformed = Id::Malformed {
         token: &text[..end + colon],
@@ -142,8 +182,21 @@ pub(super) fn check_ids(
                     ),
                 );
             }
-            Id::Malformed { .. } | Id::None if belongs_to_item => {}
-            Id::Malformed { .. } => problems.at(line, not_a_list_item()),
+            Id::Emphasised { token } if is_item => {
+                without_valid_id += 1;
+                seen_item = true;
+                problems.at(
+                    line,
+                    format!(
+                        "`{token}` is an id written with emphasis; write it plain, as in \
+                         `- AC1: Given …` (plan-header.md §6.4)"
+                    ),
+                );
+            }
+            Id::Malformed { .. } | Id::Emphasised { .. } | Id::None if belongs_to_item => {}
+            Id::Malformed { .. } | Id::Emphasised { .. } => {
+                problems.at(line, not_a_list_item());
+            }
             Id::None if is_item => {
                 without_valid_id += 1;
                 seen_item = true;
