@@ -36,6 +36,17 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": ".*test-writer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/invar",
+            "args": ["context", "show", "--conventions", "--hook"],
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PreToolUse": [
