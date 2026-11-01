@@ -1,11 +1,11 @@
 # Contract: `invar.yaml`
 
-**Version:** 2.2.0 — the `acceptance` section; see §11
+**Version:** 2.2.1 — `acceptance.run` is now executed; see §11
 **Status:** stable
 **Implements:** §6 (Config file), §13c (the review's base branch), §14.3; light
 mode L-2 and L-7 (`docs/TASKS-M1.md`); A-2, A-6 and A-7 (`docs/TASKS-AT.md`)
 **Read by:** the core (`format/config`; `invar done` for `done.*`; `plan approve`
-for `acceptance.required`), the protocol skill (`review.offer`, M1-18), any later
+for `acceptance.required`; `invar acceptance lock` for `acceptance.dir` and `run`), the protocol skill (`review.offer`, M1-18), any later
 reimplementation
 
 > Changing this file is a **public-contract change** (§14.3). It is made
@@ -195,7 +195,8 @@ the whole suite. A **placeholder** is `{`, then one or more letters, digits, `_`
 such as `{reports}` is caught. Any other brace is a literal one: `{}`, `{a,b}` and
 `{"k": 1}` are passed on as they are.
 
-Reading the command runs nothing. This version of the core does not execute it.
+Reading the command runs nothing. `invar acceptance lock` is what executes it
+(`acceptance-lock.md` §9.2).
 
 **`fakes_allowed`** is a list of non-empty strings, empty by default. The core does
 not interpret it and passes it on to the test-writer, so unknown values are accepted
@@ -577,6 +578,9 @@ acceptance:
 **Why:** the tests the core runs and locks stay inside the project.
 
 ## 11. Version history
+
+**2.2.1 — `acceptance.run` is executed (AT-8).** §3.6 no longer says that the core does
+not run it. No key, value or rule changes, so every valid file stays valid.
 
 **2.2.0 — the `acceptance` section (AT-4).**
 

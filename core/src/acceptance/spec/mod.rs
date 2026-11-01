@@ -68,6 +68,19 @@ pub fn build(
     mode: Mode,
     config: Option<&AcceptanceConfig>,
 ) -> Result<String, SpecError> {
+    let (plan, config) = usable(root, spec, mode, config)?;
+    Ok(render(&plan, config))
+}
+
+/// The Plan and the section, if tests may be written or locked for this ticket: the
+/// Plan is approved and unchanged since, `required`, the section exists, and the
+/// criteria have ids. In that order, and the first that fails is the answer.
+pub fn usable<'a>(
+    root: &ProjectRoot,
+    spec: &Path,
+    mode: Mode,
+    config: Option<&'a AcceptanceConfig>,
+) -> Result<(Plan, &'a AcceptanceConfig), SpecError> {
     let approved = check::check(root, spec, mode).map_err(SpecError::NotApproved)?;
     if approved.acceptance != Acceptance::Required {
         return Err(SpecError::Skipped {
@@ -81,7 +94,7 @@ pub fn build(
             ticket: approved.ticket,
         });
     }
-    Ok(render(&plan, config))
+    Ok((plan, config))
 }
 
 /// The output itself. A pure function of its arguments: nothing here reads the clock,

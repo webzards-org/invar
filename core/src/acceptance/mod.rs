@@ -4,4 +4,5 @@
 //! The test-writer's prompt stays one fixed text for every project and style (A-7,
 //! §13b). What changes with configuration is the output of these commands.
 
+pub mod lock;
 pub mod spec;

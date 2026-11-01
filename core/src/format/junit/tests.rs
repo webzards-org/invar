@@ -58,6 +58,8 @@ fn expected_case(case: &Value) -> TestCase {
             ),
             other => panic!("unknown criterion {other}"),
         },
+        failure_type: None,
+        message: None,
     }
 }
 
@@ -124,7 +126,16 @@ fn every_report_reads_as_results_json_says() {
             None => cases_of(report),
         };
         let expected: Vec<TestCase> = expected.iter().map(expected_case).collect();
-        let got = got.unwrap_or_else(|err| panic!("{report}: {err}"));
+        // `results.json` says nothing about messages, which have tests of their own.
+        let got: Vec<TestCase> = got
+            .unwrap_or_else(|err| panic!("{report}: {err}"))
+            .into_iter()
+            .map(|case| TestCase {
+                failure_type: None,
+                message: None,
+                ..case
+            })
+            .collect();
         assert_eq!(got, expected, "{report}");
     }
 }
@@ -424,4 +435,98 @@ fn every_error_says_what_is_wrong_and_where() {
             assert!(message.contains(part), "{part}: {message}");
         }
     }
+}
+
+// --- the message (§2.2) -----------------------------------------------------
+
+fn only(xml: &str) -> TestCase {
+    let mut all = cases(xml);
+    assert_eq!(all.len(), 1, "{xml}");
+    all.remove(0)
+}
+
+fn case_with(child: &str) -> TestCase {
+    only(&format!(
+        "<testsuite><testcase name=\"AC1\" file=\"a.php\">{child}</testcase></testsuite>"
+    ))
+}
+
+#[test]
+fn a_failure_keeps_its_type_and_its_text() {
+    let case = case_with("<error type=\"Error\">\n  Class \"X\" not found\n  at a.php:3\n</error>");
+    assert_eq!(case.outcome, Outcome::Error);
+    assert_eq!(case.failure_type.as_deref(), Some("Error"));
+    assert_eq!(
+        case.message.as_deref(),
+        Some("Class \"X\" not found\n  at a.php:3")
+    );
+}
+
+#[test]
+fn a_real_report_keeps_the_type_and_the_message_of_a_failure() {
+    let bytes = fs::read(fixtures_dir().join("real/phpunit-13.4.5.xml")).unwrap();
+    let all = read(&bytes, Path::new(ROOT)).unwrap();
+    let failed = all
+        .iter()
+        .find(|case| case.outcome == Outcome::Failure)
+        .unwrap();
+    assert!(failed.failure_type.is_some(), "{failed:?}");
+    assert!(failed.message.is_some(), "{failed:?}");
+    let passed = all
+        .iter()
+        .find(|case| case.outcome == Outcome::Passed)
+        .unwrap();
+    assert_eq!(passed.message, None);
+}
+
+#[test]
+fn the_attribute_is_used_only_when_there_is_no_text() {
+    let by_attribute = case_with("<failure message=\"short\"/>");
+    assert_eq!(by_attribute.message.as_deref(), Some("short"));
+    let by_text = case_with("<failure message=\"short\">the long one</failure>");
+    assert_eq!(by_text.message.as_deref(), Some("the long one"));
+    let blank = case_with("<failure message=\"short\">  \n </failure>");
+    assert_eq!(blank.message.as_deref(), Some("short"));
+}
+
+#[test]
+fn the_message_is_that_of_the_child_that_decided_the_outcome() {
+    let case = case_with(
+        "<failure type=\"F\">first</failure><error type=\"E\">second</error>\
+         <failure type=\"G\">third</failure>",
+    );
+    assert_eq!(case.outcome, Outcome::Error);
+    assert_eq!(case.failure_type.as_deref(), Some("E"));
+    assert_eq!(case.message.as_deref(), Some("second"));
+}
+
+#[test]
+fn entities_and_cdata_in_a_message_read_and_nothing_else_is_resolved() {
+    let case = case_with("<error>a &amp; b &#65; <![CDATA[<raw>]]> &unknown;</error>");
+    assert_eq!(case.message.as_deref(), Some("a & b A <raw> &unknown;"));
+}
+
+#[test]
+fn text_of_a_child_inside_the_message_is_not_read() {
+    let case = case_with("<error>outer<detail>inner</detail></error>");
+    assert_eq!(case.message.as_deref(), Some("outer"));
+}
+
+#[test]
+fn a_message_is_bounded_on_a_character() {
+    let long = "é".repeat(5000);
+    let in_text = case_with(&format!("<error>{long}</error>"));
+    assert_eq!(in_text.message.unwrap().chars().count(), 2000);
+    let in_attribute = case_with(&format!("<error message=\"{long}\"/>"));
+    assert_eq!(in_attribute.message.unwrap().chars().count(), 2000);
+}
+
+#[test]
+fn text_elsewhere_stays_unread_so_an_unknown_entity_there_is_still_fine() {
+    let case = only(
+        "<testsuite><system-out>&nope;</system-out><testcase name=\"AC1\" file=\"a.php\">\
+         <system-err>&nope;</system-err></testcase></testsuite>",
+    );
+    assert_eq!(case.outcome, Outcome::Passed);
+    assert_eq!(case.message, None);
 }

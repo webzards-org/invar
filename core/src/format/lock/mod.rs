@@ -1,6 +1,6 @@
 //! The `invar-lock:` line of an acceptance test file.
 //!
-//! Implements `contracts/formats/acceptance-lock.md` v1.0.0. The contract is the
+//! Implements `contracts/formats/acceptance-lock.md` v1.1.0. The contract is the
 //! authority; section numbers below (`§2`, `D-3`) point into it.
 //!
 //! Reading the line and choosing what the digest covers are format knowledge, so
@@ -57,8 +57,6 @@ pub fn read(bytes: &[u8]) -> Result<Option<LockLine>, LockError> {
 /// and no other byte changes: this works on the file as it is, not on its canonical
 /// form, so its line endings, BOM and trailing whitespace survive. Refuses a file
 /// with no line, a line for another ticket, and a line already locked.
-// `invar acceptance lock` is the caller (AT-8); remove this with its arrival.
-#[allow(dead_code)]
 pub fn with_digest(bytes: &[u8], ticket: &str) -> Result<Vec<u8>, LockError> {
     let lock = read(bytes)?.ok_or(LockError::NoLine)?;
     if lock.ticket != ticket {
