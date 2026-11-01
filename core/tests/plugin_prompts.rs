@@ -291,7 +291,7 @@ fn the_skill_has_every_part_of_the_cycle() {
         "## Is this a job for the cycle?",
         "## Phase 1 — plan",
         "## The developer approves",
-        "## Phase 2 — the coder implements",
+        "## Phase 2 — the test-writer if required, then the coder",
         "## When the coder answers BLOCKED",
         "## Closing",
         "## Models",
@@ -324,7 +324,7 @@ fn the_skill_runs_the_cycle_as_a_dispatcher() {
     assert!(flat.contains("**You do not implement an approved Plan yourself**"));
     // The gate, then the coder with the ticket line only.
     assert!(flat.contains("**Phase 2 begins with `invar plan check <TICKET>`.**"));
-    assert!(flat.contains("**start the coder** (`coder`; `invar:coder` if namespaced)"));
+    assert!(flat.contains("**Start the coder** (`coder`; `invar:coder` if namespaced)"));
     assert!(flat.contains("with the ticket line and nothing else"));
     assert!(flat.contains("`Ticket: SHOP-214`"));
     // Both answers are handled.
@@ -374,7 +374,7 @@ fn the_skill_never_tells_the_main_session_to_implement_an_approved_plan() {
 
 #[test]
 fn the_skill_chooses_models_aloud_and_handles_an_unavailable_one() {
-    let flat = skill().1.replace('\n', " ");
+    let flat = one_line(&skill().1);
 
     // The values the `Agent` tool accepts per call (M1-22).
     assert!(flat.contains("`sonnet`, `opus`, `haiku` or `fable`"));
@@ -383,6 +383,241 @@ fn the_skill_chooses_models_aloud_and_handles_an_unavailable_one() {
     assert!(flat.contains("`model_not_found`"));
     assert!(flat.contains("offer to run the agent again with `model: sonnet`"));
     assert!(flat.contains("switch models silently."));
+    // The coder will be held to the test-writer's tests.
+    assert!(flat.contains("**A test-writer on anything but its default is said aloud**"));
+    assert!(flat.contains(
+        "*\"The acceptance tests were written by sonnet, not by the test-writer's default.\"*"
+    ));
+}
+
+// --- the dispatch (AT-12) ---------------------------------------------------------------------
+
+/// `text` with every run of whitespace a single space, so that a phrase matches
+/// however it is wrapped and indented in a list.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The protocol skill's Phase 2, on one line.
+fn phase_2() -> String {
+    one_line(&skill().1)
+        .split_once("## Phase 2 — ")
+        .unwrap()
+        .1
+        .split_once("## When the coder answers BLOCKED")
+        .unwrap()
+        .0
+        .to_owned()
+}
+
+/// The part of Phase 2 between two markers, each of which has to be there.
+fn between(flat: &str, from: &str, to: &str) -> String {
+    let (_, after) = flat
+        .split_once(from)
+        .unwrap_or_else(|| panic!("no {from:?} in Phase 2"));
+    let (part, _) = after
+        .split_once(to)
+        .unwrap_or_else(|| panic!("no {to:?} after {from:?} in Phase 2"));
+    part.to_owned()
+}
+
+#[test]
+fn the_dispatch_is_decided_by_the_acceptance_line_alone() {
+    let flat = phase_2();
+
+    let check = flat
+        .find("**Phase 2 begins with `invar plan check <TICKET>`.**")
+        .unwrap();
+    let line = flat.find("Read its **`acceptance:` line**").unwrap();
+    let skipped = flat.find("### `acceptance: skipped`").unwrap();
+    let required = flat.find("### `acceptance: required`").unwrap();
+    assert!(check < line && line < skipped && skipped < required);
+    assert!(flat.contains("If it refuses, start nothing"));
+    assert!(flat.contains(
+        "**The decision comes from this line**, never from the conversation, the ticket or your \
+         own judgement"
+    ));
+    // A CLI too old to print the line decides nothing either.
+    assert!(flat.contains("If the check passes with no such line"));
+}
+
+#[test]
+fn the_acceptance_line_the_dispatch_reads_is_the_one_plan_check_prints() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("invar.yaml"), "").unwrap();
+    fs::write(dir.path().join(".gitconfig"), "[user]\n\tname = rade\n").unwrap();
+    let plan_dir = dir.path().join(".invar/plans/ACME-87-export-invoices-csv");
+    fs::create_dir_all(&plan_dir).unwrap();
+    fs::write(plan_dir.join("spec.md"), example_plan()).unwrap();
+    let invar = |args: &[&str]| {
+        Command::cargo_bin("invar")
+            .unwrap()
+            .current_dir(dir.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", dir.path().join(".gitconfig"))
+            .env("HOME", dir.path())
+            .args(args)
+            .assert()
+            .success()
+    };
+
+    invar(&["plan", "approve", "ACME-87", "--no-acceptance"]);
+    let check = invar(&["plan", "check", "ACME-87"]);
+    let stdout = String::from_utf8(check.get_output().stdout.clone()).unwrap();
+    assert!(
+        stdout.lines().any(|l| l == "acceptance: skipped"),
+        "{stdout}"
+    );
+    assert!(phase_2().contains("### `acceptance: skipped`"));
+}
+
+#[test]
+fn a_skipped_ticket_starts_the_coder_directly() {
+    let flat = phase_2();
+    let skipped = between(
+        &flat,
+        "### `acceptance: skipped`",
+        "### `acceptance: required`",
+    );
+    assert!(skipped.contains("Start the coder"), "{skipped}");
+    assert!(!skipped.contains("test-writer"), "{skipped}");
+    assert!(!skipped.contains("verify"), "{skipped}");
+}
+
+#[test]
+fn a_required_ticket_starts_the_test_writer_then_verify_then_the_coder() {
+    let flat = phase_2();
+    let required = between(&flat, "### `acceptance: required`", "### The coder");
+
+    let writer = required
+        .find("**Start the test-writer** (`test-writer`; `invar:test-writer` if namespaced)")
+        .expect("the test-writer is started");
+    let locked = required.find("**`LOCKED`**").expect("LOCKED is handled");
+    let verify = required
+        .find("run `invar acceptance verify <TICKET>`")
+        .expect("LOCKED is followed by the command");
+    let only_if = required.find("**Only if it passes**").unwrap();
+    let coder = required
+        .find("start the coder.")
+        .expect("the coder comes after the command");
+    assert!(writer < locked && locked < verify && verify < only_if && only_if < coder);
+    assert!(required.contains("Do not start the coder yet."));
+    assert!(required.contains("The agent's word is not the check; the command is."));
+    // `verify` refusing stops the cycle. With no `acceptance:` section it exits 0 having
+    // checked nothing, so the pass is the line it prints.
+    assert!(required.contains("printing `verified <N> locked file(s)`"));
+    assert!(required.contains("If `verify` refuses, or prints anything else"));
+    assert!(required.contains("start no coder, and stop"));
+
+    // The coder's section comes after the test-writer's.
+    assert!(flat.find("### `acceptance: required`") < flat.find("**Start the coder**"));
+}
+
+#[test]
+fn the_line_the_dispatch_keys_on_after_locked_is_the_one_verify_prints() {
+    // Nothing locked, for a `required` Plan, is a refusal: `verify` is not vacuous. The
+    // whole-directory form, with nothing to check, shows the shape of the line.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("invar.yaml"),
+        "acceptance:\n  dir: tests/Acceptance\n  run: [pest, \"{report}\", \"{files}\"]\n",
+    )
+    .unwrap();
+    Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["acceptance", "verify"])
+        .assert()
+        .success()
+        .stdout("verified 0 locked file(s)\n");
+}
+
+#[test]
+fn the_test_writer_is_started_with_the_ticket_line_only() {
+    let flat = phase_2();
+    assert!(
+        flat.contains("Every agent in this phase is started with the ticket line and nothing else")
+    );
+    assert!(flat.contains("`Ticket: SHOP-214`"));
+    let required = between(&flat, "### `acceptance: required`", "### The coder");
+    assert!(required.contains("with the ticket line and nothing else"));
+    // Before both of them.
+    assert!(flat.find("`Ticket: SHOP-214`") < flat.find("**Start the test-writer**"));
+}
+
+#[test]
+fn a_test_writers_blocked_starts_no_coder_and_goes_to_the_developer() {
+    let flat = phase_2();
+    let blocked = between(&flat, "**`BLOCKED <reason>`**", "### The coder");
+
+    assert!(blocked.contains("put it to the developer, as it gave it, and stop."));
+    assert!(blocked.contains("Start no coder."));
+    assert!(!blocked.contains("start the coder"), "{blocked}");
+    // What the developer can do.
+    assert!(blocked.contains("fix the cause (test infrastructure, a factory)"));
+    assert!(blocked.contains("`/invar:approve <TICKET> --reapprove --no-acceptance`"));
+    assert!(blocked.contains("revise the Plan"));
+    // A file left pending would stop `done` later, and is not the main session's to touch.
+    assert!(blocked.contains("pending `invar-lock:` line"));
+    assert!(blocked.contains("the developer's to remove, not yours"));
+    // A `failed` entry only when the Plan is the cause.
+    assert!(blocked.contains("Do not draft a `failed` entry by default"));
+    assert!(blocked.contains("Only if the reason is that the Plan cannot be tested as approved"));
+}
+
+#[test]
+fn every_flag_the_protocol_skill_gives_invar_approve_exists() {
+    // The helper below reads `` `invar …` `` spans, and these start `/invar:approve`.
+    let help = Command::cargo_bin("invar")
+        .unwrap()
+        .args(["plan", "approve", "--help"])
+        .assert()
+        .success();
+    let help = String::from_utf8(help.get_output().stdout.clone()).unwrap();
+    let body = skill().1;
+    let mut seen = 0;
+    for span in body.split('`').filter(|s| s.starts_with("/invar:approve ")) {
+        for flag in span.split_whitespace().filter(|w| w.starts_with("--")) {
+            seen += 1;
+            assert!(help.contains(flag), "`plan approve` has no {flag}");
+        }
+    }
+    assert!(seen >= 2, "found only {seen}");
+    // The flags on their own, in the gate and in the table.
+    for flag in ["--acceptance", "--no-acceptance", "--no-start"] {
+        assert!(body.contains(&format!("`{flag}`")), "{flag}");
+        assert!(help.contains(flag), "{flag}");
+    }
+}
+
+#[test]
+fn the_command_table_has_verify_and_the_flags_of_approve() {
+    let (_, body) = skill();
+    assert!(body.contains(
+        "| `invar acceptance verify <TICKET>` | yours, after the test-writer's `LOCKED`"
+    ));
+    let approve = body
+        .lines()
+        .find(|line| line.starts_with("| `/invar:approve` |"))
+        .unwrap();
+    assert!(approve.contains("`--acceptance`"), "{approve}");
+    assert!(approve.contains("`--no-acceptance`"), "{approve}");
+    assert!(approve.contains("`--no-start`"), "{approve}");
+}
+
+#[test]
+fn the_main_session_never_writes_tests_or_locks_them() {
+    let flat = one_line(&skill().1);
+    let never = flat.split_once("## Never").unwrap().1;
+    assert!(never.contains(
+        "start the coder for a `required` ticket before `invar acceptance verify` passes"
+    ));
+    assert!(never.contains(
+        "edit or write tests yourself, or run `invar acceptance lock`: that is the test-writer's"
+    ));
+    // `BLOCKED-TEST` and `/invar:relock` are AT-13's.
+    assert!(!flat.contains("BLOCKED-TEST"));
+    assert!(!flat.contains("/invar:relock"));
 }
 
 #[test]
