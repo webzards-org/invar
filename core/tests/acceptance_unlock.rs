@@ -645,6 +645,15 @@ fn spec_prints_the_unlocked_files_only_while_they_wait() {
         section.contains("Do not weaken them to pass the code"),
         "{out}"
     );
+    // The coder may have stopped before writing any code, and the last step says so too.
+    assert!(
+        section.contains("The code may or may not exist yet"),
+        "{out}"
+    );
+    assert!(
+        section.contains("every test outside the unlocked files fails on an assertion"),
+        "{out}"
+    );
     assert!(
         out.find("=== Unlocked tests ===") < out.find("=== Next step ==="),
         "{out}"

@@ -194,16 +194,22 @@ pub fn render(plan: &Plan, config: &AcceptanceConfig, unlocked: &[Entry]) -> Str
             out,
             "\nFix exactly these files to match their criteria, word for word, and change no \
              other file. Do not weaken them to pass the code: they are checked against the \
-             criteria, not against the code. The code exists now, so a test in these files may \
-             pass, and need not fail first; an error or a skipped test is still refused."
+             criteria, not against the code. The code may or may not exist yet, so a test in \
+             these files may pass or fail on an assertion; an error or a skipped test is still \
+             refused."
         );
     }
 
     heading(&mut out, "Next step");
+    let others = if unlocked.is_empty() {
+        "every test fails"
+    } else {
+        "every test outside the unlocked files fails"
+    };
     let _ = writeln!(
         out,
         "Run `invar acceptance lock {ticket}`. It checks coverage, that every criterion has a \
-         test, and red before green, that every test fails on an assertion."
+         test, and red before green, that {others} on an assertion."
     );
     out
 }
