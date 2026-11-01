@@ -397,7 +397,7 @@ fn new_id_from(taken: &HashSet<String>, mut next: impl FnMut() -> u32) -> String
 /// not to collide, and `new_id` excludes the ones that would. The standard
 /// library's hasher is seeded randomly per process; the time, the process id
 /// and a counter make every call different.
-fn random_u32() -> u32 {
+pub(crate) fn random_u32() -> u32 {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
     let nanos = std::time::SystemTime::now()

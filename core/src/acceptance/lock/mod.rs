@@ -4,9 +4,10 @@
 //! Implements `contracts/formats/acceptance-lock.md` §9. The contract is the
 //! authority; section numbers and `D-n` below point into it.
 //!
-//! [`find`] says which files belong to the ticket.
+//! [`find`] says which files belong to the ticket, and [`run`] runs them.
 
 pub mod find;
+pub mod run;
 
 #[cfg(test)]
 mod tests;

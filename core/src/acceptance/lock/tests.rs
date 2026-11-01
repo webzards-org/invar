@@ -3,10 +3,12 @@
 
 use std::fs;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
 use super::find::{FindError, find};
+use super::run::{self, RunError, TIME_LIMIT, argv};
 use crate::fs::ProjectRoot;
 
 const DIR: &str = "tests/Acceptance";
@@ -188,4 +190,107 @@ fn symlinks_are_not_followed() {
         Err(FindError::Nothing { .. })
     ));
     assert!(Path::new(&outside).join("a.py").exists());
+}
+
+// --- run ------------------------------------------------------------------------
+
+fn strings(items: &[&str]) -> Vec<String> {
+    items.iter().map(|item| (*item).to_owned()).collect()
+}
+
+fn sh(script: &str) -> Vec<String> {
+    strings(&["sh", "-c", script, "runner", "{report}", "{files}"])
+}
+
+#[test]
+fn the_placeholders_become_one_path_and_separate_files() {
+    let run = strings(&[
+        "pest",
+        "--log-junit",
+        "{report}",
+        "--x={y",
+        "{files}",
+        "--end",
+    ]);
+    let files = strings(&["a b.php", "c.php"]);
+    assert_eq!(
+        argv(&run, Path::new("/tmp/r.xml"), &files),
+        [
+            "pest",
+            "--log-junit",
+            "/tmp/r.xml",
+            "--x={y",
+            "a b.php",
+            "c.php",
+            "--end"
+        ]
+    );
+}
+
+#[test]
+fn the_report_and_the_output_come_back_and_the_exit_code_is_only_described() {
+    let (_dir, root) = project();
+    let script = "echo out; echo err >&2; pwd > where; printf '<testsuites/>' > \"$1\"; exit 3";
+    let done = run::run(&root, &sh(script), &[], TIME_LIMIT).unwrap();
+
+    assert_eq!(done.report.as_deref(), Some(&b"<testsuites/>"[..]));
+    assert_eq!(done.status, "exit status: 3");
+    assert_eq!(done.output.stdout, "out");
+    assert_eq!(done.output.stderr, "err");
+    // The working directory is the project root.
+    let cwd = fs::read_to_string(root.path().join("where")).unwrap();
+    assert_eq!(Path::new(cwd.trim()), root.path());
+}
+
+#[test]
+fn no_report_reads_as_none() {
+    let (_dir, root) = project();
+    let done = run::run(&root, &sh("exit 0"), &[], TIME_LIMIT).unwrap();
+    assert_eq!(done.report, None);
+}
+
+#[test]
+fn only_the_last_lines_of_a_stream_are_kept() {
+    let (_dir, root) = project();
+    let script = "i=0; while [ $i -lt 100 ]; do echo line$i; i=$((i+1)); done";
+    let done = run::run(&root, &sh(script), &[], TIME_LIMIT).unwrap();
+    let lines: Vec<&str> = done.output.stdout.lines().collect();
+    assert_eq!(lines.len(), 40);
+    assert_eq!(lines[0], "line60");
+    assert_eq!(lines[39], "line99");
+}
+
+#[test]
+fn a_program_that_cannot_start_is_named() {
+    let (_dir, root) = project();
+    let command = strings(&["./no-such-runner", "{report}", "{files}"]);
+    let err = run::run(&root, &command, &[], TIME_LIMIT).unwrap_err();
+    assert!(matches!(err, RunError::CannotStart { .. }));
+    let message = err.to_string();
+    assert!(message.contains("`./no-such-runner`"), "{message}");
+    assert!(message.contains("acceptance.run"), "{message}");
+}
+
+#[test]
+fn a_run_past_the_limit_is_killed_and_says_so() {
+    let (_dir, root) = project();
+    // `exec`, so the process killed is the one sleeping and nothing is left behind.
+    let script = "echo started; exec sleep 30";
+    let started = Instant::now();
+    let err = run::run(&root, &sh(script), &[], Duration::from_millis(300)).unwrap_err();
+
+    assert!(started.elapsed() < Duration::from_secs(20), "it waited");
+    let RunError::TimedOut { output, .. } = &err else {
+        panic!("{err}");
+    };
+    assert_eq!(output.stdout, "started");
+}
+
+#[test]
+fn the_time_limit_is_named_in_minutes() {
+    let err = RunError::TimedOut {
+        limit: TIME_LIMIT,
+        output: run::Output::default(),
+    };
+    assert!(err.to_string().contains("within 10 minutes"), "{err}");
 }
