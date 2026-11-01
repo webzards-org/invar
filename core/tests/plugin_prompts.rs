@@ -506,7 +506,9 @@ fn a_required_ticket_starts_the_test_writer_then_verify_then_the_coder() {
     // `verify` refusing stops the cycle. With no `acceptance:` section it exits 0 having
     // checked nothing, so the pass is the line it prints.
     assert!(required.contains("printing `verified <N> locked file(s)`"));
-    assert!(required.contains("If `verify` refuses, or prints anything else"));
+    assert!(required.contains("If `verify` refuses, or that line is not there"));
+    // A relocked ticket's `verify` says so beside that line (acceptance-lock.md D-31).
+    assert!(required.contains("saying `unlocked by the developer:` are information"));
     assert!(required.contains("start no coder, and stop"));
 
     // The coder's section comes after the test-writer's.
@@ -616,9 +618,7 @@ fn the_main_session_never_writes_tests_or_locks_them() {
     assert!(never.contains(
         "edit or write tests yourself, or run `invar acceptance lock`: that is the test-writer's"
     ));
-    // `BLOCKED-TEST` and `/invar:relock` are AT-13's.
-    assert!(!flat.contains("BLOCKED-TEST"));
-    assert!(!flat.contains("/invar:relock"));
+    assert!(never.contains("run `invar acceptance unlock`"));
 }
 
 #[test]
@@ -725,6 +725,7 @@ fn every_invar_command_and_flag_the_prompts_name_exists() {
         frontmatter("agents/reviewer.md").1,
         skill().1,
         frontmatter("skills/approve/SKILL.md").1,
+        frontmatter("skills/relock/SKILL.md").1,
         frontmatter("skills/log/SKILL.md").1,
         frontmatter("skills/log-approve/SKILL.md").1,
     ];
@@ -858,10 +859,16 @@ fn the_coder_writes_code_and_starts_no_one_on_a_cheaper_model() {
 }
 
 #[test]
-fn the_coder_answers_in_one_of_two_shapes() {
+fn the_coder_answers_in_one_of_three_shapes() {
     let (meta, body) = frontmatter("agents/coder.md");
 
     assert!(meta["description"].contains("ticket line and nothing else"));
+    assert!(meta["description"].contains("BLOCKED-TEST"));
+    assert!(body.contains("Exactly one of three shapes"));
+    assert!(
+        body.contains("```\nBLOCKED-TEST <file> <AC> <reason in one line>\n"),
+        "the BLOCKED-TEST shape"
+    );
     assert!(
         body.contains("```\nDONE\n<at most 8 lines"),
         "the DONE shape"
@@ -870,6 +877,36 @@ fn the_coder_answers_in_one_of_two_shapes() {
         body.contains("```\nBLOCKED <the reason, in one line>\n"),
         "the BLOCKED shape"
     );
+}
+
+#[test]
+fn the_coders_blocked_test_is_for_a_locked_test_and_changes_no_test() {
+    let flat = one_line(&frontmatter("agents/coder.md").1);
+
+    assert!(flat.contains("`BLOCKED-TEST` is only for a **locked** test"));
+    assert!(flat.contains("It is not for a test that is merely hard to pass."));
+    assert!(flat.contains("Leave your code in place, change no test"));
+    assert!(flat.contains("The developer decides whether the test is wrong; you do not."));
+}
+
+#[test]
+fn the_coder_writes_no_lock_line_and_leaves_locked_tests_alone() {
+    let flat = one_line(&frontmatter("agents/coder.md").1);
+
+    assert!(flat.contains("Note its `acceptance:` line"));
+    assert!(flat.contains("**With `acceptance: required`**, the test-writer has already"));
+    assert!(flat.contains("You never write a file with an `invar-lock:` line"));
+    assert!(flat.contains("Your unit tests are your own, as always."));
+    assert!(flat.contains("**With `acceptance: skipped`, each criterion gets a test from you"));
+    assert!(flat.contains("with no `invar-lock:` line"));
+    assert!(flat.contains("Never run `invar acceptance unlock`"));
+}
+
+#[test]
+fn the_test_writer_does_what_the_parts_of_the_spec_say() {
+    // Those parts are the spec's, not the prompt's (A-7).
+    let flat = one_line(&frontmatter("agents/test-writer.md").1);
+    assert!(flat.contains("called `Unlocked tests` or `Acceptance tests to change`"));
 }
 
 #[test]
@@ -1310,10 +1347,11 @@ fn approve_cannot_be_invoked_by_the_model() {
 /// The skills whose command records the developer's decision, and the command:
 /// the model cannot run any of them (`plan guard` denies it), so each runs
 /// before the model sees the skill, in its ```! block.
-const DEVELOPER_SKILLS: [(&str, &str); 3] = [
+const DEVELOPER_SKILLS: [(&str, &str); 4] = [
     ("skills/approve/SKILL.md", "invar plan approve"),
     ("skills/log-approve/SKILL.md", "invar decision approve"),
     ("skills/done/SKILL.md", "invar done"),
+    ("skills/relock/SKILL.md", "invar acceptance unlock"),
 ];
 
 /// The ```! block of a skill.
@@ -1525,6 +1563,129 @@ fn approve_shows_a_flag_that_changed_nothing_and_starts_nothing() {
         .find("if a line under it says a flag changed nothing, make sure the developer sees")
         .expect("the line is shown");
     assert!(otherwise < flag);
+}
+
+// --- /invar:relock (AT-13) ----------------------------------------------------------------
+
+#[test]
+fn relock_cannot_be_invoked_by_the_model_and_allows_exactly_its_command() {
+    // As for /invar:approve: a misspelt field is ignored without a word, so the exact
+    // string, and the skill's other half is the command `plan guard` denies to the agent.
+    let (meta, body) = frontmatter("skills/relock/SKILL.md");
+
+    assert_eq!(meta["name"], "relock");
+    assert_eq!(meta["disable-model-invocation"], "true");
+    assert_eq!(meta["allowed-tools"], "Bash(invar acceptance unlock *)");
+    assert_eq!(meta["argument-hint"], "<ticket> <file>...");
+    assert!(
+        !meta.contains_key("user-invocable"),
+        "it must stay in the / menu"
+    );
+    assert_eq!(
+        shell_block("skills/relock/SKILL.md"),
+        "invar acceptance unlock --skill $ARGUMENTS"
+    );
+    for (key, value) in &meta {
+        assert!(!value.contains(": "), "`{key}` contains `: `");
+        assert!(!value.contains(" #"), "`{key}` contains ` #`");
+    }
+    assert!(body.contains("Do not run `invar acceptance unlock` yourself"));
+}
+
+#[test]
+fn relock_starts_the_test_writer_only_on_the_success_line() {
+    let flat = one_line(&frontmatter("skills/relock/SKILL.md").1);
+
+    let condition = flat
+        .find("**If the output contains the line `unlocked <TICKET> <N> file(s), round <R> of 2`**")
+        .expect("the start is conditional on the line");
+    let start = flat
+        .find("start the test-writer for that ticket now")
+        .expect("the start");
+    let otherwise = flat
+        .find("**Otherwise, stop.** Write no code and start no agent.")
+        .expect("what to do without the line");
+    let silent = flat
+        .find("**If there is no output at all**")
+        .expect("no output");
+    assert!(condition < start && start < otherwise && otherwise < silent);
+    assert!(flat.contains("never by your own reading"));
+    // It points at the protocol skill, and keeps no copy of what follows.
+    assert!(flat.contains("the section \"When the coder answers BLOCKED-TEST\" of the protocol"));
+    assert!(!flat.contains("invar acceptance verify"));
+    assert!(!flat.contains("start the coder"));
+    assert!(flat.contains("the message says to end the cycle as `failed`"));
+}
+
+/// The protocol skill's section on `BLOCKED-TEST`, on one line.
+fn blocked_test() -> String {
+    one_line(&skill().1)
+        .split_once("## When the coder answers BLOCKED-TEST")
+        .expect("the section")
+        .1
+        .split_once("## Closing")
+        .unwrap()
+        .0
+        .to_owned()
+}
+
+#[test]
+fn the_protocol_skill_stops_on_blocked_test_and_puts_it_to_the_developer() {
+    let flat = one_line(&skill().1);
+    assert!(flat.contains("It answers with one of three things."));
+    assert!(flat.contains("**`BLOCKED-TEST <file> <AC> <reason>`**"));
+
+    let section = blocked_test();
+    assert!(section.contains("**Put it to the developer, as it was given, and stop.**"));
+    assert!(section.contains("Start no agent."));
+    // What the developer can do, each theirs.
+    assert!(section.contains("`/invar:relock <TICKET> <file>`"));
+    assert!(section.contains("tell you to start the coder again, with their words"));
+    assert!(section.contains("end the cycle as `failed`, with `/invar:log`"));
+    assert!(section.contains("never unlock a test yourself"));
+    assert!(section.contains("Never start the test-writer on your own reading"));
+    assert!(section.contains("A third `/invar:relock` is refused"));
+}
+
+#[test]
+fn the_test_writer_starts_only_after_relock_and_the_coder_only_after_verify() {
+    let section = blocked_test();
+    let stop = section.find("as it was given, and stop.").unwrap();
+    let relock = section
+        .find("**After `/invar:relock` succeeds**, and only then, start the test-writer")
+        .expect("the test-writer waits for the skill");
+    let locked = section
+        .find("on `LOCKED`, run `invar acceptance verify <TICKET>`")
+        .unwrap();
+    let only_if = section.find("only if it passes").unwrap();
+    let coder = section
+        .find("start the **coder** again with the ticket line")
+        .unwrap();
+    assert!(stop < relock && relock < locked && locked < only_if && only_if < coder);
+    assert!(section.contains("start the test-writer with the ticket line and nothing else"));
+    // No start of either before the skill has succeeded.
+    let before = &section[..relock];
+    assert!(!before.contains("start the test-writer"), "{before}");
+}
+
+#[test]
+fn the_line_relock_keys_on_is_the_one_the_contract_gives_the_cli() {
+    let contract = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/acceptance-lock.md"),
+    )
+    .unwrap();
+    assert!(contract.contains("unlocked <TICKET> <N> file(s), round <R> of 2"));
+    // tests/acceptance_unlock.rs holds that the binary prints it.
+}
+
+#[test]
+fn the_command_table_has_relock() {
+    let (_, body) = skill();
+    let line = body
+        .lines()
+        .find(|line| line.starts_with("| `/invar:relock <TICKET> <file>...` |"))
+        .expect("the table names it");
+    assert!(line.contains("the developer's"), "{line}");
 }
 
 #[test]
