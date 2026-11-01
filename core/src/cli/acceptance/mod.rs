@@ -5,6 +5,7 @@ use clap::Subcommand;
 
 mod lock;
 mod spec;
+mod unlock;
 mod verify;
 
 #[derive(Debug, Subcommand)]
@@ -38,6 +39,17 @@ pub enum Command {
     /// Refuses first what `invar acceptance spec` refuses. On success the last line
     /// is `locked <TICKET> <N> file(s)`.
     Lock(lock::Args),
+    /// Take the lock off named test files of a ticket, so that the test-writer can fix
+    /// them: the developer's decision, through `/invar:relock`.
+    ///
+    /// For a locked test that is wrong. Every file must be under `acceptance.dir`, locked
+    /// for this ticket, with its digest holding, or nothing is unlocked. The line of each
+    /// goes back to pending, and the files are written to the unlock record beside the
+    /// Plan. A ticket has two rounds, and a third is refused: end the cycle as `failed`.
+    ///
+    /// Refuses first what `invar acceptance spec` refuses. On success the last line is
+    /// `unlocked <TICKET> <N> file(s), round <R> of 2`. An agent may not run it.
+    Unlock(unlock::Args),
     /// Check that the acceptance locks hold. Runs no test.
     ///
     /// With no ticket, for CI on every push: every locked file under
@@ -59,6 +71,7 @@ pub fn run(command: Command) -> Result<()> {
     match command {
         Command::Spec(args) => spec::run(args),
         Command::Lock(args) => lock::run(args),
+        Command::Unlock(args) => unlock::run(args),
         Command::Verify(args) => verify::run(args),
     }
 }

@@ -203,14 +203,14 @@ fn for_skill(skill: bool, result: Result<()>) -> Result<()> {
     }
 }
 
-/// Whether a command line clap refused was `plan approve … --skill`, the one
-/// command whose argument errors have to reach a skill (see `for_skill`): a typo
-/// in `/invar:approve T --acceptence` is a refusal like any other. Nothing after
-/// a `--` is a flag.
-pub fn is_plan_approve_for_skill(args: &[OsString]) -> bool {
+/// Whether a command line clap refused was `plan approve … --skill` or `acceptance
+/// unlock … --skill`, the commands whose argument errors have to reach a skill (see
+/// `for_skill`): a typo in `/invar:approve T --acceptence` is a refusal like any other.
+/// Nothing after a `--` is a flag.
+pub fn reports_argument_errors_for_skill(args: &[OsString]) -> bool {
     args.len() >= 2
-        && args[0] == "plan"
-        && args[1] == "approve"
+        && ((args[0] == "plan" && args[1] == "approve")
+            || (args[0] == "acceptance" && args[1] == "unlock"))
         && args[2..]
             .iter()
             .take_while(|arg| *arg != "--")
@@ -235,23 +235,26 @@ mod tests {
     use std::ffi::OsString;
     use std::path::Path;
 
-    use super::{is_plan_approve_for_skill, shown};
+    use super::{reports_argument_errors_for_skill, shown};
 
     fn for_skill(line: &str) -> bool {
         let args: Vec<OsString> = line.split_whitespace().map(OsString::from).collect();
-        is_plan_approve_for_skill(&args)
+        reports_argument_errors_for_skill(&args)
     }
 
     #[test]
-    fn only_plan_approve_with_skill_reports_argument_errors_as_output() {
+    fn only_the_named_commands_with_skill_report_argument_errors_as_output() {
         assert!(for_skill("plan approve --skill T --acceptence"));
         assert!(for_skill("plan approve T --acceptence --skill"));
+        assert!(for_skill("acceptance unlock --skill T f --bogus"));
 
         assert!(!for_skill("plan approve T --acceptence"));
         assert!(!for_skill("plan approve T -- --skill"));
         assert!(!for_skill("done --skill --bogus"));
         assert!(!for_skill("decision approve --skill --bogus"));
         assert!(!for_skill("plan check --skill"));
+        assert!(!for_skill("acceptance lock --skill"));
+        assert!(!for_skill("acceptance unlock T f --bogus"));
         assert!(!for_skill("plan"));
     }
 

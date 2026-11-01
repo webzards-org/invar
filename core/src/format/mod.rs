@@ -29,4 +29,5 @@ pub mod decision;
 pub mod junit;
 pub mod lock;
 pub mod plan;
+pub mod unlock;
 pub mod values;

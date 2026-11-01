@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::{LockError, LockLine, holds_digest, read, with_digest};
+use super::{LockError, LockLine, holds_digest, read, with_digest, without_digest};
 use crate::digest::{canonicalize, digest};
 
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -658,4 +658,68 @@ fn holds_digest_is_false_for_what_is_not_a_digest_on_a_lock_line() {
     ] {
         assert!(!holds_digest(text), "{text:?}");
     }
+}
+
+// --- without_digest ---------------------------------------------------------------------------
+
+#[test]
+fn without_digest_is_the_inverse_of_with_digest_byte_for_byte() {
+    for pending in [
+        "# invar-lock: SHOP-214\ndef test():\n    assert False\n",
+        "# invar-lock:    SHOP-214 written by hand\nbody\n",
+        "/* invar-lock: SHOP-214 */\nbody\n",
+        "<!-- invar-lock: SHOP-214\t-->\nbody\n",
+        "# invar-lock: SHOP-214\r\nbody   \r\n",
+        "\u{feff}# invar-lock: SHOP-214\nbody\n\n\n",
+        "# invar-lock: SHOP-214",
+    ] {
+        let locked = with_digest(pending.as_bytes(), "SHOP-214").unwrap();
+        assert_ne!(locked, pending.as_bytes());
+        assert_eq!(
+            without_digest(&locked, "SHOP-214").unwrap(),
+            pending.as_bytes(),
+            "{pending:?}"
+        );
+    }
+}
+
+#[test]
+fn without_digest_leaves_a_pending_line_with_the_digest_the_file_had() {
+    let pending = b"# invar-lock: SHOP-214\nbody\n";
+    let locked = with_digest(pending, "SHOP-214").unwrap();
+    let line = read(&without_digest(&locked, "SHOP-214").unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(line.recorded, None);
+    assert_eq!(line.digest, read(&locked).unwrap().unwrap().digest);
+}
+
+#[test]
+fn without_digest_takes_the_spaces_a_hand_written_line_had_before_it() {
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let bytes = format!("# invar-lock: SHOP-214   {digest} trailing\nbody\n");
+    assert_eq!(
+        without_digest(bytes.as_bytes(), "SHOP-214").unwrap(),
+        b"# invar-lock: SHOP-214 trailing\nbody\n"
+    );
+}
+
+#[test]
+fn without_digest_refuses_no_line_another_ticket_and_a_pending_line() {
+    assert_eq!(
+        without_digest(b"body\n", "SHOP-214").unwrap_err(),
+        LockError::NoLine
+    );
+    let digest = format!("sha256:{}", "a".repeat(64));
+    assert!(matches!(
+        without_digest(
+            format!("# invar-lock: SHOP-9 {digest}\n").as_bytes(),
+            "SHOP-214"
+        ),
+        Err(LockError::OtherTicket { .. })
+    ));
+    assert!(matches!(
+        without_digest(b"# invar-lock: SHOP-214\n", "SHOP-214"),
+        Err(LockError::NotLocked { .. })
+    ));
 }

@@ -34,7 +34,7 @@ fn main() -> ExitCode {
         Ok(cli) => cli,
         Err(err) => {
             let args: Vec<_> = std::env::args_os().skip(1).collect();
-            return usage(&err, cli::is_plan_approve_for_skill(&args));
+            return usage(&err, cli::reports_argument_errors_for_skill(&args));
         }
     };
 
@@ -63,8 +63,8 @@ fn main() -> ExitCode {
 /// reason. So a usage error exits 1, like every other failure, and 2 stays a
 /// verdict someone chose to give.
 ///
-/// `for_skill` is `plan approve --skill`: an error goes to stdout and exits 0,
-/// as every refusal of that command does, because a skill's shell block that
+/// `for_skill` is `plan approve --skill` or `acceptance unlock --skill`: an error goes to
+/// stdout and exits 0, as every refusal of those commands does, because a skill's shell block that
 /// exits non-zero loses its output. clap's text already starts with `error: `.
 fn usage(err: &clap::Error, for_skill: bool) -> ExitCode {
     if for_skill && err.use_stderr() {
