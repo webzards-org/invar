@@ -1003,8 +1003,8 @@ allow capitals. Not done yet.
 ### Test-writer (AT-11)
 
 `agents/test-writer.md` writes a ticket's acceptance tests between the gate and the coder.
-The main session does not start it until AT-12, so for now it is started by hand with the
-ticket line. CI (`plugin_prompts.rs`, `plugin.rs`) holds what can drift: its tools and
+The main session starts it with the ticket line, for a ticket whose `plan check` says
+`acceptance: required` (AT-12, §15). CI (`plugin_prompts.rs`, `plugin.rs`) holds what can drift: its tools and
 model, both answer shapes, that `LOCKED` is tied to the command's line, the order of its
 commands, that every command it names exists, no pointer to the log or the business file,
 no branch by style or framework, and the `SubagentStart` hook. Whether it **behaves** is
@@ -1026,7 +1026,7 @@ prompt, so a new style changes the command's output (A-7). It does not change fa
 seeders (OQ-2): the coder's tests of the same model would then move under it, and a missing
 factory is the developer's to know about.
 
-**Known gap, for AT-12 and AT-13.** A Plan that declares a change to another ticket's locked
+**Known gap, for AT-13.** A Plan that declares a change to another ticket's locked
 test in `## Acceptance tests to change` has no route through this agent yet. `invar acceptance
 spec` does not print that section, and the guard denies `Write` and `Edit` on the file. The
 agent's answer is `BLOCKED`, naming the file.
@@ -1057,6 +1057,29 @@ the log: any read of `BUSINESS_CONTEXT.md` or `.invar/decisions/` is a failure.
 **How the smoke run was made.** `claude -p --plugin-dir <copy of plugin/ with a fresh binary>`, the main session asked to start `invar:test-writer` with the ticket line, Bash allowed only for `invar *` (read-only commands such as `cat` still ran). `AI_CONTEXT.md`, `BUSINESS_CONTEXT.md` and an entry under `.invar/decisions/` each held a sentinel. The conventions' sentinel reached the sub-agent's transcript through the hook, and the other two did not. It proves the plumbing and one small ticket, not the prompt's judgement: the Plan was a hand-written fixture, and the behavior was simple. Rows 1 to 4 are what test that.
 
 **A stale `invar` on `PATH` wins over the plugin's.** The first attempt answered `BLOCKED`, correctly, because the Bash tool found `~/.cargo/bin/invar`, built before `acceptance` existed, ahead of the plugin's `bin/`. It read the Plan's digest the old way and said the Plan had changed, and warned of an unknown key `acceptance`. Hooks are not affected, because they name the plugin's path. An agent's bare `invar` is. Before a run, check `which -a invar`, and update or remove an older CLI.
+
+### The dispatch (AT-12)
+
+Why it is built this way is in §15. **Record, per approval:** whether the test-writer started after a recorded approval with `required`; whether the coder started only after `invar acceptance verify` passed; that `--no-acceptance` started the coder directly; and that a test-writer `BLOCKED` started no coder. A coder started before `verify`, or after a `BLOCKED`, is a failure of the gate, whatever it then did.
+
+| Date | Command | `acceptance:` line | Test-writer started | Its answer | `verify` | Coder started | Result |
+|---|---|---|---|---|---|---|---|
+| 2026-11-01 | `/invar:approve NOTE-1 --acceptance` | `required` | Yes, `Ticket: NOTE-1` only, on `claude-opus-5-5` | `LOCKED` | `verified 1 locked file(s)` | Yes, after `verify`, `Ticket: NOTE-1` only, on `claude-sonnet-5-5` | `DONE`; the coder left the locked file alone |
+| 2026-11-01 | `/invar:approve NOTE-4` (no flag; `invar.yaml` says required) | `required` | Yes, `Ticket: NOTE-4` only, on `claude-opus-5-5` | `BLOCKED`: `GET /up` already answers 200, so it cannot be made red | Not run | **No** | The reason put to the developer, with the options; `/invar:log` offered, the reason being the Plan |
+| 2026-11-01 | `/invar:approve NOTE-4 --reapprove --no-acceptance`, after that `BLOCKED` | `skipped` | No | | Not run | Yes, directly | The approval recorded `skipped`. `UpTest.php`, left pending, then made `invar acceptance verify NOTE-4` refuse, as the skill warns |
+| 2026-11-01 | `/invar:approve NOTE-2 --no-acceptance` | `skipped` | No | | Not run | Yes, directly, `Ticket: NOTE-2` only, on `claude-sonnet-5-5` | `DONE` |
+| 2026-11-01 | `/invar:approve NOTE-3 --acceptance --no-acceptance` | None: no check run | No | | Not run | No | The `error:` line naming both flags, not the "no output at all" message; the Plan still a draft |
+| 2026-11-01 | `/invar:approve NOTE-3 --acceptence` | None: no check run | No | | Not run | No | clap's `error:` line, with its tip; the Plan still a draft |
+| 2026-11-01 | `/invar:approve NOTE-1 --no-acceptance`, on an approval that holds | None: no check run | No | | Not run | No | `already approved`, and the line that the flag changed nothing, shown; `Acceptance: required` kept |
+
+**How these were made.** Real `/invar:approve` runs, each a fresh `claude -p "/invar:approve …" --plugin-dir <copy of plugin/ with a fresh binary>`, Claude Code 2.1.309, a fresh `invar` first on `PATH`, on a throwaway Laravel 13 and Pest 5.3 project whose tests ran in Docker, with Bash allowed for `invar *` and the test script, and `acceptEdits`. The Plans were hand-written fixtures of one or two criteria, so these prove the plumbing and the order, not the judgement on a real ticket. In every run that started Phase 2, the main session loaded the protocol skill on its own before `invar plan check`.
+
+**Not exercised.**
+
+- [ ] An interactive session, in auto mode and outside it: `claude -p` is neither
+- [ ] `verify` refusing after a `LOCKED`, in a session: no agent could be made to lie on demand. The refusal itself is in `acceptance_verify.rs`
+- [ ] A test-writer on another model, and the sentence said aloud before the coder
+- [ ] A model that is unavailable to the test-writer
 
 ## 15. `/invar:approve` (M1-19)
 
@@ -1186,6 +1209,46 @@ turns a refusal into `error: …` on stdout with exit 0.
       it shows why
 - [ ] Asked to approve or close, the model still does not run either command,
       though the skill allows it (the guard denies it)
+
+### The acceptance flags and the dispatch (AT-12)
+
+**The flags.** `/invar:approve <ticket> --acceptance` or `--no-acceptance` decides whether
+the ticket gets acceptance tests; without either, `invar.yaml` does (A-6). They reach the
+CLI through `$ARGUMENTS`, so the block and `allowed-tools` did not change.
+
+**Errors have to reach the skill.** clap refuses a command line before `--skill` is read, and
+exits 1, and a block that exits non-zero loses its output: the developer got the "no output
+at all" message for `--acceptance --no-acceptance`, and for a typo such as `--acceptence`. So
+the pair is checked in code and goes through `for_skill`, and `main.rs` prints clap's own
+`error: …` on stdout with exit 0, for `plan approve` with `--skill` only. Help stays help, and
+other commands keep their exit codes. A typo records nothing: the Plan stays as it was.
+
+**The dispatch lives in the protocol skill's Phase 2.** `/invar:approve` points at it and keeps
+no copy, because two copies could only come to disagree. The approve skill no longer says
+"then the coder" (`plugin_prompts.rs` holds that it names neither the test-writer nor
+`verify`).
+
+**The decision comes from disk.** The main session reads the `acceptance:` line of `plan check`,
+never the conversation: the developer's flag is under the checksum there, and a sentence in
+the chat is not. `plan check` passing with no such line means an older `invar` on `PATH`
+(§14), and starts nothing.
+
+**Why `verify`, when the test-writer says `LOCKED`.** The coder will be held to these tests, so
+starting it on the agent's word would make that word the gate, and a model's summary is the
+one thing here nothing checks. `invar acceptance verify <TICKET>` makes the check `done` makes:
+at least one file locked for the ticket, every digest holding, no pending line. `plan check`
+cannot do this job, because it has to pass before the test-writer has written anything
+(D-18). The skill keys on the `verified <N> locked file(s)` line and not only on the exit
+code, because with no `acceptance:` section `verify` exits 0 having checked nothing.
+
+**A test-writer's `BLOCKED`** starts no coder, and does not default to a `failed` entry: it is
+usually about the project (no factory, no test database), and a `failed` entry would
+de-approve a Plan with nothing wrong in it. `/invar:log` is offered only when the reason is
+that the Plan cannot be tested as approved. A developer who goes on with `--reapprove
+--no-acceptance` has to remove any file the test-writer left pending: `plan check` allows a
+pending line, and `done` and `verify` do not.
+
+The record of the runs is in §14, under "The dispatch".
 
 ### `/invar:log-approve` — the same gate, on the decision log
 
