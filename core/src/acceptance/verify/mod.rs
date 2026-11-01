@@ -12,6 +12,8 @@ use crate::fs::ProjectRoot;
 
 use super::lock::find::{self, Scan, Scanned};
 
+pub mod branch;
+
 #[cfg(test)]
 mod tests;
 

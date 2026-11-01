@@ -331,8 +331,6 @@ pub fn merge_base(dir: &Path, base: &str) -> Result<String, GitError> {
 /// No rename detection: a rename is one path deleted and another added. `--relative`,
 /// because `dir` may be below the repository's top level, and `-z`, so that a path is
 /// never quoted. A path that is not UTF-8 is an error, not a path silently not checked.
-// `invar plan check` and `done` are the callers (AT-9); remove this with their arrival.
-#[allow(dead_code)]
 pub fn changed_since(dir: &Path, fork: &str, path: &str) -> Result<Vec<String>, GitError> {
     const COMMAND: &str = "git diff --name-only";
     let mut changed = Vec::new();
@@ -367,7 +365,6 @@ pub fn changed_since(dir: &Path, fork: &str, path: &str) -> Result<Vec<String>, 
 ///
 /// `ls-tree` first, so that "no such file" is an answer and any other failure of git
 /// is an error; `cat-file`, so that no filter or textconv touches the bytes.
-#[allow(dead_code)]
 pub fn file_at(dir: &Path, rev: &str, path: &str) -> Result<Option<Vec<u8>>, GitError> {
     const COMMAND: &str = "git ls-tree";
     let output = run(dir, &["ls-tree", "-z", rev, "--", path])?;
@@ -384,7 +381,6 @@ pub fn file_at(dir: &Path, rev: &str, path: &str) -> Result<Option<Vec<u8>>, Git
 }
 
 /// The bytes of `path` (relative to `dir`) in the index. `None` when it is not there.
-#[allow(dead_code)]
 pub fn file_in_index(dir: &Path, path: &str) -> Result<Option<Vec<u8>>, GitError> {
     const COMMAND: &str = "git ls-files --stage";
     let output = run(

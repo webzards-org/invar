@@ -342,6 +342,56 @@ fn check_sequence(ids: &[(u64, usize)], without_valid_id: u64, problems: &mut Di
     }
 }
 
+/// What `## Acceptance tests to change` allows for one path (§6.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestAction {
+    Change,
+    Delete,
+}
+
+impl TestAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Change => "change",
+            Self::Delete => "delete",
+        }
+    }
+}
+
+/// One item of `## Acceptance tests to change`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestToChange {
+    /// As written. What it must be is checked where `acceptance.dir` is known.
+    pub path: String,
+    pub action: TestAction,
+}
+
+/// The items of a section that [`check_tests_to_change`] accepted. An item it would
+/// refuse is left out: an approved Plan has none.
+pub(super) fn parse_tests_to_change(content: &str) -> Vec<TestToChange> {
+    let mut in_comment = false;
+    let mut items = Vec::new();
+    for (raw, _) in super::split_lines(content) {
+        let visible = without_comments(raw, &mut in_comment);
+        let Some(item) = visible.trim_end().strip_prefix("- ") else {
+            continue;
+        };
+        let (path, Some(rest)) = next_field(item) else {
+            continue;
+        };
+        let action = match next_field(rest).0 {
+            "change" => TestAction::Change,
+            "delete" => TestAction::Delete,
+            _ => continue,
+        };
+        items.push(TestToChange {
+            path: path.to_owned(),
+            action,
+        });
+    }
+    items
+}
+
 const ITEM_FORM: &str = "`- <path> — change — <reason>` or `- <path> — delete — <reason>`";
 
 /// Check `## Acceptance tests to change`, whose heading is on `heading_line`

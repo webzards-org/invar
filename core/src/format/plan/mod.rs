@@ -1,6 +1,6 @@
 //! The Plan: `.invar/plans/<TICKET>-<slug>/spec.md` (§4a).
 //!
-//! Implements `contracts/formats/plan-header.md` v1.7.0; section numbers and
+//! Implements `contracts/formats/plan-header.md` v1.7.1; section numbers and
 //! decision ids below (`§4.1`, `D-2`) point into it.
 //!
 //! **Reading** splits the file into four parts — opening delimiter, header,
@@ -46,7 +46,7 @@ use std::fs::{self, File};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
-pub use criteria::Criterion;
+pub use criteria::{Criterion, TestAction, TestToChange};
 pub use header::{Acceptance, Header, Status};
 pub use sections::{ACCEPTANCE_TESTS_TO_CHANGE, Section};
 
@@ -254,6 +254,13 @@ impl Plan {
             crate::format::values::without_comments(line, &mut in_comment).trim() == "_none_"
         });
         (!says_none).then_some(content)
+    }
+
+    /// The items of `## Acceptance tests to change`, for the commands that hold a
+    /// branch to them (`acceptance-lock.md` §10.2). Empty when it lists none.
+    pub fn tests_to_change(&self) -> Vec<TestToChange> {
+        self.acceptance_tests_to_change()
+            .map_or_else(Vec::new, criteria::parse_tests_to_change)
     }
 
     // --- the command-written fields -----------------------------------------
