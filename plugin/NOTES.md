@@ -501,6 +501,7 @@ needs and ignore the rest — which is what `invar plan guard` does.
 | Verdict | stdout | stderr | Exit |
 |---|---|---|---|
 | **Deny** — the path is an approved Plan's `spec.md` | `hookSpecificOutput` with `permissionDecision: "deny"` and the reason | the reason | **2** |
+| **Deny** — a locked acceptance test, or a digest written by hand (AT-10, below) | the same | the reason | **2** |
 | **Pass** — a draft Plan, any other file | nothing | nothing | 0 |
 | **Unsure** — input it cannot make sense of | `{"systemMessage": "invar plan guard: …; the tool call is allowed"}` | the same text | 0 |
 
@@ -575,6 +576,40 @@ the unit tests, not exercised), and that a deny on `Bash` reads like the one on
 `Edit` above. Check with the recipe in *Reproducing*, using
 `--allowedTools Bash` and a prompt that asks Claude to run
 `invar plan approve` on a throwaway project.
+
+### Locked acceptance tests — added in AT-10
+
+`Write` and `Edit` are also judged for what they do to a file under `acceptance.dir`.
+With no `acceptance:` section nothing is judged, and `invar-lock:` anywhere else is just
+text, such as in invar's own contract.
+
+- The file has a **locked** line, of any ticket, whether or not its digest still
+  matches: denied, naming the file and the ticket, and saying `BLOCKED-TEST`.
+- The call would write a digest into a lock line: denied. That is `content`,
+  `new_string`, or the file an `Edit` would leave, since `new_string` need not repeat
+  the marker. Only `invar acceptance lock` writes one, after it has run the tests.
+- Pending, no line, or a new file: passes. A malformed line in the target passes with
+  the problem reported: it is `acceptance verify`'s to report.
+
+The payloads judged are the two in "What the hook receives". A tool name the guard does
+not know is judged for the Plan only, as before.
+
+**This is not a boundary, any more than the guard on a Plan is (§8).** A `Write|Edit`
+matcher does not see a file changed through `Bash`, and the guard's Bash scan looks for
+commands, not for what they write:
+
+```bash
+sed -i 's/toBe(403)/toBe(200)/' tests/Acceptance/CancelOrderTest.php   # not denied
+```
+
+That change is caught where the boundary is: `plan check`, `done` and `invar acceptance
+verify` all refuse, because the digest no longer matches (`acceptance-lock.md` §10.1).
+
+So is writing the digest through Bash, with one limit. After the edit above, `invar hash
+--lock` prints the new digest, and a second `sed -i` can put it on the line, so the digest
+holds. For another ticket's file, the branch rule still refuses it. For the current
+ticket's own new files nothing in the core does: review and the PR diff catch it
+(`acceptance-lock.md` D-20).
 
 ### End to end, with the real binary
 
