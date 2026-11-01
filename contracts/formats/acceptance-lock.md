@@ -225,9 +225,10 @@ the PR diff are what catch it, as for the Plan's `Approved-checksum`. The lock m
 test visible and deliberate. It does not make one impossible.
 
 **D-21 — Removing the `acceptance:` section disables the check.** With no section there is no
-directory to look in, so `verify` warns that there is nothing to verify, and exits 0. `done` warns
-the same way for a Plan that says `required`, since it closes the cycle, and `plan check` says
-nothing, as it did before this check existed. Pointing `acceptance.dir`
+directory to look in, so `verify` warns that there is nothing to verify, and exits 0. `plan check`
+and `done` give one warning, in the same words, for a Plan that says `required`, because a person
+decided that this ticket needs tests and nothing will check them. For a Plan that says `skipped`
+they say nothing, as before this check existed. Pointing `acceptance.dir`
 somewhere else has the same effect on the files left behind. The change to `invar.yaml` is in
 the PR, so review and the decision log are what notice it. The core does not read an older
 config from git to second-guess the current one.
@@ -500,8 +501,8 @@ and every problem on stderr. `<N>` counts the locked files under `acceptance.dir
 holds, for any ticket.
 
 **No `acceptance:` section** (D-21): `verify` warns on stderr that there is nothing to verify, and
-exits 0. `plan check` goes on as before, and so does `done`, with the same warning when the Plan
-says `required`.
+exits 0. `plan check` and `done` go on as before, with one warning on stderr when the Plan says
+`required`, and nothing added to stderr otherwise.
 
 ## 11. Version history
 

@@ -70,9 +70,8 @@ pub fn for_ticket(
 ) -> Report {
     let mut report = Report::default();
     let Some(acceptance) = &config.acceptance else {
-        // No directory to look in (D-21). Said once, when the cycle closes, and not for
-        // a ticket that never wanted tests.
-        if stage == Stage::Closing && approved.acceptance == Acceptance::Required {
+        // No directory to look in (D-21). Not said for a ticket that never wanted tests.
+        if approved.acceptance == Acceptance::Required {
             report.warnings.push(format!(
                 "{}: the Plan says `Acceptance: required`, and invar.yaml has no `acceptance:` \
                  section, so there is nothing to verify",

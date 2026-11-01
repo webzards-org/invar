@@ -93,8 +93,8 @@
   - `verify` with no ticket is for CI: it needs no Plan and no git, works in a shallow
     clone, and refuses a pending line of any ticket.
 
-  **Upgrading:** nothing changes without an `acceptance:` section, except that `done`
-  warns when the Plan says `required`. With one, `plan check` and `done` refuse inside a
+  **Upgrading:** nothing changes without an `acceptance:` section, except that `plan
+  check` and `done` print one warning on stderr when the Plan says `required`. With one, `plan check` and `done` refuse inside a
   repository whose base branch or merge base cannot be found: fetch it, or set
   `git.base_branch`. Outside git they warn and skip the branch rule. A digest is not a
   signature: for a ticket's own new files, review and the PR diff catch a digest written

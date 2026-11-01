@@ -252,22 +252,30 @@ fn a_plan_approved_under_the_previous_contract_still_passes() {
         .stderr("");
 }
 
+/// These projects have an empty `invar.yaml`, and a `required` Plan with no `acceptance:`
+/// section is the one case `plan check` says something about (`acceptance-lock.md` D-21).
+const NO_SECTION_WARNING: &str = "warning: SHOP-214: the Plan says `Acceptance: required`, and \
+    invar.yaml has no `acceptance:` section, so there is nothing to verify\n";
+
 #[test]
 fn an_approval_with_a_value_passes() {
-    Project::new(&in_full("9.10")).check().success().stderr("");
+    Project::new(&in_full("9.10"))
+        .check()
+        .success()
+        .stderr(NO_SECTION_WARNING);
 }
 
 #[test]
 fn it_prints_the_acceptance_line_for_both_values() {
-    for (number, line) in [
-        ("9.10", "acceptance: required\n"),
-        ("9.2", "acceptance: skipped\n"),
+    for (number, line, stderr) in [
+        ("9.10", "acceptance: required\n", NO_SECTION_WARNING),
+        ("9.2", "acceptance: skipped\n", ""),
     ] {
         Project::new(&in_full(number))
             .check()
             .success()
             .stdout(contains(format!("\n{line}")))
-            .stderr("");
+            .stderr(stderr);
     }
 }
 

@@ -531,17 +531,22 @@ fn outside_git_plan_check_and_done_warn_and_still_check_integrity() {
 // --- no section ------------------------------------------------------------------
 
 #[test]
-fn with_no_section_plan_check_is_silent_and_done_warns_only_for_a_required_plan() {
+fn with_no_section_plan_check_and_done_give_one_warning_in_the_same_words_for_a_required_plan() {
     let project = Project::new();
     project.write("invar.yaml", "");
-    project.plan_check().success().stderr("");
-    let assert = project.done().success();
-    assert!(
-        stderr_of(&assert).contains("nothing to verify"),
-        "{}",
-        stderr_of(&assert)
-    );
+    let check = project.plan_check().success();
+    let warning = stderr_of(&check);
+    assert!(warning.starts_with("warning: SHOP-214:"), "{warning}");
+    assert!(warning.contains("nothing to verify"), "{warning}");
+    assert_eq!(warning.lines().count(), 1, "{warning}");
+    // Still its two lines on stdout.
+    assert_eq!(stdout_of(&check).lines().count(), 2);
 
+    project.done().success().stderr(warning);
+}
+
+#[test]
+fn with_no_section_a_skipped_plan_is_silent() {
     let project = Project::new();
     project.write("invar.yaml", "");
     project.approve("skipped", "");

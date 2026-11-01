@@ -544,8 +544,7 @@ callers:
 
 Outside a git repository the branch rule is skipped with a warning; inside one, a base
 branch or merge base that cannot be found is a problem. With no `acceptance:` section,
-`verify` warns and exits 0, `done` warns for a `required` Plan, and `plan check` says
-nothing. Removing the section disables the check, and review and the decision log are what
+`verify` warns and exits 0, and `plan check` and `done` warn for a `required` Plan. Removing the section disables the check, and review and the decision log are what
 notice it (D-21). A digest is not a signature (D-20).
 
 `done` still runs no tests (A-2); green is the team's CI.
