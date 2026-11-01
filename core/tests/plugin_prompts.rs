@@ -485,6 +485,7 @@ fn every_invar_command_and_flag_the_prompts_name_exists() {
     let mut texts = vec![
         frontmatter("agents/planner.md").1,
         frontmatter("agents/coder.md").1,
+        frontmatter("agents/test-writer.md").1,
         frontmatter("agents/reviewer.md").1,
         skill().1,
         frontmatter("skills/log/SKILL.md").1,
@@ -697,6 +698,168 @@ fn the_conventions_block_the_coder_looks_for_is_the_one_the_cli_prints() {
         .success();
     let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     assert!(out.starts_with("=== invar: conventions ===\n"), "{out}");
+}
+
+// --- the test-writer (AT-11) ------------------------------------------------------------------
+
+#[test]
+fn the_test_writer_has_exactly_its_tools_and_a_strong_model() {
+    let (meta, _) = frontmatter("agents/test-writer.md");
+    let tools: BTreeSet<&str> = meta["tools"].split(',').map(str::trim).collect();
+
+    assert_eq!(meta["name"], "test-writer");
+    assert_eq!(
+        tools,
+        BTreeSet::from(["Read", "Grep", "Glob", "Bash", "Write", "Edit"])
+    );
+    // What it writes is the fixed point the coder is held to (plugin/NOTES.md §14).
+    assert_eq!(meta["model"], "opus");
+    for (key, value) in &meta {
+        assert!(!value.contains(": "), "`{key}` contains `: `");
+        assert!(!value.contains(" #"), "`{key}` contains ` #`");
+    }
+}
+
+#[test]
+fn the_test_writers_description_tells_the_main_session_what_to_give_it_and_what_it_returns() {
+    let (meta, _) = frontmatter("agents/test-writer.md");
+    let description = &meta["description"];
+    assert!(description.contains("ticket line and nothing else"));
+    assert!(description.contains("Acceptance required"));
+    assert!(description.contains("LOCKED"));
+    assert!(description.contains("BLOCKED"));
+}
+
+#[test]
+fn the_test_writer_answers_in_one_of_two_shapes_and_locked_is_tied_to_the_commands_line() {
+    let (_, body) = frontmatter("agents/test-writer.md");
+    let flat = body.replace('\n', " ");
+
+    assert!(
+        body.contains("```\nLOCKED\n<at most 8 lines"),
+        "the LOCKED shape"
+    );
+    assert!(
+        body.contains("```\nBLOCKED <the reason, in one line>\n"),
+        "the BLOCKED shape"
+    );
+    assert!(flat.contains(
+        "Answer `LOCKED` only after `invar acceptance lock <TICKET>` printed \
+         `locked <TICKET> <N> file(s)`"
+    ));
+    // The line it keys on is the one the command prints.
+    assert!(
+        fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/acceptance-lock.md")
+        )
+        .unwrap()
+        .contains("locked <TICKET> <N> file(s)")
+    );
+    // Every reason the procedure stops for.
+    for reason in [
+        "cannot be tested from outside the code",
+        "cannot honestly be made red",
+        "missing test infrastructure",
+    ] {
+        assert!(flat.contains(reason), "{reason}");
+    }
+}
+
+#[test]
+fn the_test_writer_begins_with_plan_check_then_the_spec_and_then_locks() {
+    let flat = frontmatter("agents/test-writer.md").1.replace('\n', " ");
+    let check = flat
+        .find("Run `invar plan check <TICKET>` **before anything else**.")
+        .expect("plan check first");
+    let spec = flat
+        .find("Run `invar acceptance spec <TICKET>`.")
+        .expect("then the spec");
+    let lock = flat
+        .find("Run `invar acceptance lock <TICKET>`")
+        .expect("then lock");
+    assert!(check < spec && spec < lock);
+    assert!(flat.contains("`acceptance:` line says `skipped`"));
+    assert!(flat.contains("answer `BLOCKED <what it said>` and stop"));
+    // Its rounds are capped, and a refusal is never met by asserting less.
+    assert!(flat.contains("at most five runs"));
+    assert!(flat.contains("Never get past it by making a test weaker."));
+    // `lock` runs a suite, and may take longer than a Bash call's default limit.
+    assert!(flat.contains("the longest timeout your Bash tool allows"));
+}
+
+#[test]
+fn the_test_writer_follows_the_spec_and_has_no_branch_by_style_or_framework() {
+    // A new style is a change to the command's output, not to this prompt (A-7, §13b).
+    let (_, body) = frontmatter("agents/test-writer.md");
+    let flat = body.replace('\n', " ");
+    assert!(flat.contains("Follow its conventions exactly"));
+    let lower = body.to_lowercase();
+    for branch in [
+        "gherkin",
+        "if the style",
+        "integration",
+        "pest",
+        "phpunit",
+        "laravel",
+        "pytest",
+    ] {
+        assert!(!lower.contains(branch), "the prompt says `{branch}`");
+    }
+}
+
+#[test]
+fn the_test_writer_changes_only_its_own_tests() {
+    let body = frontmatter("agents/test-writer.md").1;
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("**Change a factory, a seeder, application code or the Plan**"));
+    assert!(flat.contains("**Touch a file with a locked line**"));
+    assert!(flat.contains("Only `invar acceptance lock` writes a digest."));
+    assert!(flat.contains("**Commit, push, or switch branches.**"));
+    assert!(flat.contains("never run `invar plan approve` or `invar done`"));
+}
+
+#[test]
+fn the_test_writers_example_is_valid_for_the_token_and_the_line_it_shows() {
+    // One criterion, negative, with its control probe and the pending line, in a domain
+    // that is not the pilot's. No digest: only `invar acceptance lock` writes one.
+    let (_, body) = frontmatter("agents/test-writer.md");
+    let example = body
+        .split_once("in made-up syntax:\n\n```\n")
+        .unwrap()
+        .1
+        .split_once("\n```")
+        .unwrap()
+        .0;
+    assert!(example.starts_with("# invar-lock: LIB-87\n"), "{example}");
+    assert!(!example.contains("sha256:"), "{example}");
+    assert!(example.contains("test \"AC2 "), "{example}");
+    assert!(example.contains("control probe"), "{example}");
+}
+
+#[test]
+fn the_test_writer_is_never_pointed_at_business_rules_or_the_log() {
+    // DESIGN §5c, as for the coder.
+    let (_, body) = frontmatter("agents/test-writer.md");
+    let mut prohibitions = 0;
+    for line in body.lines() {
+        let points_at_them = line.contains("BUSINESS_CONTEXT")
+            || line.contains(".invar/decisions")
+            || line.contains("invar decision log")
+            || (line.contains("invar context show") && !line.contains("--conventions"));
+        if points_at_them {
+            prohibitions += 1;
+            assert!(
+                line.contains("never") || line.contains("Never"),
+                "the test-writer is pointed at business rules or the log: {line}"
+            );
+        }
+    }
+    assert!(
+        prohibitions >= 2,
+        "the prohibitions themselves went missing"
+    );
+    assert!(body.contains("=== invar: conventions ==="));
+    assert!(body.contains("`invar context show --conventions`"));
 }
 
 // --- the reviewer and /invar:review (M1-20) ------------------------------------------------
