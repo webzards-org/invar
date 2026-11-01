@@ -36,7 +36,9 @@
 //!   `Status: approved`. A draft Plan is edited freely; that is Phase 1 working;
 //! - the path is under `acceptance.dir` and the file has a locked line, of any
 //!   ticket, whether or not its digest still matches. A pending file is the
-//!   test-writer working.
+//!   test-writer working;
+//! - the path is under `acceptance.dir` and the call would write a digest into a lock
+//!   line. Only `invar acceptance lock` writes one, after it has run the tests (A-4).
 //!
 //! Only files under `acceptance.dir` are judged for a lock line, because anywhere else
 //! `invar-lock:` is just text, such as in invar's own contract.
@@ -84,7 +86,7 @@ pub fn decide(input: &[u8], fallback_cwd: &Path) -> Verdict {
         return judge_command(&payload);
     }
     match target(&payload, tool, fallback_cwd) {
-        Ok(path) => judge(&path, tool),
+        Ok(path) => judge(&path, tool, &payload),
         Err(problem) => Verdict::Unsure { problem },
     }
 }
@@ -121,7 +123,7 @@ fn target(payload: &Value, tool: &str, fallback_cwd: &Path) -> Result<PathBuf, S
     Ok(cwd.join(path))
 }
 
-fn judge(path: &Path, tool: &str) -> Verdict {
+fn judge(path: &Path, tool: &str, payload: &Value) -> Verdict {
     // The file may not exist yet (`Write` creates it); its project is found
     // from the nearest directory that does.
     let Some(start) = path.ancestors().find(|dir| dir.exists()) else {
@@ -150,7 +152,7 @@ fn judge(path: &Path, tool: &str) -> Verdict {
         Some(name) => judge_plan(path, &relative, &name),
         // The tools whose payloads are known (`plugin/NOTES.md` §11). Any other keeps
         // what it had: the Plan is all it is judged for.
-        None if matches!(tool, "Write" | "Edit") => judge_test(path, &root, &relative),
+        None if matches!(tool, "Write" | "Edit") => judge_test(path, &root, &relative, payload),
         None => Verdict::Pass,
     }
 }
@@ -216,7 +218,7 @@ fn plan_dir_name(relative: &Path) -> Option<String> {
 
 // --- locked acceptance tests ---------------------------------------------------
 
-fn judge_test(path: &Path, root: &ProjectRoot, relative: &Path) -> Verdict {
+fn judge_test(path: &Path, root: &ProjectRoot, relative: &Path, payload: &Value) -> Verdict {
     let loaded = match config::load(root) {
         Ok(loaded) => loaded,
         Err(err) => {
@@ -235,16 +237,40 @@ fn judge_test(path: &Path, root: &ProjectRoot, relative: &Path) -> Verdict {
         return Verdict::Pass;
     }
 
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        // A test being written for the first time.
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Verdict::Pass,
-        Err(err) => {
-            return Verdict::Unsure {
-                problem: format!("cannot read {}: {err}", relative.display()),
-            };
+    let (existing, target) = match std::fs::read(path) {
+        Ok(bytes) => {
+            let verdict = judge_existing(&bytes, relative);
+            (Some(bytes), verdict)
         }
+        // A test being written for the first time.
+        Err(err) if err.kind() == io::ErrorKind::NotFound => (None, Verdict::Pass),
+        Err(err) => (
+            None,
+            Verdict::Unsure {
+                problem: format!("cannot read {}: {err}", relative.display()),
+            },
+        ),
     };
+    if matches!(target, Verdict::Deny { .. }) {
+        return target;
+    }
+    // Asked even when the target is in doubt: what the call writes is known.
+    if writes_digest(payload, existing.as_deref()) {
+        return Verdict::Deny {
+            reason: format!(
+                "this would write a digest into the `{MARKER}` line of {}. Only `invar acceptance \
+                 lock` writes a digest, after it has run the tests, and writing one by hand skips \
+                 the check that they fail before the code exists. Write the pending line, \
+                 `{MARKER} <TICKET>`, and run `invar acceptance lock <TICKET>`",
+                relative.display()
+            ),
+        };
+    }
+    target
+}
+
+/// The verdict on the file as it stands.
+fn judge_existing(bytes: &[u8], relative: &Path) -> Verdict {
     // Not `read` alone, which refuses any file that is not UTF-8: a file with no marker
     // has no lock, as `acceptance.dir` is walked (`acceptance-lock.md` §9.1).
     if !bytes
@@ -253,7 +279,7 @@ fn judge_test(path: &Path, root: &ProjectRoot, relative: &Path) -> Verdict {
     {
         return Verdict::Pass;
     }
-    match lock::read(&bytes) {
+    match lock::read(bytes) {
         Ok(Some(line)) if line.recorded.is_some() => Verdict::Deny {
             reason: format!(
                 "{} is a locked acceptance test of {ticket}. Neither the coder nor the \
@@ -273,6 +299,42 @@ fn judge_test(path: &Path, root: &ProjectRoot, relative: &Path) -> Verdict {
             problem: format!("{}: {err}", relative.display()),
         },
     }
+}
+
+/// Whether the `Write` or `Edit` in `payload` puts a digest into a lock line. `existing`
+/// is the file as it is, if it is there.
+///
+/// An `Edit` is also judged by the file it would leave, because `new_string` need not
+/// hold the marker: replacing `SHOP-214` with `SHOP-214 sha256:…` writes a digest into
+/// the line all the same. A digest the file already had is not this call's doing: a
+/// malformed one stays `acceptance verify`'s to report, and may be being fixed.
+fn writes_digest(payload: &Value, existing: Option<&[u8]>) -> bool {
+    let input = payload.get("tool_input");
+    let text_of = |key: &str| input.and_then(|i| i.get(key)).and_then(Value::as_str);
+    if let Some(content) = text_of("content") {
+        return lock::holds_digest(content);
+    }
+    let Some(new) = text_of("new_string") else {
+        return false;
+    };
+    if lock::holds_digest(new) {
+        return true;
+    }
+    let before = existing.and_then(|bytes| std::str::from_utf8(bytes).ok());
+    let (Some(before), Some(old)) = (before, text_of("old_string").filter(|old| !old.is_empty()))
+    else {
+        return false;
+    };
+    let replace_all = input
+        .and_then(|i| i.get("replace_all"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let after = if replace_all {
+        before.replace(old, new)
+    } else {
+        before.replacen(old, new, 1)
+    };
+    lock::holds_digest(&after) && !lock::holds_digest(before)
 }
 
 /// Whether `relative` is a path below `dir`, as `acceptance.dir` may write it (`./t`).

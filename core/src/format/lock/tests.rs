@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::{LockError, LockLine, read, with_digest};
+use super::{LockError, LockLine, holds_digest, read, with_digest};
 use crate::digest::{canonicalize, digest};
 
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -611,5 +611,51 @@ fn every_error_names_its_line_and_what_to_do() {
         for part in expected {
             assert!(message.contains(part), "{part}: {message}");
         }
+    }
+}
+
+// --- holds_digest -----------------------------------------------------------------
+
+#[test]
+fn holds_digest_finds_a_digest_on_a_lock_line_wherever_it_stands() {
+    let digest = format!("sha256:{}", "ab".repeat(32));
+    for text in [
+        format!("# invar-lock: SHOP-214 {digest}\n"),
+        format!("/* invar-lock: SHOP-214 {digest} */"),
+        format!("first\r\n// invar-lock: SHOP-214 {digest}\r\nlast"),
+        format!("first\r// invar-lock: SHOP-214 {digest}\rlast"),
+        // Past the window, and beside another line: `read` would call these other errors.
+        format!("{}# invar-lock: SHOP-214 {digest}\n", "x\n".repeat(20)),
+        format!("# invar-lock: SHOP-214\n# invar-lock: SHOP-215 {digest}\n"),
+    ] {
+        assert!(holds_digest(&text), "{text:?}");
+    }
+}
+
+#[test]
+fn holds_digest_counts_a_malformed_sha256_field_after_a_ticket() {
+    for text in [
+        "# invar-lock: SHOP-214 sha256:abc\n",
+        "# invar-lock: SHOP-214 by-hand sha256:abc\n",
+        "# invar-lock: SHOP-214\tsha256:abc\n",
+    ] {
+        assert!(holds_digest(text), "{text:?}");
+    }
+}
+
+#[test]
+fn holds_digest_is_false_for_what_is_not_a_digest_on_a_lock_line() {
+    let digest = format!("sha256:{}", "ab".repeat(32));
+    for text in [
+        "",
+        "# invar-lock: SHOP-214\n",
+        "# invar-lock: SHOP-214 written by the test-writer\n",
+        "# invar-lock:\n",
+        "# invar-lock: shop-214\n",
+        &format!("the digest is {digest}\n"),
+        &format!("# invar-lock: SHOP-214\n{digest}\n"),
+        &format!("# invar-lock: shop-214 {digest}\n"),
+    ] {
+        assert!(!holds_digest(text), "{text:?}");
     }
 }

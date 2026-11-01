@@ -88,6 +88,23 @@ pub fn with_digest(bytes: &[u8], ticket: &str) -> Result<Vec<u8>, LockError> {
     Ok(written)
 }
 
+/// Whether any line of `text` is a lock line with a digest, or with a malformed
+/// `sha256:` field after its ticket (§2, D-5).
+///
+/// For a piece of text that is not a whole file, such as what an edit puts in: the window
+/// and the one-line rule of §3 say nothing about a fragment, so [`read`] cannot answer.
+/// A line whose ticket is malformed has no digest to speak of, and is §3.1's to report.
+pub fn holds_digest(text: &str) -> bool {
+    digest::canonicalize(text).split('\n').any(|line| {
+        line.split_once(MARKER).is_some_and(|(_, after_marker)| {
+            matches!(
+                fields(after_marker, 0),
+                Ok((_, Some(_))) | Err(LockError::Digest { .. })
+            )
+        })
+    })
+}
+
 /// Canonical text keeps every line number of the file above its trailing blank
 /// lines, and a lock line is never blank, so the numbers here are the file's (§3).
 fn parse(canonical: &str) -> Result<Option<LockLine>, LockError> {
