@@ -4,7 +4,5 @@
 //! The test-writer's prompt stays one fixed text for every project and style (A-7,
 //! §13b). What changes with configuration is the output of these commands.
 
-// `invar acceptance lock` arrives over the next commits of AT-8; remove this with it.
-#[allow(dead_code)]
 pub mod lock;
 pub mod spec;

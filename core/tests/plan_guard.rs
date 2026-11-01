@@ -205,6 +205,16 @@ fn the_test_writers_command_passes_silently() {
         .stderr("");
 }
 
+#[test]
+fn the_test_writers_lock_passes_silently() {
+    // Its own step, and so not on `HUMAN_ONLY`. `--relock` is the developer's (AT-13).
+    let project = Project::new(APPROVED);
+    guard(bash(&project.root(), "invar acceptance lock SHOP-214"))
+        .code(0)
+        .stdout("")
+        .stderr("");
+}
+
 // --- allow ----------------------------------------------------------------------
 
 #[test]

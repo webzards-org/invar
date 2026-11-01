@@ -114,8 +114,6 @@ enum Open {
 
 /// Read the test cases of a report, in document order. The first problem in the
 /// document is the one reported (§6).
-// `invar acceptance lock` is the caller (AT-8); remove this with its arrival.
-#[allow(dead_code)]
 pub fn read(bytes: &[u8], root: &Path) -> Result<Vec<TestCase>, JunitError> {
     let text = std::str::from_utf8(bytes).map_err(|err| JunitError::NotXml {
         reason: format!(

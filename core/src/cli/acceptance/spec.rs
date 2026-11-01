@@ -34,12 +34,17 @@ pub fn run(args: Args) -> Result<()> {
             Ok(())
         }
         Err(err) => {
-            // `plan check` lists these on stdout, and its error points at the list.
-            if let SpecError::NotApproved(CheckError::Invalid(report)) = &err {
-                let shown = target::shown(&report.spec, &cwd);
-                eprint!("{}", report.problems.render(Path::new(&shown)));
-            }
+            show_problems(&err, &cwd);
             Err(err.into())
         }
+    }
+}
+
+/// `plan check` lists a Plan's problems on stdout, and its error points at the list.
+/// Here the list goes to stderr, because stdout stays empty on a refusal.
+pub(super) fn show_problems(err: &SpecError, cwd: &Path) {
+    if let SpecError::NotApproved(CheckError::Invalid(report)) = err {
+        let shown = target::shown(&report.spec, cwd);
+        eprint!("{}", report.problems.render(Path::new(&shown)));
     }
 }
