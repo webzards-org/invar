@@ -1,6 +1,6 @@
 # Contract: `invar.yaml`
 
-**Version:** 2.2.1 — `acceptance.run` is now executed; see §11
+**Version:** 2.2.2 — `--colors=never` in the examples of `acceptance.run`; see §11
 **Status:** stable
 **Implements:** §6 (Config file), §13c (the review's base branch), §14.3; light
 mode L-2 and L-7 (`docs/TASKS-M1.md`); A-2, A-6 and A-7 (`docs/TASKS-AT.md`)
@@ -158,7 +158,7 @@ acceptance:
   required: true                  # default when the section is present
   style: integration              # integration | gherkin (reserved)
   dir: tests/Acceptance           # required
-  run: ["vendor/bin/pest", "--log-junit", "{report}", "{files}"]   # required
+  run: ["vendor/bin/pest", "--colors=never", "--log-junit", "{report}", "{files}"]   # required
   fakes_allowed: [http, mail, queue, notification]                 # default []
 ```
 
@@ -188,6 +188,9 @@ string is an error with its own message saying to write a list; it is never spli
 |---|---|---|
 | `{report}` | Exactly once, as a whole element | One path the core chooses |
 | `{files}` | Exactly once, as a whole element | Zero or more arguments, one per test file |
+
+The examples pass `--colors=never` because the runner's output is shown as it is when the
+tests did not run, and colour codes would make it unreadable there.
 
 `{files}` is required because without it, locking the tests of one ticket would run
 the whole suite. A **placeholder** is `{`, then one or more letters, digits, `_` or
@@ -514,7 +517,7 @@ acceptance:
   required: true
   style: integration
   dir: tests/Acceptance
-  run: ["vendor/bin/pest", "--log-junit", "{report}", "{files}"]
+  run: ["vendor/bin/pest", "--colors=never", "--log-junit", "{report}", "{files}"]
   fakes_allowed: [http, mail, queue, notification]
 ```
 
@@ -526,7 +529,7 @@ Reads as written. No warnings.
 ```yaml
 acceptance:
   dir: tests/Acceptance
-  run: ["vendor/bin/pest", "--log-junit", "{report}", "{files}"]
+  run: ["vendor/bin/pest", "--colors=never", "--log-junit", "{report}", "{files}"]
 ```
 
 Reads as `required: true` (D-10), `style: integration` and no `fakes_allowed`.
@@ -560,7 +563,7 @@ where to write it.
 acceptance:
   style: gherkin
   dir: tests/Acceptance
-  run: ["vendor/bin/pest", "--log-junit", "{report}", "{files}"]
+  run: ["vendor/bin/pest", "--colors=never", "--log-junit", "{report}", "{files}"]
 ```
 
 **Why:** the value is reserved (A-7). The message names it and says it arrives later,
@@ -572,12 +575,15 @@ so it is not mistaken for a typo.
 ```yaml
 acceptance:
   dir: ../shared/tests
-  run: ["vendor/bin/pest", "--log-junit", "{report}", "{files}"]
+  run: ["vendor/bin/pest", "--colors=never", "--log-junit", "{report}", "{files}"]
 ```
 
 **Why:** the tests the core runs and locks stay inside the project.
 
 ## 11. Version history
+
+**2.2.2 — `--colors=never` in the examples (AT-11).** Pest's colour codes reached the messages
+of `invar acceptance lock`. No key, value or rule changes.
 
 **2.2.1 — `acceptance.run` is executed (AT-8).** §3.6 no longer says that the core does
 not run it. No key, value or rule changes, so every valid file stays valid.

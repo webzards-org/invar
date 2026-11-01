@@ -103,7 +103,7 @@ scenarios: false
 # acceptance:
 #   required: true          # default true: the default for `plan approve`
 #   dir: tests/Acceptance
-#   run: [\"vendor/bin/pest\", \"--log-junit\", \"{report}\", \"{files}\"]
+#   run: [\"vendor/bin/pest\", \"--colors=never\", \"--log-junit\", \"{report}\", \"{files}\"]
 #   fakes_allowed: [http, mail, queue, notification]
 ";
 
