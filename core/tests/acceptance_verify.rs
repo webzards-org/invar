@@ -548,3 +548,210 @@ fn with_no_section_plan_check_is_silent_and_done_warns_only_for_a_required_plan(
     project.plan_check().success().stderr("");
     project.done().success().stderr("");
 }
+
+// --- invar acceptance verify --------------------------------------------------------
+
+impl Project {
+    fn verify(&self) -> Assert {
+        self.invar(&["acceptance", "verify"])
+    }
+
+    fn verify_ticket(&self) -> Assert {
+        self.invar(&["acceptance", "verify", "SHOP-214"])
+    }
+}
+
+#[test]
+fn verify_with_no_ticket_counts_the_locked_files_on_one_line() {
+    let project = Project::new();
+    project.lock_mine();
+    project
+        .verify()
+        .success()
+        .stdout("verified 2 locked file(s)\n")
+        .stderr("");
+}
+
+#[test]
+fn a_one_character_change_makes_both_forms_of_verify_refuse_naming_the_file_and_its_ticket() {
+    let project = with_one_character_changed();
+    refused(
+        project.verify(),
+        &[OTHERS, "locked for SHOP-1", "changed after it was locked"],
+    );
+    refused(project.verify_ticket(), &[OTHERS, "locked for SHOP-1"]);
+    assert!(project.exists(SPEC));
+}
+
+#[test]
+fn verify_with_no_ticket_refuses_a_pending_line_of_any_ticket() {
+    let project = Project::new();
+    project.write(
+        "tests/Acceptance/more_test.php",
+        &format!("// invar-lock: SHOP-9\n{TEXT}"),
+    );
+    refused(
+        project.verify(),
+        &["more_test.php", "pending line for SHOP-9"],
+    );
+}
+
+#[test]
+fn verify_with_no_ticket_works_with_no_git_repository_and_no_plan() {
+    let project = Project::new();
+    fs::remove_dir_all(project.root().join(".git")).unwrap();
+    fs::remove_dir_all(project.root().join(".invar")).unwrap();
+    project
+        .verify()
+        .success()
+        .stdout("verified 1 locked file(s)\n")
+        .stderr("");
+
+    project.write(MINE, &format!("// invar-lock: SHOP-214\n{TEXT}"));
+    refused(project.verify(), &[MINE, "pending line for SHOP-214"]);
+}
+
+#[test]
+fn verify_with_no_ticket_works_in_a_shallow_clone_after_the_plan_is_gone() {
+    let project = Project::new();
+    project.lock_mine();
+    project.done().success();
+    project.commit("the work, with the Plan gone");
+
+    let clone = tempfile::tempdir().unwrap();
+    let url = format!("file://{}", project.root().display());
+    let output = std::process::Command::new("git")
+        .args([
+            "clone",
+            "-q",
+            "--depth",
+            "1",
+            "--branch",
+            "feat/SHOP-214-cancel",
+        ])
+        .arg(&url)
+        .arg(clone.path())
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", project.root().join(".gitconfig-test"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(clone.path())
+        .args(["acceptance", "verify"])
+        .assert()
+        .success()
+        .stdout("verified 2 locked file(s)\n");
+}
+
+#[test]
+fn verify_with_a_missing_directory_verifies_nothing() {
+    let project = Project::new();
+    fs::remove_dir_all(project.root().join("tests")).unwrap();
+    project
+        .verify()
+        .success()
+        .stdout("verified 0 locked file(s)\n");
+}
+
+#[test]
+fn verify_with_a_ticket_makes_the_check_done_makes_and_deletes_nothing() {
+    let project = Project::new();
+    // No locked test.
+    refused(
+        project.verify_ticket(),
+        &["no file under tests/Acceptance is locked"],
+    );
+
+    // A pending line left.
+    project.write(MINE, &format!("// invar-lock: SHOP-214\n{TEXT}"));
+    refused(
+        project.verify_ticket(),
+        &[MINE, "pending line for SHOP-214"],
+    );
+
+    // Another ticket's test changed, with the digest written by hand.
+    project.lock_mine();
+    let weaker = project.locked("SHOP-1", "it('AC1 works', fn () => true);\n");
+    project.write(OTHERS, &weaker);
+    refused(project.verify_ticket(), &[OTHERS, "changed on this branch"]);
+    // The form CI runs cannot see that one, which is why the other callers exist (D-17).
+    project.verify().success();
+
+    // Declared.
+    project.approve("required", &format!("- {OTHERS} — change — the rule moved"));
+    project
+        .verify_ticket()
+        .success()
+        .stdout("verified 2 locked file(s)\n");
+    assert!(project.exists(SPEC));
+    assert_eq!(project.git(&["diff", "--cached", "--name-only"]), "");
+}
+
+#[test]
+fn verify_with_a_ticket_refuses_a_plan_that_is_not_approved() {
+    let project = Project::new();
+    project.lock_mine();
+    let edited = project
+        .read(SPEC)
+        .replace("controllers stay thin", "controllers grow");
+    project.write(SPEC, &edited);
+    refused(project.verify_ticket(), &["changed after it was approved"]);
+}
+
+#[test]
+fn verify_says_every_problem_at_once() {
+    let project = Project::new();
+    let changed = project.read(OTHERS).replace("toBeTrue", "toBeFalse");
+    project.write(OTHERS, &changed);
+    project.write("tests/Acceptance/bad_test.php", "// invar-lock: shop-1\n");
+    project.write(
+        "tests/Acceptance/more_test.php",
+        &format!("// invar-lock: SHOP-9\n{TEXT}"),
+    );
+    refused(
+        project.verify(),
+        &[
+            "(3 problems)",
+            OTHERS,
+            "bad_test.php: line 1",
+            "more_test.php",
+        ],
+    );
+}
+
+#[test]
+fn with_no_section_verify_warns_and_exits_zero_in_both_forms() {
+    let project = Project::new();
+    project.write("invar.yaml", "");
+    for assert in [project.verify(), project.verify_ticket()] {
+        let assert = assert.success().stdout("");
+        assert!(
+            stderr_of(&assert).contains("nothing to verify"),
+            "{}",
+            stderr_of(&assert)
+        );
+    }
+    // The Plan is not looked for either, since it may be gone by then.
+    fs::remove_dir_all(project.root().join(".invar")).unwrap();
+    project.verify_ticket().success().stdout("");
+}
+
+#[test]
+fn verify_works_from_a_subdirectory() {
+    let project = Project::new();
+    project.lock_mine();
+    Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(project.root().join("tests/Acceptance"))
+        .args(["acceptance", "verify"])
+        .assert()
+        .success()
+        .stdout("verified 2 locked file(s)\n");
+}

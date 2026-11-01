@@ -215,6 +215,21 @@ fn the_test_writers_lock_passes_silently() {
         .stderr("");
 }
 
+#[test]
+fn verifying_the_locks_passes_silently() {
+    // An agent's command, with or without a ticket, and so not on `HUMAN_ONLY`.
+    let project = Project::new(APPROVED);
+    for command in [
+        "invar acceptance verify",
+        "invar acceptance verify SHOP-214",
+    ] {
+        guard(bash(&project.root(), command))
+            .code(0)
+            .stdout("")
+            .stderr("");
+    }
+}
+
 // --- allow ----------------------------------------------------------------------
 
 #[test]

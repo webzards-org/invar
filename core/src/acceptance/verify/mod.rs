@@ -126,8 +126,6 @@ fn closing(files: &[Scanned], approved: &Approved, dir: &str, report: &mut Repor
 
 /// What `invar acceptance verify` with no ticket checks: §10.1, and a pending line
 /// anywhere is a problem (D-17, D-18). Needs no Plan, and never runs git.
-// `invar acceptance verify` is the caller (AT-9); remove this with its arrival.
-#[allow(dead_code)]
 pub fn whole_directory(root: &ProjectRoot, config: &AcceptanceConfig) -> Report {
     let mut report = Report::default();
     for file in integrity(root, &config.dir, &mut report) {
