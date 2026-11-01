@@ -488,6 +488,7 @@ fn every_invar_command_and_flag_the_prompts_name_exists() {
         frontmatter("agents/test-writer.md").1,
         frontmatter("agents/reviewer.md").1,
         skill().1,
+        frontmatter("skills/approve/SKILL.md").1,
         frontmatter("skills/log/SKILL.md").1,
         frontmatter("skills/log-approve/SKILL.md").1,
     ];
@@ -1218,7 +1219,10 @@ fn approve_starts_phase_2_only_on_the_recorded_line() {
     let (meta, body) = frontmatter("skills/approve/SKILL.md");
     let flat = body.replace('\n', " ");
 
-    assert_eq!(meta["argument-hint"], "[ticket] [--no-start]");
+    assert_eq!(
+        meta["argument-hint"],
+        "[ticket] [--acceptance | --no-acceptance] [--no-start]"
+    );
     let condition = flat
         .find("**If the output contains the line `approved <TICKET> checksum sha256:…`**")
         .expect("the start is conditional on the recorded line");
@@ -1229,12 +1233,15 @@ fn approve_starts_phase_2_only_on_the_recorded_line() {
         .find("**Start Phase 2 for that ticket now**")
         .expect("the start instruction");
     let otherwise = flat
-        .find("**Otherwise, stop.** Write no code and start no coder.")
+        .find("**Otherwise, stop.** Write no code and start no agent.")
         .expect("what to do without the line");
     assert!(condition < no_start && no_start < start && start < otherwise);
-    // Phase 2 as the protocol describes it: the check first, then the coder.
-    assert!(flat.contains("run `invar plan check <TICKET>` first"));
-    assert!(flat.contains("with the ticket line and nothing else"));
+    // Phase 2 as the protocol describes it, and only there: a second copy of the
+    // dispatch here could only disagree with it.
+    assert!(flat.contains("as the \"Phase 2\" section of the protocol skill (`invar`)"));
+    for dispatch in ["test-writer", "`acceptance:`", "invar acceptance verify"] {
+        assert!(!flat.contains(dispatch), "the skill says {dispatch}");
+    }
     assert!(flat.contains("never by your own reading"));
     // And still never runs the approval itself.
     assert!(body.contains("Do not run `invar plan approve` yourself"));
@@ -1245,6 +1252,43 @@ fn approve_starts_phase_2_only_on_the_recorded_line() {
     assert!(protocol.contains("`approved <TICKET> checksum sha256:…`"));
     assert!(protocol.contains("`Phase 2: not started (--no-start)`"));
     assert!(!protocol.contains("When the developer tells you the Plan is approved, go on."));
+}
+
+#[test]
+fn approve_passes_both_acceptance_flags_through_a_block_that_is_unchanged() {
+    // The developer's decision reaches the CLI through `$ARGUMENTS`, so neither
+    // the block nor what it is allowed to run has to name a flag.
+    let (meta, _) = frontmatter("skills/approve/SKILL.md");
+    assert_eq!(meta["allowed-tools"], "Bash(invar plan approve *)");
+    assert_eq!(meta["disable-model-invocation"], "true");
+    assert_eq!(
+        shell_block("skills/approve/SKILL.md"),
+        "invar plan approve --skill $ARGUMENTS"
+    );
+
+    let help = Command::cargo_bin("invar")
+        .unwrap()
+        .args(["plan", "approve", "--help"])
+        .assert()
+        .success();
+    let help = String::from_utf8(help.get_output().stdout.clone()).unwrap();
+    for flag in meta["argument-hint"]
+        .split(|c: char| !(c.is_ascii_lowercase() || c == '-'))
+        .filter(|word| word.starts_with("--"))
+    {
+        assert!(help.contains(flag), "`plan approve` has no {flag}");
+    }
+}
+
+#[test]
+fn approve_shows_a_flag_that_changed_nothing_and_starts_nothing() {
+    // AT-3: on an approval that holds, a flag naming another value is not applied.
+    let flat = frontmatter("skills/approve/SKILL.md").1.replace('\n', " ");
+    let otherwise = flat.find("**Otherwise, stop.**").unwrap();
+    let flag = flat
+        .find("if a line under it says a flag changed nothing, make sure the developer sees")
+        .expect("the line is shown");
+    assert!(otherwise < flag);
 }
 
 #[test]
