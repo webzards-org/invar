@@ -34,6 +34,8 @@
 //!
 //! - the path is an existing `.invar/plans/<name>/spec.md` whose header says
 //!   `Status: approved`. A draft Plan is edited freely; that is Phase 1 working;
+//! - the path is the unlock record of a Plan, whether or not it exists yet. Only
+//!   `invar acceptance unlock` and `invar acceptance lock` write it;
 //! - the path is under `acceptance.dir` and the file has a locked line, of any
 //!   ticket, whether or not its digest still matches. A pending file is the
 //!   test-writer working;
@@ -51,7 +53,7 @@ use serde_json::Value;
 use crate::format::config;
 use crate::format::lock::{self, MARKER};
 use crate::format::plan::{Mode, Plan, Status};
-use crate::fs::plans::SPEC_FILE;
+use crate::fs::plans::{SPEC_FILE, UNLOCK_FILE};
 use crate::fs::{ProjectRoot, RootError};
 
 #[cfg(test)]
@@ -148,7 +150,18 @@ fn judge(path: &Path, tool: &str, payload: &Value) -> Verdict {
             };
         }
     };
-    match plan_dir_name(&relative) {
+    if plan_dir_name(&relative, UNLOCK_FILE).is_some() {
+        return Verdict::Deny {
+            reason: format!(
+                "{} is the unlock record. It says which locked tests the developer unlocked, and \
+                 only `invar acceptance unlock`, through `/invar:relock`, and `invar acceptance \
+                 lock` write it, so it is not edited through any tool. If a locked test is wrong, \
+                 stop and answer `BLOCKED-TEST <file> <AC> <reason>`; the developer decides",
+                relative.display()
+            ),
+        };
+    }
+    match plan_dir_name(&relative, SPEC_FILE) {
         Some(name) => judge_plan(path, &relative, &name),
         // The tools whose payloads are known (`plugin/NOTES.md` §11). Any other keeps
         // what it had: the Plan is all it is judged for.
@@ -201,8 +214,8 @@ fn judge_plan(path: &Path, relative: &Path, name: &str) -> Verdict {
     }
 }
 
-/// `<name>` when `relative` is `.invar/plans/<name>/spec.md`.
-fn plan_dir_name(relative: &Path) -> Option<String> {
+/// `<name>` when `relative` is `.invar/plans/<name>/<file>`.
+fn plan_dir_name(relative: &Path, file: &str) -> Option<String> {
     let parts: Vec<&str> = relative
         .components()
         .map(|part| match part {
@@ -211,7 +224,7 @@ fn plan_dir_name(relative: &Path) -> Option<String> {
         })
         .collect::<Option<_>>()?;
     match parts.as_slice() {
-        [".invar", "plans", name, SPEC_FILE] => Some((*name).to_owned()),
+        [".invar", "plans", name, last] if *last == file => Some((*name).to_owned()),
         _ => None,
     }
 }
@@ -370,6 +383,9 @@ struct HumanOnly {
 ///
 /// `done` deletes the approved Plan and closes the cycle: the developer runs it,
 /// with `/invar:done` or from a terminal, or CI does, when the work is finished.
+///
+/// `acceptance unlock` takes the lock off a test, and the next `lock` of that file
+/// skips the red check (`acceptance-lock.md` §11).
 const HUMAN_ONLY: &[HumanOnly] = &[
     HumanOnly {
         words: &["plan", "approve"],
@@ -386,6 +402,10 @@ const HUMAN_ONLY: &[HumanOnly] = &[
     HumanOnly {
         words: &["done"],
         reason: done_reason,
+    },
+    HumanOnly {
+        words: &["acceptance", "unlock"],
+        reason: acceptance_unlock_reason,
     },
 ];
 
@@ -443,6 +463,18 @@ fn done_reason(target: &str) -> String {
          cycle is ready to close and wait: they close it themselves, with `/invar:done \
          {target}`, or CI does. {}",
         mention("done")
+    )
+}
+
+fn acceptance_unlock_reason(target: &str) -> String {
+    format!(
+        "`invar acceptance unlock` is the developer's decision, not yours: it takes the lock \
+         off a test, and the next `invar acceptance lock` of that file skips the check that it \
+         fails first. Do not run it, and do not look for another way to do the same thing. Say \
+         which test you believe is wrong and why (the coder answers `BLOCKED-TEST <file> <AC> \
+         <reason>`) and wait: the developer unlocks it themselves, with `/invar:relock {target} \
+         <file>`. {}",
+        mention("acceptance unlock")
     )
 }
 

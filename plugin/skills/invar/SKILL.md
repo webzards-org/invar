@@ -121,8 +121,9 @@ things.
 
 - **`LOCKED`** and a short summary — run `invar acceptance verify <TICKET>`. **Only if
   it passes**, printing `verified <N> locked file(s)`, start the coder. The agent's word
-  is not the check; the command is. If `verify` refuses, or prints anything else, tell
-  the developer what it said, in its words, start no coder, and stop.
+  is not the check; the command is. If `verify` refuses, or that line is not there, tell
+  the developer what it said, in its words, start no coder, and stop. Lines beside it
+  saying `unlocked by the developer:` are information.
 - **`BLOCKED <reason>`** — put it to the developer, as it gave it, and stop. Start no
   coder. Say what the developer can do:
   - fix the cause (test infrastructure, a factory), and ask you to go on: you begin
@@ -143,11 +144,12 @@ things.
 Plan declares them, with the ticket line and nothing else. It runs the check again itself, reads the Plan and the project's
 conventions, implements inside the Scope, and runs the project's own checks.
 
-It answers with one of two things.
+It answers with one of three things.
 
 - **`DONE`** and a short summary — tell the developer what it says, as it says it,
   and go to Closing.
-- **`BLOCKED <reason>`** — see the next section.
+- **`BLOCKED <reason>`** — see "When the coder answers BLOCKED".
+- **`BLOCKED-TEST <file> <AC> <reason>`** — see "When the coder answers BLOCKED-TEST".
 
 If the developer wants something changed in the coder's work, start the coder again
 with the ticket line and the developer's request, verbatim. You still do not edit
@@ -181,6 +183,26 @@ change the approved Plan themselves, they edit it and approve it again with
 **Never edit the approved Plan** — with any tool, however small the edit. A hook
 refuses edits made through `Write` and `Edit`; an edit made through a shell is caught
 by `invar plan check` and `invar done`, and is no more allowed.
+
+## When the coder answers BLOCKED-TEST
+
+`BLOCKED-TEST` means the coder believes a locked acceptance test contradicts its
+criterion or the Plan. The coder must not be the one who decides that, and neither must
+you. **Put it to the developer, as it was given, and stop.** Start no agent. Say what the
+developer can do:
+
+- if they agree the test is wrong, unlock it: `/invar:relock <TICKET> <file>`;
+- if they do not, tell you to start the coder again, with their words, and it goes on;
+- or end the cycle as `failed`, with `/invar:log`.
+
+**After `/invar:relock` succeeds**, and only then, start the test-writer with the ticket
+line and nothing else. Its answers are handled as under `acceptance: required`: on
+`LOCKED`, run `invar acceptance verify <TICKET>`, and only if it passes, start the
+**coder** again with the ticket line. On its `BLOCKED`, put it to the developer and stop.
+
+Never start the test-writer on your own reading of a `BLOCKED-TEST`, and never unlock a
+test yourself. A ticket has two rounds of this. A third `/invar:relock` is refused, and
+says to end the cycle as `failed`.
 
 ## Closing
 
@@ -269,6 +291,8 @@ implementing it.
 - start the coder for a `required` ticket before `invar acceptance verify` passes;
 - edit or write tests yourself, or run `invar acceptance lock`: that is the
   test-writer's;
+- run `invar acceptance unlock`, or start the test-writer on a `BLOCKED-TEST` before
+  `/invar:relock` has succeeded: that is the developer's;
 - answer the planner's questions for the developer;
 - record a decision entry: never `invar decision approve`, never `invar decision record`
   — the developer records it, with `/invar:log-approve`;
@@ -284,6 +308,7 @@ implementing it.
 | `invar acceptance verify <TICKET>` | yours, after the test-writer's `LOCKED`; the coder starts only if it passes |
 | `invar plan validate <TICKET>` | form of a draft Plan (the planner runs it) |
 | `/invar:approve` | the developer's; `--acceptance` or `--no-acceptance` decides whether the ticket gets acceptance tests (otherwise `invar.yaml`); starts Phase 2 when the approval is recorded, unless `--no-start` |
+| `/invar:relock <TICKET> <file>...` | the developer's, after a `BLOCKED-TEST`: runs `invar acceptance unlock`; you start the test-writer when it succeeds |
 | `/invar:review` | the developer's, before `done`, unless `review.offer: false` |
 | `/invar:log` | the developer's: drafts the decision entry, at the end of Phase 2 or after `BLOCKED` |
 | `invar decision validate <TICKET>` | form of a draft entry (`/invar:log` runs it) |

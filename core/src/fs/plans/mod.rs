@@ -41,6 +41,9 @@ mod tests;
 /// The file inside a Plan directory that holds the Plan (§2).
 pub const SPEC_FILE: &str = "spec.md";
 
+/// The unlock record, beside the Plan (`acceptance-lock.md` §11.2).
+pub const UNLOCK_FILE: &str = "unlocked";
+
 /// A Plan directory whose name has the contract's shape and that holds a
 /// `spec.md`.
 #[derive(Debug, Clone, PartialEq, Eq)]

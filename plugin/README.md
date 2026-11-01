@@ -20,6 +20,7 @@ plugin/
 ├── agents/planner.md            Phase 1: a ticket becomes a draft Plan
 ├── skills/invar/SKILL.md        the cycle, as the main session lives it
 ├── skills/approve/SKILL.md      /invar:approve — the developer's gate
+├── skills/relock/SKILL.md       /invar:relock — the developer unlocks a wrong test
 ├── skills/review/SKILL.md       /invar:review — the advisory review
 ├── skills/log/SKILL.md          /invar:log — drafts the decision entry
 ├── skills/log-approve/SKILL.md  /invar:log-approve — the developer records it

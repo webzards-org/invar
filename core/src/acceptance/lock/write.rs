@@ -48,6 +48,19 @@ pub fn prepare(
     ticket: &str,
     files: &[TestFile],
 ) -> Result<Vec<Prepared>, WriteError> {
+    prepare_with(root, files, |bytes| {
+        let digest = lock::read(bytes)?.ok_or(LineError::NoLine)?.digest;
+        Ok((lock::with_digest(bytes, ticket)?, digest))
+    })
+}
+
+/// Steps 1 and 2 of §9.4, with `change` saying what each file becomes, and what to report
+/// for it. Used for unlocking too (§11.2).
+pub fn prepare_with(
+    root: &ProjectRoot,
+    files: &[TestFile],
+    change: impl Fn(&[u8]) -> Result<(Vec<u8>, String), LineError>,
+) -> Result<Vec<Prepared>, WriteError> {
     let changed: Vec<String> = files
         .iter()
         .filter(|file| fs::read(root.path().join(&file.path)).ok().as_ref() != Some(&file.bytes))
@@ -59,15 +72,10 @@ pub fn prepare(
 
     let mut prepared = Vec::with_capacity(files.len());
     for file in files {
-        let line = |source| WriteError::Line {
+        let (bytes, digest) = change(&file.bytes).map_err(|source| WriteError::Line {
             path: file.path.clone(),
             source,
-        };
-        let digest = lock::read(&file.bytes)
-            .map_err(line)?
-            .ok_or_else(|| line(LineError::NoLine))?
-            .digest;
-        let bytes = lock::with_digest(&file.bytes, ticket).map_err(line)?;
+        })?;
 
         let target = root.path().join(&file.path);
         let entry = Prepared {

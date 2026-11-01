@@ -34,7 +34,7 @@ fn config() -> AcceptanceConfig {
 
 #[test]
 fn the_parts_come_in_their_fixed_order() {
-    let out = render(&plan(), &config());
+    let out = render(&plan(), &config(), &[]);
     let mut last = 0;
     for heading in [
         "=== invar acceptance spec: SHOP-214 ===",
@@ -55,7 +55,7 @@ fn the_parts_come_in_their_fixed_order() {
 
 #[test]
 fn the_ticket_goes_into_the_lock_line() {
-    let out = render(&plan(), &config());
+    let out = render(&plan(), &config(), &[]);
     assert!(out.contains("`invar-lock: SHOP-214`"), "{out}");
     assert!(!out.contains("<TICKET>"), "{out}");
     assert!(out.contains("`invar acceptance lock SHOP-214`"), "{out}");
@@ -85,7 +85,7 @@ fn the_conventions_are_the_fixed_text_of_the_style() {
 
 #[test]
 fn the_run_command_is_shown_as_configured() {
-    let out = render(&plan(), &config());
+    let out = render(&plan(), &config(), &[]);
     assert!(
         out.contains("run: [\"vendor/bin/pest\", \"{report}\", \"{files}\"]\n"),
         "{out}"
@@ -99,18 +99,18 @@ fn the_run_command_is_shown_as_configured() {
 
 #[test]
 fn fakes_allowed_or_none() {
-    assert!(render(&plan(), &config()).contains("fakes_allowed: http, mail\n"));
+    assert!(render(&plan(), &config(), &[]).contains("fakes_allowed: http, mail\n"));
     let none = AcceptanceConfig {
         fakes_allowed: Vec::new(),
         ..config()
     };
-    assert!(render(&plan(), &none).contains("fakes_allowed: none: nothing may be faked\n"));
+    assert!(render(&plan(), &none, &[]).contains("fakes_allowed: none: nothing may be faked\n"));
 }
 
 #[test]
 fn every_criterion_of_the_plan_is_printed_with_its_id_and_text() {
     let plan = plan();
-    let out = render(&plan, &config());
+    let out = render(&plan, &config(), &[]);
     let criteria = plan.criteria();
     assert!(!criteria.is_empty());
     for criterion in criteria {
@@ -125,7 +125,7 @@ fn every_criterion_of_the_plan_is_printed_with_its_id_and_text() {
 #[test]
 fn what_explains_how_the_plan_came_about_is_left_out() {
     let plan = plan();
-    let out = render(&plan, &config());
+    let out = render(&plan, &config(), &[]);
     for heading in [
         "Ticket",
         "Open questions / answers",
@@ -136,4 +136,59 @@ fn what_explains_how_the_plan_came_about_is_left_out() {
         assert!(!section.is_empty(), "{heading}");
         assert!(!out.contains(section), "{heading} is in the output\n{out}");
     }
+}
+
+// --- `## Acceptance tests to change` (AT-13) --------------------------------------------------
+
+fn with_tests_to_change() -> Plan {
+    let contract =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/plan-header.md");
+    let contract = fs::read_to_string(contract).unwrap();
+    let after = contract.split_once("### 9.1 ").unwrap().1;
+    let body = after.split_once("```markdown\n").unwrap().1;
+    let text = body.split_once("\n```\n").unwrap().0.to_owned() + "\n";
+    let text = text.replace(
+        "## Implementation context",
+        "## Acceptance tests to change\n\
+         - tests/Acceptance/old_test.php — delete — the behavior is gone\n\
+         - tests/Acceptance/other_test.php — change — the limit moved\n\n\
+         ## Implementation context",
+    );
+    Plan::parse(&text, Mode::Light).unwrap()
+}
+
+#[test]
+fn the_tests_to_change_are_printed_with_what_to_do_for_each_action() {
+    let out = render(&with_tests_to_change(), &config(), &[]);
+    let part = out
+        .split_once("=== Acceptance tests to change ===")
+        .unwrap()
+        .1;
+    assert!(
+        part.contains("tests/Acceptance/old_test.php — delete — the behavior is gone"),
+        "{out}"
+    );
+    assert!(
+        part.contains("tests/Acceptance/other_test.php — change — the limit moved"),
+        "{out}"
+    );
+    assert!(
+        part.contains("For a `delete` item, remove the file"),
+        "{out}"
+    );
+    assert!(
+        part.contains("For a `change` item, stop and answer `BLOCKED`, naming the file"),
+        "{out}"
+    );
+    assert!(
+        out.find("=== Implementation context ===") < out.find("=== Acceptance tests to change ===")
+    );
+    assert!(out.find("=== Acceptance tests to change ===") < out.find("=== Next step ==="));
+}
+
+#[test]
+fn a_plan_with_no_tests_to_change_prints_no_such_part() {
+    let out = render(&plan(), &config(), &[]);
+    assert!(!out.contains("=== Acceptance tests to change ==="), "{out}");
+    assert!(!out.contains("=== Unlocked tests ==="), "{out}");
 }

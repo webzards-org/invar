@@ -150,7 +150,7 @@ struct Declaration {
 }
 
 /// `path` with `.` and empty segments dropped, if it may name a test under `dir`.
-fn normalised(path: &str, dir: &str) -> Result<String, String> {
+pub fn normalised(path: &str, dir: &str) -> Result<String, String> {
     if path.contains('\\') {
         return Err("the path has a `\\`".to_owned());
     }

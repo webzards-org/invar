@@ -506,3 +506,81 @@ fn a_command_never_changes_what_the_file_checks_decide() {
     assert!(matches!(on(&spec), Verdict::Deny { .. }));
     assert_eq!(verdict_on(&format!("ls {}", spec.display())), Verdict::Pass);
 }
+
+// --- unlocking is the developer's (AT-13) ---------------------------------------------------
+
+#[test]
+fn running_acceptance_unlock_is_denied_and_points_at_the_skill() {
+    let reason = denied("invar acceptance unlock SHOP-214 tests/Acceptance/a_test.php");
+    assert!(
+        reason.starts_with("`invar acceptance unlock` is the developer's decision"),
+        "{reason}"
+    );
+    assert!(
+        reason.contains("`/invar:relock SHOP-214 <file>`"),
+        "{reason}"
+    );
+    assert!(
+        reason.contains("`BLOCKED-TEST <file> <AC> <reason>`"),
+        "{reason}"
+    );
+    assert!(reason.contains("write it without `invar`"), "{reason}");
+}
+
+#[test]
+fn every_way_of_writing_acceptance_unlock_is_denied() {
+    for command in [
+        "invar acceptance unlock SHOP-214 a.php",
+        "invar acceptance unlock --skill SHOP-214 a.php",
+        "cd app && invar acceptance unlock SHOP-214 a.php",
+        "bash -c 'invar acceptance unlock SHOP-214 a.php'",
+        "./target/debug/invar acceptance unlock SHOP-214 a.php",
+    ] {
+        assert!(
+            matches!(verdict_on(command), Verdict::Deny { .. }),
+            "{command:?}"
+        );
+    }
+}
+
+#[test]
+fn help_for_unlock_is_allowed_and_so_are_the_commands_beside_it() {
+    for command in [
+        "invar acceptance unlock --help",
+        "invar acceptance unlock -h",
+        "invar acceptance lock SHOP-214",
+        "invar acceptance verify SHOP-214",
+        "invar acceptance spec SHOP-214",
+        "echo acceptance unlock",
+    ] {
+        assert_eq!(verdict_on(command), Verdict::Pass, "{command:?}");
+    }
+}
+
+#[test]
+fn write_and_edit_of_the_unlock_record_are_denied_whether_or_not_it_exists() {
+    let (_dir, root, spec) = project(APPROVED);
+    let record = spec.parent().unwrap().join("unlocked");
+    for tool in ["Write", "Edit"] {
+        let verdict = decide(&payload(tool, record.to_str().unwrap()), Path::new("/"));
+        match verdict {
+            Verdict::Deny { reason } => {
+                assert!(reason.contains("is the unlock record"), "{reason}");
+                assert!(reason.contains("`/invar:relock`"), "{reason}");
+            }
+            other => panic!("{tool}: expected Deny, got {other:?}"),
+        }
+    }
+    fs::write(&record, "round: 1\n").unwrap();
+    assert!(matches!(on(&record), Verdict::Deny { .. }));
+    // Under a draft Plan too: an unlock of nothing is still not the agent's to write.
+    fs::write(&spec, draft()).unwrap();
+    assert!(matches!(on(&record), Verdict::Deny { .. }));
+    // The name means nothing anywhere else.
+    assert_eq!(on(&root.join("unlocked")), Verdict::Pass);
+    assert_eq!(on(&root.join(".invar/plans/unlocked")), Verdict::Pass);
+    assert_eq!(
+        on(&spec.parent().unwrap().join("sub/unlocked")),
+        Verdict::Pass
+    );
+}

@@ -1026,10 +1026,11 @@ prompt, so a new style changes the command's output (A-7). It does not change fa
 seeders (OQ-2): the coder's tests of the same model would then move under it, and a missing
 factory is the developer's to know about.
 
-**Known gap, for AT-13.** A Plan that declares a change to another ticket's locked
-test in `## Acceptance tests to change` has no route through this agent yet. `invar acceptance
-spec` does not print that section, and the guard denies `Write` and `Edit` on the file. The
-agent's answer is `BLOCKED`, naming the file.
+**Known gap: OQ-4.** `invar acceptance spec` prints a Plan's `## Acceptance tests to change`, with
+what to do. For a `delete` item, the agent removes the file, and the branch rule allows that. For
+a `change` item, it answers `BLOCKED`, naming the file: the file is locked for another ticket, and
+its test names carry that ticket's ids, so how it becomes this ticket's is open
+(`docs/TASKS-AT.md`, OQ-4).
 
 **The runs.** Each in a fresh session, with the ticket line only.
 
@@ -1080,6 +1081,46 @@ Why it is built this way is in §15. **Record, per approval:** whether the test-
 - [ ] `verify` refusing after a `LOCKED`, in a session: no agent could be made to lie on demand. The refusal itself is in `acceptance_verify.rs`
 - [ ] A test-writer on another model, and the sentence said aloud before the coder
 - [ ] A model that is unavailable to the test-writer
+
+### `BLOCKED-TEST` and `/invar:relock` (AT-13)
+
+**Record, per run:** whether the coder answered `BLOCKED-TEST` for a test that really differs from
+its criterion, and changed no test; that the main session stopped, and started nothing before
+`/invar:relock` succeeded; that `lock` named the skipped red check; that `verify` came before the
+coder; and that no criterion text changed. A test-writer started on the main session's own reading
+is a failure of the gate.
+
+Ticket NOTE-5: AC1 says `{"pong":true}`, and the seeded locked test asserted `{"pong":false}`.
+
+| Date | Step | What started | Result |
+|---|---|---|---|
+| 2026-11-01 | `/invar:approve NOTE-5 --acceptance --no-start`, then the seeded test through the real `invar acceptance lock` | Nothing | Approved; locked, red because the route was not there |
+| 2026-11-01 | Asked to go on with Phase 2 from there | `plan check`, `verify`, coder (`Ticket: NOTE-5` only, `claude-sonnet-5-5`) | `BLOCKED-TEST tests/Acceptance/PingTest.php AC1 …`, justified. No test changed. The main session put it to the developer with the options, and started nothing |
+| 2026-11-01 | `/invar:relock NOTE-5 tests/Acceptance/PingTest.php` | test-writer (`Ticket: NOTE-5` only), `verify`, coder | The assertion fixed to `true`; `red check skipped for … (round 1)`; `verified 1 locked file(s)`, with the `unlocked by the developer:` line beside it, which did not stop the main session; `DONE`, with the test passing |
+| 2026-11-01 | The same command again | test-writer, `verify`, coder | Round 2, to reach a third: nothing was wrong now, so the test-writer changed nothing and locked it again, and said the spec did not say what was wrong |
+| 2026-11-01 | The same command a third time | Nothing | `error: NOTE-5: both rounds of unlocking are used …`, naming `failed` and `/invar:log` |
+| 2026-11-01 | `/invar:done NOTE-5` | Nothing | Both rounds listed above `removed:`; the Plan gone, with a tracked `spec.md` and an untracked record |
+
+The criterion's line was the same before and after, and `plan check` passed throughout.
+
+**How these were made.** One conversation, `claude -p` with `--session-id` and then `--resume`, as in
+"The dispatch", Claude Code 2.1.309, with real `/invar:approve`, `/invar:relock` and `/invar:done`. One
+step was a prompt and not a command: going on from a test locked by hand, because the seed has to be
+wrong, and a test-writer would not write it so.
+
+**Changed because of it.** The spec told the test-writer that the code exists now. This coder had
+stopped before writing any, so the part now says it may not, and the next step exempts the unlocked
+files from red before green. Those two sentences changed after these runs. A test covers them, and
+the runs were not repeated.
+
+**Not exercised.**
+
+- [ ] An interactive session, in auto mode and outside it
+- [ ] The coder answering `BLOCKED-TEST` with code already written, and leaving it in place
+- [ ] A developer who disagrees, and tells the coder to go on
+- [ ] The guard denying the command and the record in a session. `gate/guard/tests.rs` holds both
+- [ ] A coder on a real ticket answering `BLOCKED-TEST` for a test that is only hard to pass: this
+      seed was as plain as it can be, so it says nothing about that judgement
 
 ## 15. `/invar:approve` (M1-19)
 
@@ -1249,6 +1290,37 @@ that the Plan cannot be tested as approved. A developer who goes on with `--reap
 pending line, and `done` and `verify` do not.
 
 The record of the runs is in §14, under "The dispatch".
+
+### The `BLOCKED-TEST` round and `/invar:relock` (AT-13)
+
+A locked test can be wrong, and the coder must not be the one to decide that (A-8). So the coder
+answers `BLOCKED-TEST <file> <AC> <reason>` and changes nothing; the main session puts it to the
+developer and stops; the developer runs `/invar:relock <TICKET> <file>...`; the test-writer fixes
+those files and locks them; `verify` passes; and the coder starts again. All of the details are in
+`acceptance-lock.md` §11.
+
+**A command of its own, and a skill that keeps the name.** `invar acceptance unlock`, not `lock
+--relock` (D-25), and built as `/invar:approve` is: one shell block, `allowed-tools` naming it,
+`--skill`, a success line it keys on. `HUMAN_ONLY` denies it to an agent.
+
+**Why the main session may not decide.** It has the coder's reason and no more. Starting the
+test-writer on that reading would be an agent unlocking a test by another route, so the start hangs on
+the skill's success line, which only the developer's command can print.
+
+**The test-writer gets the ticket line only, here too.** `invar acceptance spec` lists the unlocked
+files and what to do, so its prompt needed one sentence. **The coder's reason does not reach it**,
+which is the same rule: it fixes the files against the criteria, not against an agent's account of
+them. The walkthrough shows the price. A developer who unlocks a file for a fault the criteria do not
+show gets the file back unchanged, locked again, with a round used, and the test-writer says so.
+
+**What the record gives up.** The guard stops `Write` and `Edit`, and a shell can still write it (D-30),
+as with a digest. What catches that is that a skip is never quiet: `lock` names it, `verify` and `done`
+list it, and the diff shows it. `done` deletes the record with the Plan, so the PR description is
+where it has to survive (AT-15).
+
+**`verify`'s stdout stays one line.** The relock round runs `verify` again, and the dispatch reads its
+line, so which files were unlocked goes to stderr there (D-31). The protocol skill says those lines
+are information. An earlier wording, "or prints anything else", would have stopped the cycle.
 
 ### `/invar:log-approve` — the same gate, on the decision log
 

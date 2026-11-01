@@ -16,6 +16,7 @@ use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
 
 use super::spec::{self, SpecError};
+use super::unlock::{self, ReadError};
 use check::{Coverage, Problems};
 use find::{FindError, Found};
 use run::{Output, RunError, TIME_LIMIT};
@@ -35,6 +36,10 @@ pub struct Locked {
     pub ticket: String,
     pub coverage: Coverage,
     pub files: Vec<Written>,
+    /// The files that skipped the red check, each with its round (§11.3).
+    pub skipped_red: Vec<(String, u32)>,
+    /// Said on stderr, and refused for nothing.
+    pub warnings: Vec<String>,
 }
 
 impl Locked {
@@ -54,6 +59,12 @@ impl Locked {
             let _ = writeln!(out, "  {} {}", file.path, file.digest);
         }
         let _ = writeln!(out);
+        for (file, round) in &self.skipped_red {
+            let _ = writeln!(
+                out,
+                "red check skipped for {file} (unlocked by the developer, round {round})"
+            );
+        }
         let _ = writeln!(out, "locked {} {} file(s)", self.ticket, self.files.len());
         out
     }
@@ -68,7 +79,28 @@ pub fn lock(
 ) -> Result<Locked, LockError> {
     let (plan, config) = spec::usable(root, spec, mode, config).map_err(LockError::Plan)?;
     let ticket = plan.header().ticket.clone();
+    let plan_dir = spec.parent().unwrap_or(root.path());
+    let mut record = unlock::read_record(plan_dir).map_err(LockError::Record)?;
     let found: Found = find::find(root, &config.dir, &ticket).map_err(LockError::Find)?;
+
+    let skipped_red: Vec<(String, u32)> = found
+        .to_lock
+        .iter()
+        .filter_map(|file| Some((file.path.clone(), record.open_round(&file.path)?)))
+        .collect();
+    let mut warnings: Vec<String> = record
+        .open
+        .iter()
+        .filter(|entry| !found.to_lock.iter().any(|file| file.path == entry.path))
+        .map(|entry| {
+            format!(
+                "{}: in the unlock record, and it is not pending, so the record says nothing \
+                 about it",
+                entry.path
+            )
+        })
+        .collect();
+    let unlocked: Vec<&str> = skipped_red.iter().map(|(path, _)| path.as_str()).collect();
 
     let finished =
         run::run(root, &config.run, &found.all_paths(), TIME_LIMIT).map_err(LockError::Run)?;
@@ -96,13 +128,24 @@ pub fn lock(
         }
     };
 
-    let coverage =
-        check::check(&ticket, &plan.criteria(), &found, &cases).map_err(LockError::Checks)?;
+    let coverage = check::check(&ticket, &plan.criteria(), &found, &unlocked, &cases)
+        .map_err(LockError::Checks)?;
     let files = write::write(root, &ticket, &found.to_lock).map_err(LockError::Write)?;
+
+    // The files are locked by now, so a record left behind is said and not refused for: an
+    // open entry for a locked file grants nothing (§11.3).
+    if !record.open.is_empty() {
+        record.close_all();
+        if let Err(err) = unlock::write_record(plan_dir, &record) {
+            warnings.push(format!("cannot update the unlock record: {err}"));
+        }
+    }
     Ok(Locked {
         ticket,
         coverage,
         files,
+        skipped_red,
+        warnings,
     })
 }
 
@@ -111,6 +154,7 @@ pub fn lock(
 pub enum LockError {
     /// What `invar acceptance spec` refuses, in its words.
     Plan(SpecError),
+    Record(ReadError),
     Find(FindError),
     Run(RunError),
     /// No report, or an empty one: nothing is known about any test (§9.2).
@@ -131,6 +175,7 @@ impl fmt::Display for LockError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Plan(err) => err.fmt(f),
+            Self::Record(err) => write!(f, "{err}; nothing was run or locked"),
             Self::Find(err) => err.fmt(f),
             Self::Run(err) => err.fmt(f),
             Self::DidNotRun {

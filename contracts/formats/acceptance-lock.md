@@ -1,10 +1,10 @@
 # Contract: the `invar-lock:` line
 
-**Version:** 1.2.0 — adds §10, what verifying a lock means; see §11
+**Version:** 1.3.0 — adds §11, unlocking a test; see §12
 **Status:** stable
 **Implements:** §4d (Checksums); A-2, A-3, A-4, A-5 (`docs/TASKS-AT.md`)
 **Read by:** the core (`format/lock`; `invar hash --lock`; `invar acceptance lock` and
-`verify`; `plan check`; `done`), any later reimplementation
+`verify` and `unlock`; `plan check`; `done`; `plan guard`), any later reimplementation
 
 > Changing this file is a **public-contract change** (§14.3). It is made
 > deliberately, in its own PR, with the reason recorded, the version bumped,
@@ -19,8 +19,8 @@ line says which ticket owns the file and, once the file is locked, what the file
 content was at that moment. Nothing else records a lock (D-1).
 
 This contract defines how the line is read, when it is an error, how the digest is
-computed, how a line comes to be locked (§9), and what the commands that verify locks
-refuse (§10).
+computed, how a line comes to be locked (§9), what the commands that verify locks
+refuse (§10), and how the developer takes a lock off (§11).
 
 Fixtures: `contracts/fixtures/acceptance/`.
 
@@ -251,6 +251,46 @@ problem.** A project with no acceptance tests yet has nothing wrong with it. A f
 at that path (D-16) could hide every lock from the walk, and must not read as zero files that
 all hold.
 
+**D-25 — Unlocking is a command of its own, not `lock --relock`.** One command that locks and
+another that unlocks are easier to read and to guard than one command with a flag that does the
+opposite. `HUMAN_ONLY` names words, so `acceptance unlock` is denied whole, while a flag on `lock`,
+which the test-writer has to run, would have been one more word to look for after the ones that
+are allowed. The skill keeps the name `/invar:relock` (A-8), because relocking is what the
+developer is asking for.
+
+**D-26 — The record is a file in the Plan's directory.** It dies with the Plan at `done`, which is
+right for something that only means anything during one cycle. It needs no change to the grammar
+of §2, and a mark inside the test file would be one more thing the test-writer could write by hand,
+under a digest that covers the file.
+
+**D-27 — Two rounds per ticket.** Two corrections of the same tests mean the criteria are not what
+the developer meant, and a third correction would be editing the specification through its tests.
+So a third is refused, and the cycle ends as `failed`. A round is one run of the command, however
+many files it names, so the files of one correction are named together. The rounds outlive a
+re-approval, because the limit is on the ticket.
+
+**D-28 — Only the red check goes, and for the whole file.** A corrected test would pass now that the
+code exists, so A-4 could never relock it (A-8). An `error` still means the test is broken, and a
+`skipped` test still proves nothing. The tokens and coverage are what they always are. The check is
+skipped per file because the lock is per file, so a test added to an unlocked file skips it too;
+the reviewer reads what the file says against the criteria (AT-14).
+
+**D-29 — A file leaves the open list when locked, and stays in the record's history.** "Unlocked
+once per `unlock`" needs it off the list that grants the skip, and telling the reader at `done` which
+files were unlocked needs it to stay somewhere. Every open entry closes on a successful `lock`,
+including one that was ignored, so that no old entry can grant a skip later.
+
+**D-30 — The honest limit: the record is not a signature either.** The guard denies `Write` and
+`Edit` of the record, and a shell can still write it, as it can write a digest (D-20). An agent that
+writes the record and takes the digest off a file by hand gets a skipped red check. What catches
+that is that it cannot be quiet: `lock` names the file, `verify` and `done` list it, the record and
+the test are in the branch's diff, and a person who never ran `/invar:relock` sees an unlock they did
+not make. It makes the skip visible and deliberate. It does not make it impossible.
+
+**D-31 — `verify` says it on stderr, and `done` on stdout.** `verify`'s stdout is one line that the
+main session reads (§10.4). `done` is shown through `/invar:done`, whose shell block carries stdout,
+and its success line stays the last.
+
 ## 7. Open questions
 
 None.
@@ -396,6 +436,9 @@ and the Plan has that id. Otherwise the test is refused.
 
 **In already locked files**, the outcome is not looked at (D-13).
 
+**In a file to lock that the unlock record lists** (§11.3), `passed` is accepted too. `error` and
+`skipped` are refused as above.
+
 **Coverage:** every criterion id of the Plan has at least one test case with that one token,
 counting both kinds of file. Missing ids are refused, each with its text.
 
@@ -424,7 +467,8 @@ keys on:
 locked <TICKET> <N> file(s)
 ```
 
-`<N>` counts the files written by this run, not the ones already locked.
+`<N>` counts the files written by this run, not the ones already locked. Above that line, each
+file that skipped the red check is named (§11.3).
 
 ## 10. Verifying
 
@@ -498,13 +542,107 @@ For `done`, and `verify` with a ticket:
 `invar acceptance verify` is an agent's command, and needs no Plan and, with no ticket, no git. It
 exits 0 with one line on stdout, `verified <N> locked file(s)`, or non-zero with nothing on stdout
 and every problem on stderr. `<N>` counts the locked files under `acceptance.dir` whose digest
-holds, for any ticket.
+holds, for any ticket. With a ticket that has an unlock record, it also says on stderr which files
+were unlocked (§11.4).
 
 **No `acceptance:` section** (D-21): `verify` warns on stderr that there is nothing to verify, and
 exits 0. `plan check` and `done` go on as before, with one warning on stderr when the Plan says
 `required`, and nothing added to stderr otherwise.
 
-## 11. Version history
+## 11. Unlocking
+
+A locked test can be wrong, and the coder must not be the one to decide that (A-8).
+`invar acceptance unlock <TICKET> <file>...` is the **developer's** command, through `/invar:relock`:
+`plan guard` denies it to an agent, and allows its `--help`.
+
+### 11.1 What it refuses
+
+In this order, and the first that fails is the answer:
+
+1. No file named.
+2. What §9.1 refuses first: the Plan is not approved or changed since, `Acceptance` is not `required`,
+   there is no `acceptance:` section, the criteria have no ids.
+3. An unlock record that cannot be read (§11.2).
+4. A third round (D-27). The message says the cycle should end as `failed`, with `/invar:log`.
+5. Any named file that is not all of these, each named, and every one reported (D-14): under
+   `acceptance.dir`, found as in §9.1, with a locked line, for this ticket, whose digest is the file's.
+
+On any refusal it changes nothing, and with `--skill` the reason is on stdout as `error: …` with
+exit 0, as for `plan approve`.
+
+### 11.2 What it writes
+
+**The record**, `.invar/plans/<TICKET>-<slug>/unlocked`, in UTF-8 with `\n` line endings:
+
+```
+round: 2
+open 2 tests/Acceptance/a_test.php
+closed 1 tests/Acceptance/a_test.php
+```
+
+| Line | Means |
+|---|---|
+| `round: <R>` | The first line, and exactly once. `<R>` is `1` or `2`, the rounds used |
+| `open <R> <path>` | Unlocked in round `<R>`, waiting for `lock`. This is what grants the skip |
+| `closed <R> <path>` | Unlocked in round `<R>`, and `lock` has run since (D-29) |
+
+`<path>` is relative to the project root, with `/` separators, and is the rest of the line. Anything
+else is a record that cannot be read, which `unlock`, `lock` and `spec` refuse, and `verify` and `done`
+warn about. A path holding a line break is refused by `unlock`. A file listed twice as `open` keeps
+the later round.
+
+**The files.** The lock line of each goes back to pending: the digest and the spaces before it are
+removed, and no other byte changes. Applied to the output of §4's writing, this gives back the pending
+file byte for byte.
+
+In order: every new file is written beside its original; the record is written; each file is renamed
+over its original. A failure before the renames leaves the test files as they were. A failure during
+them is reported with the files written and not written, and the round is used.
+
+**On success** each file is named, and the last line on stdout is fixed:
+
+```
+unlocked <TICKET> <N> file(s), round <R> of 2
+```
+
+### 11.3 What `lock` does with it
+
+For a file to lock that is `open` in the record:
+
+- no red check: `passed` and `failure` are both accepted (D-28);
+- the tokens and coverage of §9.3 apply as always;
+- the output names it, above the last line:
+  `red check skipped for <file> (unlocked by the developer, round <R>)`.
+
+Every other file is checked as before. An `open` entry whose file is not pending, being still locked
+or gone, is ignored with a warning on stderr.
+
+After a successful `lock`, every `open` entry becomes `closed`, and the round stays. A record that
+cannot be updated at that point is a warning, because the files are already locked.
+
+### 11.4 Who says so
+
+`invar acceptance spec` prints the `open` files that are pending, each with its round, under a heading
+of its own, with what to do: fix exactly these files to match their criteria, word for word, without
+weakening them to pass the code.
+
+`invar acceptance verify <TICKET>`, on stderr, and `invar done`, on stdout above its `removed:` line,
+print a line per entry, as information (D-31):
+
+```
+unlocked by the developer: <path> (round <R>)
+```
+
+### 11.5 The guard
+
+`plan guard` denies `Write` and `Edit` of an `unlocked` file directly in a Plan's directory, whether
+or not it exists yet. A shell can still write it (D-30).
+
+## 12. Version history
+
+**1.3.0** — adds §11 and D-25 to D-31: unlocking a test (AT-13). `lock`, `verify`, `spec` and `done`
+read the record. The line and the digest do not change, and nothing changes for a ticket with no
+record.
 
 **1.2.0** — adds §10 and D-17 to D-24: what verifying a lock means (AT-9). The line, the digest and
 locking do not change.

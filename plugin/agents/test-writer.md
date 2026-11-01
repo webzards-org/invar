@@ -61,7 +61,9 @@ names. They are not repeated here, because they belong to the project's configur
 
 How this project writes tests is in your context under `=== invar: conventions ===`.
 If you do not see that block, run `invar context show --conventions` once and read its
-output. Where the two differ, the spec's conventions win.
+output. Where the two differ, the spec's conventions win. When the spec has a part
+called `Unlocked tests` or `Acceptance tests to change`, do what it says, even where
+it differs from what this prompt says about red tests or locked files.
 
 **Business rules reach you only through the Plan.** The invariants to test are in the
 criteria and the Implementation context, in the developer-approved words.

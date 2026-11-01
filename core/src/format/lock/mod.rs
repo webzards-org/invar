@@ -1,6 +1,6 @@
 //! The `invar-lock:` line of an acceptance test file.
 //!
-//! Implements `contracts/formats/acceptance-lock.md` v1.2.0. The contract is the
+//! Implements `contracts/formats/acceptance-lock.md` v1.3.0. The contract is the
 //! authority; section numbers below (`§2`, `D-3`) point into it.
 //!
 //! Reading the line and choosing what the digest covers are format knowledge, so
@@ -85,6 +85,42 @@ pub fn with_digest(bytes: &[u8], ticket: &str) -> Result<Vec<u8>, LockError> {
     written.push(b' ');
     written.extend_from_slice(lock.digest.as_bytes());
     written.extend_from_slice(&bytes[at..]);
+    Ok(written)
+}
+
+/// `bytes` with the digest taken out of the locked line of `ticket`, and the spaces
+/// before it: the inverse of [`with_digest`] (§11.2).
+///
+/// No other byte changes, for the same reason. Refuses a file with no line, a line for
+/// another ticket, and a line that is pending.
+pub fn without_digest(bytes: &[u8], ticket: &str) -> Result<Vec<u8>, LockError> {
+    let lock = read(bytes)?.ok_or(LockError::NoLine)?;
+    if lock.ticket != ticket {
+        return Err(LockError::OtherTicket {
+            line: lock.line,
+            found: lock.ticket,
+            wanted: ticket.to_owned(),
+        });
+    }
+    let Some(recorded) = &lock.recorded else {
+        return Err(LockError::NotLocked {
+            line: lock.line,
+            ticket: lock.ticket,
+        });
+    };
+
+    // As in `with_digest`: the first marker in the raw text is the one `read` read, and
+    // §2 puts only spaces between the ticket and the digest.
+    let text = String::from_utf8_lossy(bytes);
+    let marker = text.find(MARKER).unwrap_or_default() + MARKER.len();
+    let spaces = text[marker..].len() - text[marker..].trim_start_matches(' ').len();
+    let from = marker + spaces + lock.ticket.len();
+    let spaces = text[from..].len() - text[from..].trim_start_matches(' ').len();
+    let to = from + spaces + recorded.len();
+
+    let mut written = Vec::with_capacity(bytes.len() - (to - from));
+    written.extend_from_slice(&bytes[..from]);
+    written.extend_from_slice(&bytes[to..]);
     Ok(written)
 }
 
@@ -218,9 +254,9 @@ pub enum LockError {
         line: usize,
         found: String,
     },
-    /// [`with_digest`] on a file with no lock line.
+    /// [`with_digest`] or [`without_digest`] on a file with no lock line.
     NoLine,
-    /// [`with_digest`] for another ticket than the one on the line.
+    /// [`with_digest`] or [`without_digest`] for another ticket than the one on the line.
     OtherTicket {
         line: usize,
         found: String,
@@ -228,6 +264,11 @@ pub enum LockError {
     },
     /// [`with_digest`] on a line that already records a digest.
     AlreadyLocked {
+        line: usize,
+        ticket: String,
+    },
+    /// [`without_digest`] on a line that records no digest.
+    NotLocked {
         line: usize,
         ticket: String,
     },
@@ -281,6 +322,11 @@ impl fmt::Display for LockError {
                 f,
                 "line {line}: the `{MARKER}` line is already locked for `{ticket}`, and a digest \
                  is written only into a pending line"
+            ),
+            Self::NotLocked { line, ticket } => write!(
+                f,
+                "line {line}: the `{MARKER}` line for `{ticket}` is pending, so there is no \
+                 digest to take out"
             ),
         }
     }

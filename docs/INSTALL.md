@@ -66,7 +66,7 @@ the plugin.
 - `/plugin` lists `invar`, and the **Errors** tab is empty.
 - `/hooks` shows the invar hooks (`SessionStart`, `SubagentStart`, `SubagentStop`, `PreToolUse`).
 - `/agents` shows `planner`, `coder` and `reviewer`.
-- `/invar:approve`, `/invar:log-approve` and `/invar:done` appear in the command list.
+- `/invar:approve`, `/invar:relock`, `/invar:log-approve` and `/invar:done` appear in the command list.
 
 ## For yourself only: install for every project
 
