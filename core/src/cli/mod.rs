@@ -6,6 +6,7 @@
 //! can be called from a test, from CI or from a hook and behave identically
 //! (§13b).
 
+use std::ffi::OsString;
 use std::io::{IsTerminal as _, Read as _};
 use std::path::Path;
 use std::process::ExitCode;
@@ -202,6 +203,20 @@ fn for_skill(skill: bool, result: Result<()>) -> Result<()> {
     }
 }
 
+/// Whether a command line clap refused was `plan approve … --skill`, the one
+/// command whose argument errors have to reach a skill (see `for_skill`): a typo
+/// in `/invar:approve T --acceptence` is a refusal like any other. Nothing after
+/// a `--` is a flag.
+pub fn is_plan_approve_for_skill(args: &[OsString]) -> bool {
+    args.len() >= 2
+        && args[0] == "plan"
+        && args[1] == "approve"
+        && args[2..]
+            .iter()
+            .take_while(|arg| *arg != "--")
+            .any(|arg| arg == "--skill")
+}
+
 /// A path relative to the current directory when it is under it, so the paths
 /// an agent or a person sees are the ones they would type; otherwise as it is.
 ///
@@ -217,9 +232,28 @@ pub fn shown(path: &Path, cwd: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::path::Path;
 
-    use super::shown;
+    use super::{is_plan_approve_for_skill, shown};
+
+    fn for_skill(line: &str) -> bool {
+        let args: Vec<OsString> = line.split_whitespace().map(OsString::from).collect();
+        is_plan_approve_for_skill(&args)
+    }
+
+    #[test]
+    fn only_plan_approve_with_skill_reports_argument_errors_as_output() {
+        assert!(for_skill("plan approve --skill T --acceptence"));
+        assert!(for_skill("plan approve T --acceptence --skill"));
+
+        assert!(!for_skill("plan approve T --acceptence"));
+        assert!(!for_skill("plan approve T -- --skill"));
+        assert!(!for_skill("done --skill --bogus"));
+        assert!(!for_skill("decision approve --skill --bogus"));
+        assert!(!for_skill("plan check --skill"));
+        assert!(!for_skill("plan"));
+    }
 
     #[test]
     fn a_path_under_the_current_directory_is_shown_relative_to_it() {

@@ -718,9 +718,94 @@ fn both_flags_together_are_refused_and_nothing_is_written() {
             .failure()
             .code(1)
             .stdout("")
-            .stderr(contains("cannot be used with"));
+            .stderr(contains(BOTH_FLAGS));
     }
     assert_eq!(project.read_spec(), draft);
+}
+
+const BOTH_FLAGS: &str = "`--acceptance` cannot be used with `--no-acceptance`";
+
+#[test]
+fn both_flags_under_skill_are_an_error_line_with_exit_0_and_nothing_is_written() {
+    let project = Project::new(Some("rade"));
+    project.configure(SKIPPED_BY_CONFIG);
+    let draft = project.read_spec();
+    for args in [
+        &["--skill", "PROJ-412", "--acceptance", "--no-acceptance"][..],
+        &["--skill", "PROJ-412", "--no-acceptance", "--acceptance"][..],
+        &["--skill", "--acceptance", "--no-acceptance", "--no-start"][..],
+    ] {
+        project
+            .approve(args)
+            .success()
+            .stdout(predicate::str::starts_with("error: ").and(contains(BOTH_FLAGS)))
+            .stdout(contains("Phase 2").not())
+            .stdout(contains("Acceptance criteria").not());
+    }
+    assert_eq!(project.read_spec(), draft);
+}
+
+#[test]
+fn an_argument_error_under_skill_is_an_error_line_with_exit_0_and_nothing_is_written() {
+    let project = Project::new(Some("rade"));
+    let draft = project.read_spec();
+    for (args, named) in [
+        (&["--skill", "PROJ-412", "--acceptence"][..], "--acceptence"),
+        (&["PROJ-412", "--no-strat", "--skill"][..], "--no-strat"),
+        (&["--skill", "PROJ-412", "PROJ-413"][..], "PROJ-413"),
+        (
+            &["--skill", "PROJ-412", "--reapprove=yes"][..],
+            "--reapprove",
+        ),
+    ] {
+        project
+            .approve(args)
+            .success()
+            .stdout(predicate::str::starts_with("error: ").and(contains(named)))
+            .stdout(contains("checksum sha256:").not())
+            .stderr("");
+    }
+    assert_eq!(project.read_spec(), draft);
+}
+
+#[test]
+fn an_argument_error_without_skill_stays_a_failure_on_stderr() {
+    let project = Project::new(Some("rade"));
+    project
+        .approve(&["PROJ-412", "--acceptence"])
+        .failure()
+        .code(1)
+        .stdout("")
+        .stderr(contains("--acceptence"));
+}
+
+#[test]
+fn help_under_skill_is_still_help() {
+    let project = Project::new(Some("rade"));
+    project
+        .approve(&["--skill", "--help"])
+        .success()
+        .stdout(contains("--no-acceptance"))
+        .stdout(predicate::str::starts_with("error: ").not());
+}
+
+#[test]
+fn other_commands_keep_their_argument_errors() {
+    let project = Project::new(Some("rade"));
+    for args in [
+        &["done", "--skill", "--bogus"][..],
+        &["decision", "approve", "--skill", "--bogus"][..],
+    ] {
+        Command::cargo_bin("invar")
+            .unwrap()
+            .current_dir(project.root())
+            .args(args)
+            .assert()
+            .failure()
+            .code(1)
+            .stdout("")
+            .stderr(contains("--bogus"));
+    }
 }
 
 #[test]
