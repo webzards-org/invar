@@ -1,6 +1,6 @@
 //! The `invar-lock:` line of an acceptance test file.
 //!
-//! Implements `contracts/formats/acceptance-lock.md` v1.0.0. The contract is the
+//! Implements `contracts/formats/acceptance-lock.md` v1.1.0. The contract is the
 //! authority; section numbers below (`§2`, `D-3`) point into it.
 //!
 //! Reading the line and choosing what the digest covers are format knowledge, so

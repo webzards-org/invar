@@ -1,10 +1,10 @@
 # Contract: the `invar-lock:` line
 
-**Version:** 1.0.0 — initial version; see §9
+**Version:** 1.1.0 — adds §9, what `invar acceptance lock` checks and writes; see §10
 **Status:** stable
-**Implements:** §4d (Checksums); A-3, A-5 (`docs/TASKS-AT.md`)
-**Read by:** the core (`format/lock`; `invar hash --lock`), any later
-reimplementation
+**Implements:** §4d (Checksums); A-2, A-3, A-4, A-5 (`docs/TASKS-AT.md`)
+**Read by:** the core (`format/lock`; `invar hash --lock`; `invar acceptance lock`), any
+later reimplementation
 
 > Changing this file is a **public-contract change** (§14.3). It is made
 > deliberately, in its own PR, with the reason recorded, the version bumped,
@@ -18,9 +18,9 @@ One line of text inside an acceptance test file, and the digest that goes with i
 line says which ticket owns the file and, once the file is locked, what the file's
 content was at that moment. Nothing else records a lock (D-1).
 
-This contract defines how the line is read, when it is an error, and how the digest is
-computed. Which files are read, what writes the line and what a mismatch refuses belong
-to the commands that use it (AT-8, AT-9).
+This contract defines how the line is read, when it is an error, how the digest is
+computed, and how a line comes to be locked (§9). What a mismatch refuses after that
+belongs to the commands that verify locks (AT-9).
 
 Fixtures: `contracts/fixtures/acceptance/`.
 
@@ -158,6 +158,50 @@ nothing else. Running all of §4d again would strip a `U+FEFF` that the removal 
 bring to the start of the text, giving two different files one digest. Fixture
 `locked/bom-next-line.py` pins it.
 
+**D-8 — The exit code is not read when locking** (A-2). A red run exits non-zero by design,
+and a run that could not load exits non-zero too, so the code cannot tell them apart. The
+report can. The code is kept only for messages.
+
+**D-9 — The report is outside the repository.** It lives in a fresh directory of its own in
+the OS temp directory, which is removed however the command ends, short of the process being
+killed. A report inside the repository could be committed, or swept up by a formatter or a
+file watcher, and it would change the very tree whose bytes the command promises not to
+touch. A temp directory configured inside the project is refused for the same reason.
+
+**D-10 — Test cases of files that were not passed are ignored.** A runner may add its own, such
+as a bootstrap check, and they say nothing about this ticket. A passed file with **no** test
+case is the opposite case, and is refused: a syntax error or a filter can do that, and a file
+with nothing proven must not be locked.
+
+**D-11 — A fixed limit of 10 minutes, and no configuration key.** The agent that runs this must
+not hang on a hanging suite. Locking runs one ticket's files, not the whole suite, so a limit
+a project would need to raise is not expected, and a key can be added later without breaking
+anyone. At the limit the program started is killed and the command refuses. Processes it
+started itself are not tracked: killing a process group would also take the runner out of the
+terminal's foreground group, so that Ctrl-C no longer reached it.
+
+**D-12 — A test that passes has no override in this command** (OQ-1). A green test proves
+nothing about the code to come, however good the reason. The test-writer answers `BLOCKED`
+and the developer decides, which may mean rewriting the criterion. A flag here would be a
+flag the agent could pass.
+
+**D-13 — The outcomes of already locked files are ignored.** They were proven red when they
+were locked. Now that their code may exist they may pass, and they are run only so that their
+tests count for coverage. Their token checks still apply, because coverage reads the tokens.
+
+**D-14 — Every problem in one run.** A run can be slow, and the test-writer can fix everything
+at once. Refusing one problem at a time would cost one run per problem.
+
+**D-15 — All or nothing, up to the renames.** Every new file is written beside its original
+before the first rename, so any failure until then leaves every test file as it was. Renames
+are one at a time, and no file system offers a rename of several: a failure between two of them
+is the only partial case. The message names what was written. Running `lock` again recovers,
+since a written file now reads as already locked.
+
+**D-16 — Symlinks are not followed, and that includes `acceptance.dir` itself.** A link could
+take a run, and then a write, outside the project, or reach one file by two names. A directory
+that is itself a link reads as no directory.
+
 ## 7. Open questions
 
 None.
@@ -237,6 +281,106 @@ closed with no whitespace before it.
 
 **Why:** truncated, uppercase, and out of place. None of them passes as a pending line (D-5).
 
-## 9. Version history
+## 9. Locking
+
+`invar acceptance lock <TICKET>` is the test-writer's command, and the first one that runs
+anything (A-2). It writes digests only when every test checks something. On any refusal it
+writes nothing and prints nothing on stdout, and the reason is on stderr.
+
+### 9.1 Before anything runs
+
+The refusals of `invar acceptance spec`, in its order and its words: the Plan is not approved
+or changed since; `Acceptance` is not `required`; there is no `acceptance:` section; the
+criteria have no ids.
+
+Then the ticket's files. `acceptance.dir` is walked recursively, in sorted order and following
+no symlink (D-16). A file whose bytes do not contain `invar-lock:` is not a test file of any
+ticket, and is skipped, as is a leftover `*.invar-tmp` of an interrupted write. The rest are
+read by §2 to §4:
+
+| What the file holds | Means |
+|---|---|
+| An error of §3.1 | Refused, naming the file and the error |
+| A pending line for this ticket | **To lock** |
+| A locked line for this ticket, with the file's digest | **Already locked** |
+| A locked line for this ticket, with another digest | Refused, naming the file: it changed after locking |
+| A line for another ticket | Ignored |
+
+All of these refusals are reported together. With nothing to lock, or with no such directory,
+the command refuses and says that the test-writer writes files with the pending line.
+
+### 9.2 The run
+
+The files to lock and the already locked files run together, in one run. The already locked
+ones are there only so that their tests count for coverage (D-13).
+
+`acceptance.run` is run without a shell, with the project root as its working directory and
+stdin empty. `{report}` becomes one path (D-9), and `{files}` becomes the files as separate
+arguments, relative to the root and sorted. stdout and stderr are captured. The exit code is
+not read (D-8).
+
+These refuse, and none of them says anything about coverage or red:
+
+| What happened | The message says |
+|---|---|
+| The program cannot be started | The program, and `acceptance.run` |
+| The limit passed (D-11) | The limit, and the last lines of stderr and of stdout |
+| No report was written, or it is **Empty** (`test-results.md` §6) | "the tests did not run", the exit status, and the last 40 lines of stderr and of stdout |
+| Any other error of `test-results.md` §6 | That error, and the exit status |
+
+### 9.3 The checks
+
+Test cases whose file was not passed are ignored (D-10). A file passed with no test case is
+refused ("no test from this file ran").
+
+**In both kinds of file**, each test case has exactly one `AC<n>` token (`test-results.md` §4),
+and the Plan has that id. Otherwise the test is refused.
+
+**In the files to lock**, the outcome decides:
+
+| Outcome | Means |
+|---|---|
+| `failure` | Red for the right reason. The only one accepted (A-4) |
+| `passed` | Refused: it passes before the code exists. There is no override here (D-12) |
+| `error` | Refused: it fails for the wrong reason, with the failure's type and the first lines of its message |
+| `skipped` | Refused: a skipped test proves nothing |
+
+**In already locked files**, the outcome is not looked at (D-13).
+
+**Coverage:** every criterion id of the Plan has at least one test case with that one token,
+counting both kinds of file. Missing ids are refused, each with its text.
+
+Every problem is reported in one run, grouped by file and test (D-14).
+
+### 9.4 Writing
+
+Only when every check holds:
+
+1. Every file to lock is read again and compared with the bytes that ran. If any changed, the
+   command refuses, naming them, and writes nothing.
+2. The digest goes into each file's line (§4), and each result is written to a temporary file
+   beside the original, with the original's permissions.
+3. Each temporary file is renamed over its original.
+
+A failure before step 3 leaves every test file as it was. A failure during step 3 is the only
+partial case, and the message names the files written and the files not written (D-15).
+
+### 9.5 The output on success
+
+On stdout: per criterion in the Plan's order, the tests that cover it, each with its file and
+name; then each file locked, with its digest; then one fixed last line that the test-writer
+keys on:
+
+```
+locked <TICKET> <N> file(s)
+```
+
+`<N>` counts the files written by this run, not the ones already locked.
+
+## 10. Version history
+
+**1.1.0** — adds §9 and D-8 to D-16: what `invar acceptance lock` checks and writes (AT-8). The
+line and the digest do not change. It is here, not in a contract of its own, because §9 is how
+the line of §2 becomes the line of §2 with a digest, and the two are read together.
 
 **1.0.0** — initial version (AT-5).
