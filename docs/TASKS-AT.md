@@ -123,9 +123,9 @@ Each one is closed by the task named. A recommendation is not a decision.
   by AT-8: not in this command (`invar acceptance lock`); the test-writer answers
   `BLOCKED` and the developer decides (`acceptance-lock.md` D-12).
 - **OQ-2 — Are factories and shared helpers ever locked?** Closed by AT-11 and
-  AT-14.
-  *Recommendation (not a decision):* the test-writer may add factory states, and
-  the review reports coder changes to them (AT-14).
+  AT-14. Decided in AT-11: the test-writer does not change factories or seeders, so they
+  are not locked; helpers it needs live under `acceptance.dir`. What the review reports
+  of coder changes to factories is AT-14's.
 - **OQ-3 — The exact form of the `Acceptance` field inside the approval digest.**
   Closed by AT-3.
   *Recommendation (not a decision):* `Approved-checksum` covers the body plus the
@@ -624,25 +624,27 @@ guard and is still caught at `plan check`, `done` and `acceptance verify`.
 only. It:
 
 1. runs `invar plan check <TICKET>`, then `invar acceptance spec <TICKET>`
-2. writes acceptance tests only under `acceptance.dir` (and helpers there): one file
-   per ticket, pending lock line, `AC<n>` in every test name, criterion text in the
-   docblock
-3. uses the real database and the app's own scopes and policies; fakes only what
-   `fakes_allowed` lists
-4. gives every negative criterion (403, 404, refused) a **control probe** in the same
-   test, so it fails before the code exists for the right reason
-5. runs `invar acceptance lock <TICKET>` and fixes its own tests until it locks
+2. writes acceptance tests only under `acceptance.dir` (and helpers there), following
+   the conventions the spec prints: one ticket per file, a ticket may have several
+   files. The prompt does not restate them (A-7)
+3. takes its data from the existing factories with explicit attributes, or from helpers
+   under `acceptance.dir`
+4. runs `invar acceptance lock <TICKET>` and fixes its own tests, at most five runs, then
+   answers `BLOCKED`
 
-Never edits application code, the Plan, or a locked file. Reads neither
-`BUSINESS_CONTEXT.md` nor `.invar/decisions/`.
+Never edits application code, a factory, a seeder, the Plan, or a locked file. Reads
+neither `BUSINESS_CONTEXT.md` nor `.invar/decisions/`. `AI_CONTEXT.md` reaches it through
+a `SubagentStart` hook, as it reaches the coder. Runs on `model: opus`
+(`plugin/NOTES.md` §14).
 
 Answers `LOCKED` + at most eight lines (files, tests per criterion), or
 `BLOCKED <reason>` (a criterion it cannot test, a green-before-code test it cannot
 make red, missing test infrastructure).
 
-Decide (AT-1 open question) whether factories it creates or changes are in scope;
-recommended: it may add factory states, and the review reports coder changes to
-them (AT-14).
+OQ-2 is decided for the test-writer: it does **not** change factories or seeders. A model
+with no factory for what a criterion needs is `BLOCKED`.
+
+The main session does not start it yet (AT-12).
 
 ### Purpose
 
@@ -657,6 +659,7 @@ code that won't pass. Separating it from the coder is the point of the feature.
       style-specific branches in the prompt
 - [ ] Model default chosen per the M1-22 finding and recorded in NOTES.md
 - [ ] On walkthrough ticket 1 it answers `LOCKED` with every criterion covered
+      (pending: the developer's run on the pilot, `plugin/NOTES.md` §14)
 
 ---
 

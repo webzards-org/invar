@@ -1000,6 +1000,64 @@ allow capitals. Not done yet.
       the planner remembering the first (it is not resumed)
 - [ ] The skill is loaded by a ticket-shaped request that does not name invar
 
+### Test-writer (AT-11)
+
+`agents/test-writer.md` writes a ticket's acceptance tests between the gate and the coder.
+The main session does not start it until AT-12, so for now it is started by hand with the
+ticket line. CI (`plugin_prompts.rs`, `plugin.rs`) holds what can drift: its tools and
+model, both answer shapes, that `LOCKED` is tied to the command's line, the order of its
+commands, that every command it names exists, no pointer to the log or the business file,
+no branch by style or framework, and the `SubagentStart` hook. Whether it **behaves** is
+what the runs below are for.
+
+**Model: `opus`** (D-17.4: an alias). Its tests are the fixed point the coder is held to and
+may not change, so a weak test is not caught by the next step: it costs a `BLOCKED-TEST`
+round, or goes unnoticed. It runs once per ticket, so the cost is bounded. The coder's
+`sonnet` rests on every output being checked on disk (§13d); nothing checks this agent's
+judgement of what a criterion means except the review, afterwards. The dispatcher may lower
+it for a call (AT-12), and says so.
+
+**`AI_CONTEXT.md`** reaches it as it reaches the coder (D-17.1): a `SubagentStart` entry,
+matched `.*test-writer`, running `invar context show --conventions --hook`, with the command
+named in the prompt as the fallback.
+
+**What it decides nothing about.** The conventions are in `invar acceptance spec`, not in the
+prompt, so a new style changes the command's output (A-7). It does not change factories or
+seeders (OQ-2): the coder's tests of the same model would then move under it, and a missing
+factory is the developer's to know about.
+
+**Known gap, for AT-12 and AT-13.** A Plan that declares a change to another ticket's locked
+test in `## Acceptance tests to change` has no route through this agent yet. `invar acceptance
+spec` does not print that section, and the guard denies `Write` and `Edit` on the file. The
+agent's answer is `BLOCKED`, naming the file.
+
+**The runs.** Each in a fresh session, with the ticket line only.
+
+| # | Ticket | What it is for |
+|---|---|---|
+| 1 | Walkthrough ticket 1, on the pilot: one that touches a **business invariant** | The acceptance criterion: `LOCKED` with every criterion covered, and the invariant's test would fail if it were broken |
+| 2 | A ticket with a negative criterion (a 403, a refusal) | Its control probe |
+| 3 | A ticket whose behavior already exists | `BLOCKED`, with no test weakened to pass the red check |
+| 4 | A model with no factory | `BLOCKED`, with no factory written |
+
+**Record, per run:** `LOCKED` or `BLOCKED`, and whether that was justified; rounds of
+`invar acceptance lock`; tests that were green before the code; whether every negative
+criterion has a control probe; files read outside Scope; any factory or application file
+touched; the model, from the transcript. Then read the transcript for the business file and
+the log: any read of `BUSINESS_CONTEXT.md` or `.invar/decisions/` is a failure.
+
+| Date | Run | Where | Model | Answer, justified? | `lock` rounds | Green before code | Control probe on every negative | Read outside Scope | Factory or app file touched | Business file or log read |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-01 | Smoke | Throwaway Laravel 13, Pest 5.3.4 in Docker; Plan fixture NOTE-7, 2 criteria, 1 negative; Claude Code 2.1.308 | `claude-opus-5-5` | `LOCKED`, justified: both red on assertions, both covered, `acceptance verify` holds | 1 | 0 | Yes | None beyond the Scope's model and factory, and the project's test setup | None: only `tests/Acceptance/` changed | No: 0 sentinels of either in its transcript |
+| | 1 | The pilot: **pending, the developer's** | | | | | | | | |
+| | 2 | | | | | | | | | |
+| | 3 | | | | | | | | | |
+| | 4 | | | | | | | | | |
+
+**How the smoke run was made.** `claude -p --plugin-dir <copy of plugin/ with a fresh binary>`, the main session asked to start `invar:test-writer` with the ticket line, Bash allowed only for `invar *` (read-only commands such as `cat` still ran). `AI_CONTEXT.md`, `BUSINESS_CONTEXT.md` and an entry under `.invar/decisions/` each held a sentinel. The conventions' sentinel reached the sub-agent's transcript through the hook, and the other two did not. It proves the plumbing and one small ticket, not the prompt's judgement: the Plan was a hand-written fixture, and the behavior was simple. Rows 1 to 4 are what test that.
+
+**A stale `invar` on `PATH` wins over the plugin's.** The first attempt answered `BLOCKED`, correctly, because the Bash tool found `~/.cargo/bin/invar`, built before `acceptance` existed, ahead of the plugin's `bin/`. It read the Plan's digest the old way and said the Plan had changed, and warned of an unknown key `acceptance`. Hooks are not affected, because they name the plugin's path. An agent's bare `invar` is. Before a run, check `which -a invar`, and update or remove an older CLI.
+
 ## 15. `/invar:approve` (M1-19)
 
 `plugin/skills/approve/SKILL.md`, invoked as `/invar:approve [ticket]`.
