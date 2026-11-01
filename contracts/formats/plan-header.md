@@ -1,6 +1,6 @@
 # Contract: Plan header and required sections
 
-**Version:** 1.7.0 — the `Acceptance` field, and what the approval digest covers; see §10 for what changed and why
+**Version:** 1.7.1 — what a declared test path must be, and what an undeclared change does; see §10 for what changed and why
 **Status:** stable
 **Implements:** §4a (Plan document structure), §4d (Checksums), §5c (Context
 delivery), §12 (Plan lifecycle); light mode L-1, L-2, L-5
@@ -512,6 +512,16 @@ It comes right after `## Acceptance criteria`, and in any case before
   single line, as in §6.2.
 
 As with `## Acceptance criteria`, `Approved-checksum` covers it.
+
+**What a path must be.** `plan validate` checks only the form above, since it has no
+`acceptance.dir` to compare with. `plan check` and `done` check the rest
+(`acceptance-lock.md` §10.2): relative to the project root, `/` separators, no `..`, under
+`acceptance.dir`. A path that breaks this is refused there. One that was not a locked test at
+the merge base, or that did not change, is a warning.
+
+**What an undeclared change does.** `plan check` and `done` refuse a change to, or a deletion of,
+a test that another ticket locked, unless it is listed here with that action. So a typo cannot
+let a change through: the declaration matches nothing, and the change is still refused.
 
 The PR description and `invar review-input` show it right after the criteria,
 when it lists something: the point of the section is that a person sees the
@@ -1068,6 +1078,10 @@ Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece8
 `acceptance: skipped` (§5.1, D-19). Adding `Acceptance: required` by hand stales it.
 
 ## 10. Version history
+
+**1.7.1 — what a declared test path must be (AT-9).** §6.5 says what `plan check` and `done`
+check of a path, and what an undeclared change does. `plan validate` checks what it did, so no
+valid Plan becomes invalid.
 
 **1.7.0 — the `Acceptance` field (AT-3).**
 
