@@ -5,6 +5,7 @@ use clap::Subcommand;
 
 mod lock;
 mod spec;
+mod verify;
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -37,11 +38,27 @@ pub enum Command {
     /// Refuses first what `invar acceptance spec` refuses. On success the last line
     /// is `locked <TICKET> <N> file(s)`.
     Lock(lock::Args),
+    /// Check that the acceptance locks hold. Runs no test.
+    ///
+    /// With no ticket, for CI on every push: every locked file under
+    /// `acceptance.dir` has the digest its line records, no line is malformed, and no
+    /// line is pending. It needs no Plan and no git, so it works after the Plan is
+    /// deleted and in a shallow clone.
+    ///
+    /// With a ticket, before `invar done`: the check `done` makes, deleting nothing.
+    /// That adds the branch rule, under which another ticket's locked test may change
+    /// only if the approved Plan declares it, and it asks for a locked test for the
+    /// ticket when its Plan says `required`, with no pending line left.
+    ///
+    /// Prints `verified <N> locked file(s)`, or every problem on stderr and exits
+    /// non-zero. With no `acceptance:` section it warns and exits 0.
+    Verify(verify::Args),
 }
 
 pub fn run(command: Command) -> Result<()> {
     match command {
         Command::Spec(args) => spec::run(args),
         Command::Lock(args) => lock::run(args),
+        Command::Verify(args) => verify::run(args),
     }
 }

@@ -6,3 +6,4 @@
 
 pub mod lock;
 pub mod spec;
+pub mod verify;

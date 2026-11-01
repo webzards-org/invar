@@ -521,17 +521,31 @@ weaken": complete against the criteria, proven to test something, and frozen.
 
 ### Description
 
-`invar acceptance verify [<TICKET>]` and the same check inside `plan check` and
-`done`:
+One check with three parts (`contracts/formats/acceptance-lock.md` §10), and three
+callers:
 
-- every file under `acceptance.dir` with a **locked** line: digest matches
-- files changed on the branch (merge base to `HEAD` and the working tree) that were
-  locked by **another** ticket: allowed only if listed in the current Plan's
-  `## Acceptance tests to change`
-- locked files **deleted** on the branch (content read from git): allowed only if
-  listed with `delete`
-- `done`, with `Acceptance: required`: at least one locked test for the ticket, and
-  no pending line left for it
+- **Integrity:** every file under `acceptance.dir`: a locked line has the file's digest,
+  and no line is malformed. Needs no git and no Plan.
+- **Branch rule:** a test locked by **another** ticket at the merge base, compared with
+  the working tree, the index and `HEAD`, with no rename detection. Changed only if the
+  current Plan lists it in `## Acceptance tests to change` with `change`; deleted (content
+  read from git) only with `delete`. A declared path that is not a locked test, or did not
+  change, is a warning; one that breaks the path rules is a problem. A file locked for the
+  current ticket is its own.
+- **Closing:** with `Acceptance: required`, at least one locked test for the ticket; with
+  either value, no pending line left for it.
+
+| Command | Checks | Pending lines |
+|---|---|---|
+| `plan check <TICKET>` | Integrity, branch rule | Allowed |
+| `done <TICKET>` | All three, before it deletes anything | The ticket's refused |
+| `invar acceptance verify <TICKET>` | All three, deleting nothing | The ticket's refused |
+| `invar acceptance verify` | Integrity, for CI: no Plan, no git | Any refused |
+
+Outside a git repository the branch rule is skipped with a warning; inside one, a base
+branch or merge base that cannot be found is a problem. With no `acceptance:` section,
+`verify` warns and exits 0, and `plan check` and `done` warn for a `required` Plan. Removing the section disables the check, and review and the decision log are what
+notice it (D-21). A digest is not a signature (D-20).
 
 `done` still runs no tests (A-2); green is the team's CI.
 

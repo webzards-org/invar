@@ -7,10 +7,12 @@
 //! 2. refuse while a draft decision entry (`decision.md`) sits in the Plan
 //!    directory: deleting the Plan would delete the text the developer
 //!    reviewed, and that is the one way this flow could lose it silently.
-//! 3. delete the Plan directory.
-//! 4. stage the deletion (`git rm -r --cached`), so it goes into the same
+//! 3. refuse unless the acceptance locks hold (`acceptance-lock.md` §10), with
+//!    no pending line left. No test is run (A-2).
+//! 4. delete the Plan directory.
+//! 5. stage the deletion (`git rm -r --cached`), so it goes into the same
 //!    commit — and the same PR — as the code.
-//! 5. with `--commit <MESSAGE>` — or `done.commit: true` in `invar.yaml`,
+//! 6. with `--commit <MESSAGE>` — or `done.commit: true` in `invar.yaml`,
 //!    under `done.commit_message` — commit the deletion alone, under that
 //!    message (`git commit --only`): anything else that is staged stays
 //!    staged. invar makes no commit unless asked; the project's hooks, signing
@@ -36,6 +38,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::acceptance::verify::{self, Report, Stage};
+use crate::format::config::Config;
 use crate::format::decision::DRAFT_FILE;
 use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
@@ -53,6 +57,8 @@ pub struct Closed {
     pub plan_dir: PathBuf,
     pub staged: Staged,
     pub committed: Committed,
+    /// What the check of the locks said without refusing.
+    pub warnings: Vec<String>,
 }
 
 /// Whether the deletion was committed.
@@ -80,7 +86,7 @@ pub enum Staged {
 pub fn close(
     root: &ProjectRoot,
     spec: &Path,
-    mode: Mode,
+    config: &Config,
     commit: Option<&str>,
 ) -> Result<Closed, DoneError> {
     let plan_dir = spec
@@ -93,12 +99,18 @@ pub fn close(
         .to_owned();
 
     // 1. The Plan is approved and unchanged; changes nothing.
-    check::check(root, spec, mode).map_err(DoneError::Check)?;
+    let approved = check::check(root, spec, Mode::of(config)).map_err(DoneError::Check)?;
 
     // 2. A draft entry nobody approved: the developer decides its fate.
     let draft = plan_dir.join(DRAFT_FILE);
     if draft.symlink_metadata().is_ok() {
         return Err(DoneError::DraftPending { draft });
+    }
+
+    // 3. The locks hold, and none is half done.
+    let report = verify::for_ticket(root, config, &approved, Stage::Closing);
+    if !report.holds() {
+        return Err(DoneError::Locks(report));
     }
 
     // `--commit` is checked before anything is deleted: a message that is
@@ -119,20 +131,20 @@ pub fn close(
         }
     };
 
-    // 3. Delete. `remove_dir_all` does not follow a symlinked directory: it
+    // 4. Delete. `remove_dir_all` does not follow a symlinked directory: it
     //    unlinks it, and leaves what it pointed at alone.
     fs::remove_dir_all(&plan_dir).map_err(|source| DoneError::Remove {
         plan_dir: plan_dir.clone(),
         source,
     })?;
 
-    // 4. Stage the deletion.
+    // 5. Stage the deletion.
     let staged = stage(root, &relative).map_err(|source| DoneError::Stage {
         plan_dir: plan_dir.clone(),
         source,
     })?;
 
-    // 5. Commit it, alone, when asked.
+    // 6. Commit it, alone, when asked.
     let committed = match commit {
         None => Committed::NotAsked,
         Some((_, false)) => Committed::NothingTracked,
@@ -152,6 +164,7 @@ pub fn close(
         plan_dir,
         staged,
         committed,
+        warnings: report.warnings,
     })
 }
 
@@ -202,6 +215,8 @@ pub enum DoneError {
     /// A draft decision entry is still in the Plan directory. Nothing was
     /// changed.
     DraftPending { draft: PathBuf },
+    /// The acceptance locks do not hold. Nothing was changed.
+    Locks(Report),
     /// The Plan directory could not be removed (perhaps in part).
     Remove {
         plan_dir: PathBuf,
@@ -244,6 +259,7 @@ impl fmt::Display for DoneError {
                  then run `invar done` again. Nothing was changed",
                 draft.display()
             ),
+            Self::Locks(report) => write!(f, "{report}\nNothing was changed"),
             Self::Remove { plan_dir, source } => write!(
                 f,
                 "cannot remove {}: {source}. Part of it may be gone already; remove the rest \

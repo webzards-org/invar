@@ -7,7 +7,6 @@ use anyhow::{Context as _, Result};
 
 use crate::done::{self, Committed, DoneError, Staged};
 use crate::format::config::Done as DoneConfig;
-use crate::format::plan::Mode;
 use crate::fs;
 use crate::fs::plans::parse_dir_name;
 use crate::gate::check::CheckError;
@@ -67,10 +66,9 @@ fn close(args: Args) -> Result<()> {
         }
     };
     let config = super::config(&root)?;
-    let mode = Mode::of(&config);
     let commit = commit_message(&args, &config.done, &spec);
 
-    let closed = match done::close(&root, &spec, mode, commit.as_deref()) {
+    let closed = match done::close(&root, &spec, &config, commit.as_deref()) {
         Ok(closed) => closed,
         // The refusal for a Plan that is not valid in form says "fix every
         // problem listed above"; here is the list it points at.
@@ -81,6 +79,9 @@ fn close(args: Args) -> Result<()> {
         Err(err) => return Err(err.into()),
     };
 
+    for warning in &closed.warnings {
+        eprintln!("warning: {warning}");
+    }
     let shown = target::shown(&closed.plan_dir, &cwd);
     match (&closed.staged, &closed.committed) {
         (_, Committed::Yes(message)) => {

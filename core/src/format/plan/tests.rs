@@ -1,5 +1,5 @@
 //! Tests for Plan parsing and writing (M1-6), against
-//! `contracts/formats/plan-header.md` v1.7.0.
+//! `contracts/formats/plan-header.md` v1.7.1.
 //!
 //! The valid Plan used throughout is the contract's own example 9.1, read out
 //! of the Markdown, so the contract and the parser cannot drift apart.
@@ -1754,6 +1754,39 @@ fn an_emphasised_id_counts_as_no_id_in_an_approved_plan() {
 }
 
 // --- which Plans show `## Acceptance tests to change` --------------------------
+
+#[test]
+fn the_items_of_the_tests_to_change_are_read_with_their_actions() {
+    use super::{TestAction, TestToChange};
+
+    let text = with_tests_to_change(
+        "- tests/Acceptance/a.php — change — the rule moved\n\
+         <!-- - tests/Acceptance/hidden.php — delete — a comment is not an item -->\n\
+         - tests/Acceptance/b.php — delete — the feature is gone — for good",
+    );
+    let plan = Plan::parse(&text, Mode::Light).unwrap();
+    assert_eq!(
+        plan.tests_to_change(),
+        [
+            TestToChange {
+                path: "tests/Acceptance/a.php".to_owned(),
+                action: TestAction::Change,
+            },
+            TestToChange {
+                path: "tests/Acceptance/b.php".to_owned(),
+                action: TestAction::Delete,
+            },
+        ]
+    );
+
+    let none = with_tests_to_change("_none_");
+    assert!(
+        Plan::parse(&none, Mode::Light)
+            .unwrap()
+            .tests_to_change()
+            .is_empty()
+    );
+}
 
 #[test]
 fn the_tests_to_change_are_there_only_when_the_plan_lists_some() {

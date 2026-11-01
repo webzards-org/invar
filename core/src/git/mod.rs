@@ -285,6 +285,19 @@ const REVIEW_DIFF: &[&str] = &[
 /// and the reviewer must not see the log (M1-20, §7); the Plan is in it too,
 /// and is shown separately.
 pub fn branch_diff(dir: &Path, base: &str) -> Result<BranchDiff, GitError> {
+    let fork = merge_base(dir, base)?;
+
+    // The context size is given only to the patch: `--unified` implies `-p`,
+    // and the `--numstat` run would print the whole patch after its stats.
+    Ok(BranchDiff {
+        patch: review_diff(dir, &fork, &["--unified=3", "--inter-hunk-context=0"])?,
+        numstat: review_diff(dir, &fork, &["--numstat"])?,
+    })
+}
+
+/// The commit where `HEAD` left `base`: `git merge-base`. A shallow clone may not have
+/// one, and then git's own words say so.
+pub fn merge_base(dir: &Path, base: &str) -> Result<String, GitError> {
     // `--end-of-options`: a base that begins with `-` is a name, not an option.
     let wanted = format!("{base}^{{commit}}");
     let output = run(
@@ -309,14 +322,108 @@ pub fn branch_diff(dir: &Path, base: &str) -> Result<BranchDiff, GitError> {
     if !output.status.success() {
         return Err(failed(MERGE_BASE, &output));
     }
-    let fork = text(MERGE_BASE, &output.stdout)?.trim().to_owned();
+    Ok(text(MERGE_BASE, &output.stdout)?.trim().to_owned())
+}
 
-    // The context size is given only to the patch: `--unified` implies `-p`,
-    // and the `--numstat` run would print the whole patch after its stats.
-    Ok(BranchDiff {
-        patch: review_diff(dir, &fork, &["--unified=3", "--inter-hunk-context=0"])?,
-        numstat: review_diff(dir, &fork, &["--numstat"])?,
-    })
+/// Whether the repository has only part of its history:
+/// `git rev-parse --is-shallow-repository`.
+pub fn is_shallow(dir: &Path) -> Result<bool, GitError> {
+    const COMMAND: &str = "git rev-parse --is-shallow-repository";
+    let output = run(dir, &["rev-parse", "--is-shallow-repository"])?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(text(COMMAND, &output.stdout)?.trim() == "true")
+}
+
+/// The files under `path` (relative to `dir`, as the results are) that differ from
+/// `fork` in `HEAD`, in the index or in the work tree, sorted.
+///
+/// No rename detection: a rename is one path deleted and another added. `--relative`,
+/// because `dir` may be below the repository's top level, and `-z`, so that a path is
+/// never quoted. A path that is not UTF-8 is an error, not a path silently not checked.
+pub fn changed_since(dir: &Path, fork: &str, path: &str) -> Result<Vec<String>, GitError> {
+    const COMMAND: &str = "git diff --name-only";
+    let mut changed = Vec::new();
+    for sides in [&[fork, "HEAD"][..], &["--cached", fork][..], &[fork][..]] {
+        let mut args = vec![
+            "--literal-pathspecs",
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--no-ext-diff",
+            "--relative",
+        ];
+        args.extend_from_slice(sides);
+        args.extend(["--", path]);
+        let output = run(dir, &args)?;
+        if !output.status.success() {
+            return Err(failed(COMMAND, &output));
+        }
+        for field in output.stdout.split(|&byte| byte == 0) {
+            if !field.is_empty() {
+                changed.push(text(COMMAND, field)?.to_owned());
+            }
+        }
+    }
+    changed.sort();
+    changed.dedup();
+    Ok(changed)
+}
+
+/// The bytes of `path` (relative to `dir`) at `rev`. `None` when no file is there.
+///
+/// `ls-tree` first, so that "no such file" is an answer and any other failure of git
+/// is an error; `cat-file`, so that no filter or textconv touches the bytes.
+pub fn file_at(dir: &Path, rev: &str, path: &str) -> Result<Option<Vec<u8>>, GitError> {
+    const COMMAND: &str = "git ls-tree";
+    let output = run(dir, &["ls-tree", "-z", rev, "--", path])?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    // `<mode> <type> <oid>\t<path>`.
+    let entry = String::from_utf8_lossy(&output.stdout);
+    let mut fields = entry.split_whitespace();
+    match (fields.nth(1), fields.next()) {
+        (Some("blob"), Some(oid)) => blob(dir, oid).map(Some),
+        _ => Ok(None),
+    }
+}
+
+/// The bytes of `path` (relative to `dir`) in the index. `None` when it is not there.
+pub fn file_in_index(dir: &Path, path: &str) -> Result<Option<Vec<u8>>, GitError> {
+    const COMMAND: &str = "git ls-files --stage";
+    let output = run(
+        dir,
+        &[
+            "--literal-pathspecs",
+            "ls-files",
+            "--stage",
+            "-z",
+            "--",
+            path,
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    // `<mode> <oid> <stage>\t<path>`. During a merge there are several, and any will do:
+    // the caller asks whether it is what the merge base has.
+    let entry = String::from_utf8_lossy(&output.stdout);
+    match entry.split_whitespace().nth(1) {
+        Some(oid) => blob(dir, oid).map(Some),
+        None => Ok(None),
+    }
+}
+
+fn blob(dir: &Path, oid: &str) -> Result<Vec<u8>, GitError> {
+    const COMMAND: &str = "git cat-file blob";
+    let output = run(dir, &["cat-file", "blob", oid])?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(output.stdout)
 }
 
 fn review_diff(dir: &Path, fork: &str, extra: &[&str]) -> Result<String, GitError> {
@@ -499,9 +606,9 @@ impl fmt::Display for GitError {
             Self::CannotRun { source } => write!(f, "cannot run `git`: {source}"),
             Self::BaseNotFound { base } => write!(
                 f,
-                "the base branch `{base}` is not a branch or commit in this repository; the \
-                 review compares this branch with the one it will be merged into — fetch \
-                 it, or set `git.base_branch` in invar.yaml to its name"
+                "the base branch `{base}` is not a branch or commit in this repository; invar \
+                 compares this branch with the one it will be merged into — fetch it, or set \
+                 `git.base_branch` in invar.yaml to its name"
             ),
             Self::NotADirectory { dir } => write!(
                 f,

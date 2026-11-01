@@ -1,10 +1,10 @@
 # Contract: the `invar-lock:` line
 
-**Version:** 1.1.0 — adds §9, what `invar acceptance lock` checks and writes; see §10
+**Version:** 1.2.0 — adds §10, what verifying a lock means; see §11
 **Status:** stable
 **Implements:** §4d (Checksums); A-2, A-3, A-4, A-5 (`docs/TASKS-AT.md`)
-**Read by:** the core (`format/lock`; `invar hash --lock`; `invar acceptance lock`), any
-later reimplementation
+**Read by:** the core (`format/lock`; `invar hash --lock`; `invar acceptance lock` and
+`verify`; `plan check`; `done`), any later reimplementation
 
 > Changing this file is a **public-contract change** (§14.3). It is made
 > deliberately, in its own PR, with the reason recorded, the version bumped,
@@ -19,8 +19,8 @@ line says which ticket owns the file and, once the file is locked, what the file
 content was at that moment. Nothing else records a lock (D-1).
 
 This contract defines how the line is read, when it is an error, how the digest is
-computed, and how a line comes to be locked (§9). What a mismatch refuses after that
-belongs to the commands that verify locks (AT-9).
+computed, how a line comes to be locked (§9), and what the commands that verify locks
+refuse (§10).
 
 Fixtures: `contracts/fixtures/acceptance/`.
 
@@ -117,7 +117,7 @@ leaves `def test_ac1():\n    assert False\n`, and its digest is the one in examp
 The line names the ticket that last locked the file. A ticket may own several files. A
 later ticket that changes the file through `## Acceptance tests to change`
 (`plan-header.md` §6.5) replaces the ticket on the line, and that is checked by the
-commands that verify locks (AT-9), not here.
+commands that verify locks (§10).
 
 ## 6. Decisions and their reasons
 
@@ -201,6 +201,55 @@ since a written file now reads as already locked.
 **D-16 — Symlinks are not followed, and that includes `acceptance.dir` itself.** A link could
 take a run, and then a write, outside the project, or reach one file by two names. A directory
 that is itself a link reads as no directory.
+
+**D-17 — CI checks integrity only.** `done` deletes the Plan in the PR, so the commit CI sees
+may have no Plan to read a declaration from, and a shallow clone may not have the merge base.
+So `invar acceptance verify` with no ticket needs neither a Plan nor git. What it gives up is
+the branch rule, which `plan check` and `done` make while the Plan exists.
+
+**D-18 — Pending lines are allowed in `plan check`, and refused in `done` and in CI.** The
+test-writer runs `plan check` before it has locked anything, so refusing them there would stop
+the cycle at its first step. A cycle that closes with one has half a lock, and a branch that
+reaches CI with one has a test nobody proved red.
+
+**D-19 — A declared path that is not a locked test is a warning.** A typo cannot let a change
+through: the declaration matches nothing, so the real change is still refused. Refusing the typo
+as well would add nothing but a second reason. A path that breaks §10.2's form is different. It
+can never name a test, so it is a problem.
+
+**D-20 — The honest limit: a digest is not a signature.** Someone who edits a locked file and
+writes the new digest by hand passes §10.1, because `invar hash --lock` prints that digest for
+anyone. §10.2 catches this for another ticket's file, because the version at the merge base is
+out of their reach. For the current ticket's own new files nothing in the core does: review and
+the PR diff are what catch it, as for the Plan's `Approved-checksum`. The lock makes a weakened
+test visible and deliberate. It does not make one impossible.
+
+**D-21 — Removing the `acceptance:` section disables the check.** With no section there is no
+directory to look in, so `verify` warns that there is nothing to verify, and exits 0. `plan check`
+and `done` give one warning, in the same words, for a Plan that says `required`, because a person
+decided that this ticket needs tests and nothing will check them. For a Plan that says `skipped`
+they say nothing, as before this check existed. Pointing `acceptance.dir`
+somewhere else has the same effect on the files left behind. The change to `invar.yaml` is in
+the PR, so review and the decision log are what notice it. The core does not read an older
+config from git to second-guess the current one.
+
+**D-22 — A change is read through the digest, and in all three places.** Comparing bytes would
+call a line-ending conversion by a checkout filter a change, and §4 already says what does not
+count. Comparing only the digest would miss a lock being taken off, since removing the line or
+the digest leaves the covered text alone, so the ticket and the recorded digest are compared
+too. The working tree, the index and `HEAD` are each compared, because the file on disk can be
+put back while the change stays staged or committed, and that change is what the PR will hold.
+
+**D-23 — No repository is a warning, and a repository that cannot answer is a problem.** A
+project outside git has no merge base and no branch, and `invar done` has always worked there,
+so the branch rule is skipped and says so. Inside a repository, a base branch that cannot be
+found, a missing merge base or a git that refuses to look would otherwise be a way past the
+rule, so each is reported. The fix is to fetch, or to set `git.base_branch`.
+
+**D-24 — A missing `acceptance.dir` holds no files, and one that is not a directory is a
+problem.** A project with no acceptance tests yet has nothing wrong with it. A file or a symlink
+at that path (D-16) could hide every lock from the walk, and must not read as zero files that
+all hold.
 
 ## 7. Open questions
 
@@ -377,7 +426,88 @@ locked <TICKET> <N> file(s)
 
 `<N>` counts the files written by this run, not the ones already locked.
 
-## 10. Version history
+## 10. Verifying
+
+One check, used by `plan check`, `done` and `invar acceptance verify`. None of them runs a test
+(A-2): green is the team's CI. Every problem is reported in one run (D-14), each naming its file
+and ticket, and saying what to do.
+
+### 10.1 Integrity
+
+Needs no git and no Plan. Every file under `acceptance.dir`, found as in §9.1:
+
+| What the file holds | Means |
+|---|---|
+| An error of §3.1 | A problem, naming the file and the error |
+| A locked line whose digest is not the file's | A problem, naming the file, the ticket on the line, and both digests |
+
+A missing directory holds no files. A path that exists and is not a directory, or is a symlink,
+is a problem (D-24).
+
+### 10.2 The branch rule
+
+Needs git and the current, approved Plan. It compares the merge base of `HEAD` and the base
+branch (`git.base_branch`, else `origin/HEAD`, else `main`) with the files as they are now, in the
+working tree, the index and `HEAD` (D-22).
+
+**Which files.** Every file under `acceptance.dir` whose version at the merge base has a **locked**
+line for **another** ticket. A file locked there for the current ticket is its own (a ticket's
+second cycle), and needs no declaration.
+
+**What counts.** There is no rename detection: a rename is a delete plus a new file.
+
+- **Deleted:** missing from the working tree, the index or `HEAD`. Allowed only if the Plan lists
+  the path with `delete`. The version at the merge base is read from git, since there is no
+  manifest (A-3).
+- **Changed:** otherwise, when any of the three differs from the merge base. It differs unless its
+  bytes are the same, or its line has the same ticket and the same recorded digest and its digest
+  of §4 is the same. So taking the line or the digest off is a change, and so is naming another
+  ticket on it. A symlink in the file's place is a change. Allowed only if the Plan lists the path
+  with `change`.
+
+The action has to match: a file deleted under a `change` declaration is refused, and the other way
+round.
+
+**The declarations** (`plan-header.md` §6.5):
+
+| A path in `## Acceptance tests to change` | Means |
+|---|---|
+| Absolute, with a `\`, with a `..`, or not under `acceptance.dir` | A problem. `.` and empty segments are ignored |
+| Not a locked test at the merge base | A warning (D-19) |
+| A locked test that did not change | A warning |
+
+**When it cannot run.** Outside a git repository, the rule is skipped with a warning. Inside one, a
+base branch that is not there, no merge base, or git failing is a problem (D-23).
+
+### 10.3 Closing
+
+For `done`, and `verify` with a ticket:
+
+- `Acceptance: required`: at least one **locked** file for the ticket under `acceptance.dir`.
+- `required` or `skipped`: **no pending** line for the ticket (D-18).
+
+### 10.4 The callers
+
+| Command | Checks | Pending lines | Refuses before |
+|---|---|---|---|
+| `plan check <TICKET>` | §10.1, §10.2, after its own checks | Allowed | Printing its `ok:` and `acceptance:` lines, which do not change |
+| `done <TICKET>` | §10.1, §10.2, §10.3, after its own checks | The ticket's are refused | Deleting anything |
+| `invar acceptance verify <TICKET>` | The same as `done`, and what `plan check` refuses | The ticket's are refused | |
+| `invar acceptance verify` | §10.1 | Anywhere under `acceptance.dir`, refused | |
+
+`invar acceptance verify` is an agent's command, and needs no Plan and, with no ticket, no git. It
+exits 0 with one line on stdout, `verified <N> locked file(s)`, or non-zero with nothing on stdout
+and every problem on stderr. `<N>` counts the locked files under `acceptance.dir` whose digest
+holds, for any ticket.
+
+**No `acceptance:` section** (D-21): `verify` warns on stderr that there is nothing to verify, and
+exits 0. `plan check` and `done` go on as before, with one warning on stderr when the Plan says
+`required`, and nothing added to stderr otherwise.
+
+## 11. Version history
+
+**1.2.0** — adds §10 and D-17 to D-24: what verifying a lock means (AT-9). The line, the digest and
+locking do not change.
 
 **1.1.0** — adds §9 and D-8 to D-16: what `invar acceptance lock` checks and writes (AT-8). The
 line and the digest do not change. It is here, not in a contract of its own, because §9 is how

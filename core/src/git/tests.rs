@@ -7,8 +7,8 @@
 use std::path::Path;
 
 use super::{
-    GitError, Instant, WorkTree, base_branch, current_branch, stage_removal, today, user_name,
-    work_tree,
+    GitError, Instant, WorkTree, base_branch, changed_since, current_branch, file_at,
+    file_in_index, is_shallow, merge_base, stage_removal, today, user_name, work_tree,
 };
 use crate::calendar::civil_from_days;
 
@@ -385,4 +385,153 @@ fn a_removal_is_staged_and_an_untracked_path_is_no_error() {
 
     // Never tracked: nothing to stage, and not a failure.
     stage_removal(repo.path(), Path::new(".invar/plans/PROJ-9-never")).unwrap();
+}
+
+// --- the merge base, and what changed since --------------------------------------
+
+/// `main` with `t/a.txt`, `t/b.txt` and `t/c.txt`, and `feat` checked out, one commit
+/// on. Returns the merge base too.
+fn repo_with_tests() -> (Repo, String) {
+    let repo = Repo::new();
+    std::fs::create_dir_all(repo.path().join("t")).unwrap();
+    for name in ["a", "b", "c"] {
+        std::fs::write(repo.path().join(format!("t/{name}.txt")), name).unwrap();
+    }
+    repo.git(&["add", "-A"]);
+    repo.commit("tests");
+    let fork = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    repo.git(&["checkout", "--quiet", "-b", "feat"]);
+    repo.commit("work");
+    (repo, fork)
+}
+
+#[test]
+fn the_merge_base_is_where_the_branch_left_not_where_the_base_is_now() {
+    let (repo, fork) = repo_with_tests();
+    repo.git(&["checkout", "--quiet", "main"]);
+    repo.commit("later on main");
+    repo.git(&["checkout", "--quiet", "feat"]);
+    assert_eq!(merge_base(repo.path(), "main").unwrap(), fork);
+}
+
+#[test]
+fn a_base_that_is_not_there_is_its_own_error() {
+    let (repo, _) = repo_with_tests();
+    let err = merge_base(repo.path(), "develop").unwrap_err();
+    assert!(matches!(err, GitError::BaseNotFound { .. }), "{err}");
+}
+
+#[test]
+fn nothing_changed_is_an_empty_list() {
+    let (repo, fork) = repo_with_tests();
+    assert!(changed_since(repo.path(), &fork, "t").unwrap().is_empty());
+}
+
+#[test]
+fn committed_staged_and_unstaged_changes_all_count_and_only_under_the_path() {
+    let (repo, fork) = repo_with_tests();
+    let write = |path: &str| std::fs::write(repo.path().join(path), "changed").unwrap();
+    write("t/a.txt");
+    write("outside.txt");
+    repo.git(&["add", "-A"]);
+    repo.commit("committed");
+    write("t/b.txt");
+    repo.git(&["add", "t/b.txt"]);
+    write("t/c.txt");
+    assert_eq!(
+        changed_since(repo.path(), &fork, "t").unwrap(),
+        ["t/a.txt", "t/b.txt", "t/c.txt"]
+    );
+}
+
+#[test]
+fn a_change_put_back_on_disk_still_counts() {
+    let (repo, fork) = repo_with_tests();
+    std::fs::write(repo.path().join("t/a.txt"), "changed").unwrap();
+    repo.git(&["add", "t/a.txt"]);
+    std::fs::write(repo.path().join("t/a.txt"), "a").unwrap();
+    assert_eq!(changed_since(repo.path(), &fork, "t").unwrap(), ["t/a.txt"]);
+}
+
+#[test]
+fn a_rename_is_a_delete_and_an_add() {
+    let (repo, fork) = repo_with_tests();
+    repo.git(&["mv", "t/a.txt", "t/z.txt"]);
+    repo.commit("renamed");
+    assert_eq!(
+        changed_since(repo.path(), &fork, "t").unwrap(),
+        ["t/a.txt", "t/z.txt"]
+    );
+}
+
+#[test]
+fn below_the_top_level_paths_are_relative_to_the_directory_asked_from() {
+    let repo = Repo::new();
+    let project = repo.path().join("apps/shop");
+    std::fs::create_dir_all(project.join("t")).unwrap();
+    std::fs::write(project.join("t/a.txt"), "a").unwrap();
+    repo.git(&["add", "-A"]);
+    repo.commit("tests");
+    let fork = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    std::fs::write(project.join("t/a.txt"), "changed").unwrap();
+
+    assert_eq!(changed_since(&project, &fork, "t").unwrap(), ["t/a.txt"]);
+    assert_eq!(file_at(&project, &fork, "t/a.txt").unwrap().unwrap(), b"a");
+    assert_eq!(file_in_index(&project, "t/a.txt").unwrap().unwrap(), b"a");
+}
+
+#[test]
+fn a_file_is_read_at_a_commit_and_in_the_index_and_its_absence_is_an_answer() {
+    let (repo, fork) = repo_with_tests();
+    repo.git(&["rm", "--quiet", "t/a.txt"]);
+    assert_eq!(
+        file_at(repo.path(), &fork, "t/a.txt").unwrap().unwrap(),
+        b"a"
+    );
+    assert_eq!(file_at(repo.path(), &fork, "t/none.txt").unwrap(), None);
+    assert_eq!(
+        file_at(repo.path(), &fork, "t").unwrap(),
+        None,
+        "a directory"
+    );
+    assert_eq!(file_in_index(repo.path(), "t/a.txt").unwrap(), None);
+    assert_eq!(
+        file_in_index(repo.path(), "t/b.txt").unwrap().unwrap(),
+        b"b"
+    );
+}
+
+#[test]
+fn bytes_come_back_as_they_are() {
+    let repo = Repo::new();
+    std::fs::write(repo.path().join("binary"), [0xff, 0x00, 0x0d, 0x0a]).unwrap();
+    repo.git(&["add", "-A"]);
+    repo.commit("binary");
+    assert_eq!(
+        file_at(repo.path(), "HEAD", "binary").unwrap().unwrap(),
+        [0xff, 0x00, 0x0d, 0x0a]
+    );
+}
+
+#[test]
+fn a_revision_that_is_not_there_is_an_error_and_not_an_absent_file() {
+    let (repo, _) = repo_with_tests();
+    assert!(file_at(repo.path(), "no-such-rev", "t/a.txt").is_err());
+}
+
+#[test]
+fn a_repository_with_its_history_is_not_shallow_and_a_depth_one_clone_is() {
+    let (repo, _) = repo_with_tests();
+    assert!(!is_shallow(repo.path()).unwrap());
+    let clone = tempfile::tempdir().unwrap();
+    let url = format!("file://{}", repo.path().display());
+    repo.git(&[
+        "clone",
+        "--quiet",
+        "--depth",
+        "1",
+        &url,
+        &clone.path().to_string_lossy(),
+    ]);
+    assert!(is_shallow(clone.path()).unwrap());
 }
