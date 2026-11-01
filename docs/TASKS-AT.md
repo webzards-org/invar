@@ -675,12 +675,13 @@ code that won't pass. Separating it from the coder is the point of the feature.
 ### Description
 
 - `/invar:approve` accepts `--acceptance` / `--no-acceptance` and passes them to
-  `invar plan approve`; `argument-hint` updated. The argument check in the skill
-  allows exactly these flags.
+  `invar plan approve`; `argument-hint` updated. The skill has no argument check of its
+  own: `plan approve --skill` reports any argument error as `error: …` with exit 0.
 - The protocol skill (`skills/invar/SKILL.md`): after a successful approval the main
   session runs `invar plan check` and reads the `acceptance:` line. `required` →
-  start the test-writer; on `LOCKED`, start the coder. `skipped` → start the coder.
-  On the test-writer's `BLOCKED`, report to the developer and stop.
+  start the test-writer; on `LOCKED`, run `invar acceptance verify`, and start the coder
+  only if it passes. `skipped` → start the coder. On the test-writer's `BLOCKED`, report
+  to the developer and stop.
 - The decision comes from the line on disk, never from the conversation.
 
 ### Purpose
@@ -693,7 +694,8 @@ whether this ticket gets locked tests. The dispatcher never chooses on its own.
 - [ ] `plugin_prompts.rs`: both flags handled; dispatch is conditional on the
       `acceptance:` line; `LOCKED` precedes the coder start
 - [ ] Walkthrough: `/invar:approve T` starts the test-writer, then the coder;
-      `/invar:approve T --no-acceptance` starts the coder directly
+      `/invar:approve T --no-acceptance` starts the coder directly (run on a throwaway
+      project, `plugin/NOTES.md` §14)
 - [ ] A `BLOCKED` from the test-writer starts no coder
 
 **Note from AT-3 (#97).** `invar plan approve --acceptance --no-acceptance` is
@@ -702,7 +704,7 @@ block that exits non-zero loses its output, so `/invar:approve T --acceptance
 --no-acceptance` lands in the skill's "no output at all" path instead of
 showing an `error:` line. Either check the conflict in code, so `--skill`
 formats it, or have the skill's argument check refuse the pair before the
-shell block runs.
+shell block runs. Done the first way (`plugin/NOTES.md` §15).
 
 - [ ] `/invar:approve T --acceptance --no-acceptance` shows an `error:` line
       naming both flags, not the "no output at all" message

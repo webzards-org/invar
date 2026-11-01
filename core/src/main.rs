@@ -32,7 +32,10 @@ use clap::Parser;
 fn main() -> ExitCode {
     let cli = match cli::Cli::try_parse() {
         Ok(cli) => cli,
-        Err(err) => return usage(&err),
+        Err(err) => {
+            let args: Vec<_> = std::env::args_os().skip(1).collect();
+            return usage(&err, cli::is_plan_approve_for_skill(&args));
+        }
     };
 
     match cli.run() {
@@ -59,7 +62,15 @@ fn main() -> ExitCode {
 /// `Write`, `Edit` and `Bash` call in the session, with a usage message as the
 /// reason. So a usage error exits 1, like every other failure, and 2 stays a
 /// verdict someone chose to give.
-fn usage(err: &clap::Error) -> ExitCode {
+///
+/// `for_skill` is `plan approve --skill`: an error goes to stdout and exits 0,
+/// as every refusal of that command does, because a skill's shell block that
+/// exits non-zero loses its output. clap's text already starts with `error: `.
+fn usage(err: &clap::Error, for_skill: bool) -> ExitCode {
+    if for_skill && err.use_stderr() {
+        print!("{err}");
+        return ExitCode::SUCCESS;
+    }
     // Help and version go to stdout, errors to stderr, in clap's own format.
     // If even printing fails there is nowhere left to say so.
     let _ = err.print();

@@ -1,6 +1,6 @@
 ---
 name: invar
-description: The invar cycle for changing code in a project that has an invar.yaml. A ticket is planned by the planner agent, the developer approves the Plan, the coder agent implements it, and the developer closes the cycle. Use it when a ticket or request touches business logic, behavior users can observe, permissions, money or data, or when the developer mentions a ticket, a Plan, acceptance criteria or invar. For trivial work such as a typo or a copy change, skip it and say so.
+description: The invar cycle for changing code in a project that has an invar.yaml. A ticket is planned by the planner agent, the developer approves the Plan, the test-writer agent locks its acceptance tests if the approval requires them, the coder agent implements it, and the developer closes the cycle. Use it when a ticket or request touches business logic, behavior users can observe, permissions, money or data, or when the developer mentions a ticket, a Plan, acceptance criteria or invar. For trivial work such as a typo or a copy change, skip it and say so.
 ---
 
 # The invar cycle
@@ -12,11 +12,11 @@ only way to a different Plan is back through the developer.
 
 You are the **main session**, and in the cycle you are the **dispatcher**. You talk
 to the developer, start the planner and relay its questions, wait at the gate,
-start the coder, offer the review, and tell the developer when the cycle is ready
-to close. **You do not implement an
-approved Plan yourself**: the coder does, in its own context, starting from the
-Plan and nothing you said. The only code you write is the trivial work this skill
-skips the cycle for.
+start the test-writer when the approval requires it and then the coder, offer the
+review, and tell the developer when the cycle is ready to close. **You do not
+implement an approved Plan yourself**: the coder does, in its own context, starting
+from the Plan and nothing you said. The only code you write is the trivial work this
+skill skips the cycle for.
 
 ## Where the session runs
 
@@ -74,7 +74,10 @@ its rules still bind.
 ## The developer approves
 
 Approval is the developer's one manual step, and it is theirs alone: they run
-`/invar:approve`, here in Claude Code. It records who read the Plan and when.
+`/invar:approve`, here in Claude Code. It records who read the Plan and when, and
+whether the ticket gets acceptance tests: `--acceptance` or `--no-acceptance`,
+otherwise what `invar.yaml` says. That decision is theirs too; do not suggest one
+unless they ask.
 
 **Stop and wait.** Never run `invar plan approve` yourself: a hook denies it, and you
 must not look for another way to record an approval.
@@ -87,22 +90,58 @@ once — do. Without that line (a refusal, `already approved`), or with
 it. If they approved some other way (`! invar plan approve <TICKET>` in the
 prompt, or a terminal), they tell you, and you go on.
 
-## Phase 2 — the coder implements
+## Phase 2 — the test-writer if required, then the coder
 
-**Phase 2 begins with `invar plan check <TICKET>`.** Run it before you start the
-coder: it passes only a Plan that is approved and unchanged since. If it refuses,
+**Phase 2 begins with `invar plan check <TICKET>`.** Run it before you start any
+agent: it passes only a Plan that is approved and unchanged since. If it refuses,
 start nothing; tell the developer what it said, in its words, and wait.
 
-Once it passes, **start the coder** (`coder`; `invar:coder` if namespaced) with the
-ticket line and nothing else:
+Read its **`acceptance:` line**: `required` or `skipped`. **The decision comes from
+this line**, never from the conversation, the ticket or your own judgement. If the
+check passes with no such line, the `invar` on `PATH` is older than this plugin:
+start nothing and tell the developer.
+
+Every agent in this phase is started with the ticket line and nothing else:
 
 `Ticket: SHOP-214`
 
 Not your reading of the ticket, not what the developer said before the gate, not
-hints about the code. The coder works from the approved Plan; anything you add is a
-second specification nobody approved. It runs the check again itself, reads the
-Plan and the project's conventions, implements inside the Scope, and runs the
-project's own checks.
+hints about the code. The agents work from the approved Plan; anything you add is a
+second specification nobody approved.
+
+### `acceptance: skipped`
+
+Start the coder, as described under "The coder" below.
+
+### `acceptance: required`
+
+**Start the test-writer** (`test-writer`; `invar:test-writer` if namespaced) with the
+ticket line and nothing else. Do not start the coder yet. It answers with one of two
+things.
+
+- **`LOCKED`** and a short summary — run `invar acceptance verify <TICKET>`. **Only if
+  it passes**, printing `verified <N> locked file(s)`, start the coder. The agent's word
+  is not the check; the command is. If `verify` refuses, or prints anything else, tell
+  the developer what it said, in its words, start no coder, and stop.
+- **`BLOCKED <reason>`** — put it to the developer, as it gave it, and stop. Start no
+  coder. Say what the developer can do:
+  - fix the cause (test infrastructure, a factory), and ask you to go on: you begin
+    Phase 2 again, at `invar plan check <TICKET>`;
+  - approve again with `/invar:approve <TICKET> --reapprove --no-acceptance`, if this
+    ticket should go without tests. A file the test-writer left with a pending
+    `invar-lock:` line has to go first, or `/invar:done` will refuse it later; that is
+    the developer's to remove, not yours;
+  - revise the Plan.
+
+  Do not draft a `failed` entry by default: a test-writer's `BLOCKED` is usually about
+  the project, not the Plan. Only if the reason is that the Plan cannot be tested as
+  approved, offer `/invar:log`, once.
+
+### The coder
+
+**Start the coder** (`coder`; `invar:coder` if namespaced), one per work unit when the
+Plan declares them, with the ticket line and nothing else. It runs the check again itself, reads the Plan and the project's
+conventions, implements inside the Scope, and runs the project's own checks.
 
 It answers with one of two things.
 
@@ -193,8 +232,10 @@ entry is still beside the Plan: the developer records it with
 ## Models
 
 Each agent has a default model: the planner a strong one (`opus`) — the developer
-approves its work, so a weak Plan weakens the gate itself — the coder a cheaper one
-(`sonnet`), because everything it produces is checked on disk. You may choose
+approves its work, so a weak Plan weakens the gate itself — the test-writer a strong
+one too (`opus`), because the coder is held to its tests and may not change them, and
+the coder a cheaper one (`sonnet`), because everything it produces is checked on
+disk. You may choose
 another for one call with the `Agent` tool's `model` parameter: `sonnet`, `opus`,
 `haiku` or `fable`. It overrides the agent's own.
 
@@ -203,6 +244,9 @@ another for one call with the `Agent` tool's `model` parameter: `sonnet`, `opus`
 - **A planner on anything but its default is said aloud**, before the gate: *"The
   Plan was written by sonnet, not by the planner's default."* The developer is about
   to approve that model's work.
+- **A test-writer on anything but its default is said aloud**, before the coder
+  starts: *"The acceptance tests were written by sonnet, not by the test-writer's
+  default."* The coder will be held to that model's tests.
 - **If an agent fails because its model is unavailable** — an error naming
   `model_not_found`, or HTTP 404 for the model — there is no fallback. Put the error
   to the developer and offer to run the agent again with `model: sonnet`. Never
@@ -222,6 +266,9 @@ implementing it.
 - implement an approved Plan yourself, or tell the coder more than the ticket line;
 - run `invar plan approve` or `invar done`;
 - edit an approved Plan, or start the coder on a draft;
+- start the coder for a `required` ticket before `invar acceptance verify` passes;
+- edit or write tests yourself, or run `invar acceptance lock`: that is the
+  test-writer's;
 - answer the planner's questions for the developer;
 - record a decision entry: never `invar decision approve`, never `invar decision record`
   — the developer records it, with `/invar:log-approve`;
@@ -233,9 +280,10 @@ implementing it.
 
 | | |
 |---|---|
-| `invar plan check <TICKET>` | before you start the coder; refuses draft, changed and unrecorded approvals |
+| `invar plan check <TICKET>` | before you start any agent; refuses draft, changed and unrecorded approvals; its `acceptance:` line decides who starts |
+| `invar acceptance verify <TICKET>` | yours, after the test-writer's `LOCKED`; the coder starts only if it passes |
 | `invar plan validate <TICKET>` | form of a draft Plan (the planner runs it) |
-| `/invar:approve` | the developer's; starts Phase 2 when the approval is recorded, unless `--no-start` |
+| `/invar:approve` | the developer's; `--acceptance` or `--no-acceptance` decides whether the ticket gets acceptance tests (otherwise `invar.yaml`); starts Phase 2 when the approval is recorded, unless `--no-start` |
 | `/invar:review` | the developer's, before `done`, unless `review.offer: false` |
 | `/invar:log` | the developer's: drafts the decision entry, at the end of Phase 2 or after `BLOCKED` |
 | `invar decision validate <TICKET>` | form of a draft entry (`/invar:log` runs it) |

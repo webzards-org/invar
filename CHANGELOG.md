@@ -33,7 +33,7 @@
   and if the body changed too, it prints that the earlier approval cannot confirm
   the value. On a Plan already approved and unchanged, a flag changes
   nothing unless `--reapprove` is given too. The planner does not write the field,
-  and a `failed` entry clears it. Nothing acts on the value yet.
+  and a `failed` entry clears it. The main session acts on the value in Phase 2.
 
 - **The `acceptance:` section in `invar.yaml`** (contract 2.2.0): `dir` and `run`
   are required, `required` defaults to `true` and is the default for `plan approve`,
@@ -85,7 +85,20 @@
   `LOCKED` only after the command's `locked <TICKET> <N> file(s)` line, or `BLOCKED` with
   the reason. It never changes application code, factories, seeders or the Plan, and reads
   neither `BUSINESS_CONTEXT.md` nor the decision log. `AI_CONTEXT.md` reaches it through a
-  second `SubagentStart` hook. The main session does not start it yet.
+  second `SubagentStart` hook.
+
+- **`/invar:approve` takes `--acceptance` and `--no-acceptance`, and Phase 2 starts the
+  test-writer for a required ticket.** After a recorded approval the main session reads the
+  `acceptance:` line of `invar plan check`, never the conversation. With `skipped` it starts
+  the coder. With `required` it starts the test-writer, and the coder only after `LOCKED`
+  and a passing `invar acceptance verify`. A test-writer's `BLOCKED` goes to the developer
+  and starts no coder. Approval is still the developer's only manual step.
+
+- **`plan approve --skill` reports argument errors as `error: …` with exit 0**, including
+  `--acceptance --no-acceptance` and an unknown flag, so `/invar:approve` shows the reason
+  instead of "no output at all". Without `--skill` they still exit 1 on stderr, and other
+  commands are unchanged. The text for the two flags together changed: it now names them in
+  invar's words, not clap's.
 
 - **`--colors=never` in the Pest examples** of `invar init`, the messages and the contract
   (`invar-yaml.md` 2.2.2), because Pest's colour codes reached the "tests did not run"

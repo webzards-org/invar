@@ -14,7 +14,7 @@
 //! is the file changing in the meantime, which the commit refuses, and a disk
 //! that fails.
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 
 use crate::format::plan::{Acceptance, Mode};
 use crate::gate::approval::Prior;
@@ -43,7 +43,8 @@ pub struct Args {
     /// keeps the value in its header; otherwise the value is `acceptance.required`
     /// from `invar.yaml`, and `skipped` when there is no such section. On a Plan
     /// already approved it changes nothing unless `--reapprove` is given as well.
-    #[arg(long, conflicts_with = "no_acceptance")]
+    /// Refused together with `--no-acceptance`.
+    #[arg(long)]
     pub acceptance: bool,
 
     /// This ticket needs no acceptance tests: records `Acceptance: skipped`.
@@ -72,7 +73,7 @@ pub struct Args {
     /// Approve without starting Phase 2: ends the output with `Phase 2: not
     /// started (--no-start)`.
     ///
-    /// For `/invar:approve`, which starts the coder once an approval is
+    /// For `/invar:approve`, which starts Phase 2 once an approval is
     /// recorded; with this the developer implements later, or elsewhere.
     /// What is recorded is the same either way.
     #[arg(long)]
@@ -97,6 +98,13 @@ pub fn run(args: Args) -> Result<()> {
 }
 
 fn approve(args: Args) -> Result<()> {
+    // Here and not clap's `conflicts_with`: clap would refuse the pair before
+    // `--skill` is read, and `/invar:approve` would lose the reason.
+    if args.acceptance && args.no_acceptance {
+        bail!(
+            "`--acceptance` cannot be used with `--no-acceptance`: name the one this ticket needs"
+        );
+    }
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
     let query = match args.target {
         Some(target) => target,
