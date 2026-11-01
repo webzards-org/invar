@@ -120,10 +120,8 @@ relock it; unlocking therefore has to be explicit and human.
 Each one is closed by the task named. A recommendation is not a decision.
 
 - **OQ-1 — Is there a developer override for a green-before-code test?** Closed
-  by AT-8.
-  *Recommendation (not a decision):* not in this command
-  (`invar acceptance lock`); the test-writer answers `BLOCKED` and the developer
-  decides.
+  by AT-8: not in this command (`invar acceptance lock`); the test-writer answers
+  `BLOCKED` and the developer decides (`acceptance-lock.md` D-12).
 - **OQ-2 — Are factories and shared helpers ever locked?** Closed by AT-11 and
   AT-14.
   *Recommendation (not a decision):* the test-writer may add factory states, and
@@ -480,9 +478,17 @@ Gherkin later is a change to this command, not to the agent.
 Locking is the agent's step (the test-writer runs it). It cannot be used to relock a
 weakened test once code exists, because those tests no longer fail (A-4).
 
-Close the open question from AT-1: whether a developer may lock a green test (e.g.
-a criterion describing behavior that already exists). Recommended: not in this
-command; the test-writer answers `BLOCKED` and the developer decides.
+This closes the open question from AT-1, whether a developer may lock a green test (e.g.
+a criterion describing behavior that already exists): not in this command; the
+test-writer answers `BLOCKED` and the developer decides.
+
+**Note from AT-6:** an empty report means the tests did not run. Pest and PHPUnit write
+0 bytes when they cannot load the tests, and the reader reports that as **Empty**. It is
+refused as "the tests did not run", with the runner's stderr, and nothing about coverage
+or red.
+
+The behavior is in `contracts/formats/acceptance-lock.md` §9. A failure between two
+renames is the only partial write, and its message names what was written (D-15).
 
 ### Purpose
 
@@ -499,6 +505,8 @@ weaken": complete against the criteria, proven to test something, and frozen.
 - [ ] Refuses on a Plan that is not approved or `Acceptance: skipped`
 - [ ] End-to-end test on a tiny fixture project with a fake `run` command that
       writes a canned report
+- [ ] An empty report is refused as "the tests did not run", with the runner's
+      stderr, and nothing is locked
 
 ---
 

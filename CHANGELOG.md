@@ -39,7 +39,7 @@
   are required, `required` defaults to `true` and is the default for `plan approve`,
   `style` is `integration` (`gherkin` is reserved), and `fakes_allowed` is passed on
   as it is. `run` is a list run without a shell, with `{report}` and `{files}` each
-  exactly once as a whole element. Nothing runs it yet. **Configs without the section
+  exactly once as a whole element. **Configs without the section
   behave as before.** `plan approve --acceptance` needs the section and is refused
   without it, and a recorded `required` kept by `--reapprove` with no section prints a
   warning. `invar init` writes the section commented out, because its values depend
@@ -49,14 +49,15 @@
   in `contracts/fixtures/acceptance/`): one line near the top of an acceptance test,
   with any comment prefix, naming its ticket and, once locked, the digest of the file
   without that line. `invar hash --lock <file>` prints that digest and says what the
-  line records. Nothing writes or enforces the line yet.
+  line records. `invar acceptance lock` writes the digest, and nothing enforces the
+  line yet.
 
 - **A reader for JUnit XML test results** (new contract `test-results.md` 1.0.0, with
   real Pest and PHPUnit reports in `contracts/fixtures/junit/`): each test case's
   outcome (`passed`, `failure`, `error`, `skipped`), its file relative to the project
   root, and the `AC<n>` token in its name. The exit code of a run is never read, and
-  the ticket comes from the file's lock line, never from a name. Nothing runs tests
-  yet.
+  the ticket comes from the file's lock line, never from a name. A failure's type
+  and the start of its message are kept, for showing only (contract 1.1.0).
 
 - **`invar acceptance spec <TICKET>`** prints everything the test-writer needs: the
   style, `acceptance.dir`, the `run` command, `fakes_allowed`, the conventions of the
@@ -65,6 +66,18 @@
   refuses what `plan check` refuses, a ticket approved as `skipped`, an `invar.yaml`
   with no `acceptance:` section, and criteria with no ids. Never the decision log, or
   `BUSINESS_CONTEXT.md` beyond what the Plan quotes. No agent uses it yet.
+
+- **`invar acceptance lock <TICKET>`** turns a ticket's pending acceptance tests into
+  locked ones, and is the first command that runs anything (`acceptance-lock.md` 1.1.0
+  §9). It runs `acceptance.run` on the ticket's files and reads the JUnit report, never
+  the exit code. It writes the digests only if every criterion has a test, every test
+  has exactly one `AC<n>` token of this Plan, and every new test fails on an assertion.
+  A test that passes, errors or is skipped is refused, and a test that passes has no
+  override: the test-writer answers `BLOCKED` and the developer decides. An empty or
+  missing report is refused as "the tests did not run", with the runner's own output.
+  All the problems are listed at once, and a refusal writes nothing. A run that takes
+  over 10 minutes is killed and refused. On success the last line is
+  `locked <TICKET> <N> file(s)`. No agent uses it yet, and nothing enforces a lock yet.
 
 - **`plan check` prints one more line** on success: `acceptance: required` or
   `acceptance: skipped`. Every existing line stays as it was.

@@ -6,7 +6,7 @@ contracts: changing one is a deliberate, versioned PR (see `../README.md`).
 
 | File | Version | Specifies | Implemented by |
 |---|---|---|---|
-| `invar-yaml.md` | 2.2.0 | `invar.yaml`: the keys M1 reads (including `done.commit` and the `acceptance` section), the §6 keys it ignores, value rules (§6) | M1-3; `done.*` read by `invar done` |
+| `invar-yaml.md` | 2.2.1 | `invar.yaml`: the keys M1 reads (including `done.commit` and the `acceptance` section), the §6 keys it ignores, value rules (§6) | M1-3; `done.*` read by `invar done` |
 | `plan-header.md` | 1.7.0 | The Plan header and required sections, per mode (§4a, §5c), the ids of the acceptance criteria, `## Acceptance tests to change`, the `Acceptance` field, and what `plan approve` writes | M1-6 (parsing), M1-7 (lookup), M1-8 (`plan validate`), M1-9 (`plan approve`), AT-2 (ids, the new section); read by M1-10 |
 | `decision-entry.md` | 1.3.1 | A decision entry: filename, front matter, the four types, insert-only, who writes, and the `failed` reset (§7, §4c); and its draft in the Plan directory (§8.1) | M1-11 (`decision record`, `decision log`), `decision validate` (the draft); read by M1-12 to M1-14 |
 | `acceptance-lock.md` | 1.1.0 | The `invar-lock:` line of an acceptance test: grammar, where it may stand, errors, the digest of a locked file (§4d), and what `invar acceptance lock` checks and writes | AT-5: `format/lock`, `invar hash --lock`; AT-8: `acceptance/lock` |
