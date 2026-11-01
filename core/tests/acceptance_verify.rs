@@ -874,14 +874,21 @@ fn done_in_a_shallow_clone_refuses_and_says_how_to_fix_it() {
         &[
             "shallow clone",
             "`develop`",
-            "git fetch --deepen=200 origin develop:develop",
-            "--unshallow",
+            "git fetch --unshallow origin develop:develop",
             "fetch-depth: 0",
             "git branch develop origin/develop",
             "git.base_branch",
         ],
     );
     assert!(clone.has_plan());
+    // It counts from a shallow boundary that a ref fetched for the first time does not
+    // have, and git 2.56 leaves the merge base missing.
+    let assert = clone.done().failure();
+    assert!(
+        !stderr_of(&assert).contains("--deepen"),
+        "{}",
+        stderr_of(&assert)
+    );
 }
 
 #[test]
@@ -889,7 +896,7 @@ fn the_fetch_the_message_gives_lets_done_pass_the_branch_rule() {
     let project = ready_on_develop();
     let clone = Clone::shallow(&project);
     clone.done().failure();
-    clone.git(&["fetch", "-q", "--deepen=200", "origin", "develop:develop"]);
+    clone.git(&["fetch", "-q", "--unshallow", "origin", "develop:develop"]);
     clone.done().success();
     assert!(!clone.has_plan());
 }
@@ -907,7 +914,7 @@ fn after_the_fetch_the_branch_rule_really_compares() {
     let project = ready_on_develop();
     let weaker = project.locked("SHOP-1", "it('AC1 works', fn () => true);\n");
     let clone = Clone::shallow(&project);
-    clone.git(&["fetch", "-q", "--deepen=200", "origin", "develop:develop"]);
+    clone.git(&["fetch", "-q", "--unshallow", "origin", "develop:develop"]);
     clone.write(OTHERS, &weaker);
     refused(
         clone.done(),
@@ -918,7 +925,7 @@ fn after_the_fetch_the_branch_rule_really_compares() {
 
 #[test]
 fn a_fetch_that_makes_no_ref_is_not_enough() {
-    // The form that looks right: it deepens, and creates no branch. The clone is not
+    // The form that looks right: it brings the history, and creates no branch. The clone is not
     // shallow any more, so this is the message for a base that is simply not there.
     let project = ready_on_develop();
     let clone = Clone::shallow(&project);
@@ -929,7 +936,7 @@ fn a_fetch_that_makes_no_ref_is_not_enough() {
         message.contains("the base branch `develop` is not a branch"),
         "{message}"
     );
-    assert!(!message.contains("--deepen"), "{message}");
+    assert!(!message.contains("--unshallow"), "{message}");
 }
 
 #[test]

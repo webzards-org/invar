@@ -141,8 +141,8 @@ base branch by the name invar looks for, since `actions/checkout` creates only `
   run: invar done SHOP-214 --commit "chore: remove the Plan of SHOP-214"
 ```
 
-In a checkout you already have, `git fetch --deepen=200 origin develop:develop` does the same.
-Without the `develop:develop`, the fetch deepens the clone and still creates no branch.
+In a checkout you already have, `git fetch --unshallow origin develop:develop` does the same.
+Without the `develop:develop`, the fetch brings the history and still creates no branch.
 
 ---
 
