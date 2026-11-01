@@ -29,6 +29,9 @@ pub fn run(args: Args) -> Result<()> {
 
     match lock::lock(&root, &plan, mode, config.acceptance.as_ref()) {
         Ok(locked) => {
+            for warning in &locked.warnings {
+                eprintln!("warning: {warning}");
+            }
             print!("{}", locked.render());
             Ok(())
         }

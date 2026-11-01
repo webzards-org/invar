@@ -424,3 +424,307 @@ fn an_unknown_flag_without_skill_stays_a_failure_on_stderr() {
         .stdout("")
         .stderr(contains("--bogus"));
 }
+
+// --- `lock` with a record ---------------------------------------------------------------------
+
+impl Project {
+    fn lock(&self) -> Assert {
+        self.run(&["acceptance", "lock", "SHOP-214"])
+    }
+
+    /// What the next run reports, for [`A`] and [`B`].
+    fn outcomes(&self, a: &str, b: &str) {
+        self.write(
+            "canned.xml",
+            &report(&[case(A, "it AC1 cancels", a), case(B, "it AC2 refuses", b)]),
+        );
+    }
+}
+
+const SKIPPED_A: &str =
+    "red check skipped for tests/Acceptance/a_test.php (unlocked by the developer, round 1)\n";
+
+#[test]
+fn an_unlocked_file_that_now_passes_locks_and_the_output_names_it() {
+    let project = Project::new();
+    project.unlock(&[A]).success();
+    project.outcomes("", "");
+
+    project
+        .lock()
+        .success()
+        .stdout(contains(SKIPPED_A))
+        .stdout(contains("sub/b_test.php (unlocked").not())
+        .stdout(predicate::str::ends_with("locked SHOP-214 1 file(s)\n"));
+    assert!(project.read(A).contains("sha256:"));
+}
+
+#[test]
+fn an_unlocked_file_that_still_fails_on_an_assertion_locks_too() {
+    let project = Project::new();
+    project.unlock(&[A]).success();
+    project.outcomes("failure", "");
+    project.lock().success().stdout(contains(SKIPPED_A));
+}
+
+#[test]
+fn an_unlocked_file_with_an_error_or_a_skip_is_refused_and_stays_pending() {
+    for outcome in ["error", "skipped"] {
+        let project = Project::new();
+        project.unlock(&[A]).success();
+        project.outcomes(outcome, "");
+        let record = project.read(RECORD);
+
+        project.lock().failure().stdout("").stderr(contains(A));
+        assert_eq!(project.read(A), PENDING, "{outcome}");
+        assert_eq!(
+            project.read(RECORD),
+            record,
+            "{outcome}: a refusal keeps it"
+        );
+    }
+}
+
+#[test]
+fn the_token_checks_and_coverage_still_apply_to_an_unlocked_file() {
+    let project = Project::new();
+    project.unlock(&[A]).success();
+    project.write(
+        "canned.xml",
+        &report(&[
+            case(A, "it cancels with no token", ""),
+            case(B, "it AC2 refuses", ""),
+        ]),
+    );
+    project
+        .lock()
+        .failure()
+        .stderr(contains("no `AC<n>` token"))
+        .stderr(contains("no test covers"));
+    assert_eq!(project.read(A), PENDING);
+}
+
+#[test]
+fn another_file_in_the_same_run_still_gets_the_red_check() {
+    let project = Project::new();
+    project.unlock(&[A]).success();
+    let new = "tests/Acceptance/new_test.php";
+    project.write(new, PENDING);
+    project.write(
+        "canned.xml",
+        &report(&[
+            case(A, "it AC1 cancels", ""),
+            case(B, "it AC2 refuses", ""),
+            case(new, "it AC2 also refuses", ""),
+        ]),
+    );
+    project
+        .lock()
+        .failure()
+        .stdout("")
+        .stderr(contains(new))
+        .stderr(contains("passes before the code exists"));
+    assert_eq!(project.read(A), PENDING, "nothing is locked on a refusal");
+
+    // Red, it locks, beside the file that passed.
+    project.write(
+        "canned.xml",
+        &report(&[
+            case(A, "it AC1 cancels", ""),
+            case(B, "it AC2 refuses", ""),
+            case(new, "it AC2 also refuses", "failure"),
+        ]),
+    );
+    project
+        .lock()
+        .success()
+        .stdout(contains(SKIPPED_A))
+        .stdout(contains("new_test.php (unlocked").not())
+        .stdout(contains("locked SHOP-214 2 file(s)\n"));
+}
+
+#[test]
+fn a_pending_file_the_record_does_not_list_gets_the_red_check() {
+    // Taking the digest off by hand grants nothing.
+    let project = Project::new();
+    project.unlock(&[B]).success();
+    project.write(A, PENDING);
+    project.outcomes("", "");
+    project
+        .lock()
+        .failure()
+        .stderr(contains(A))
+        .stderr(contains("passes before the code exists"));
+}
+
+#[test]
+fn the_record_is_updated_once_locked_and_the_file_is_unlocked_once() {
+    let project = Project::new();
+    project.unlock(&[A]).success();
+    project.outcomes("", "");
+    project.lock().success();
+    assert_eq!(project.read(RECORD), format!("round: 1\nclosed 1 {A}\n"));
+
+    // Taking the digest off again by hand, now that the entry is closed, grants nothing.
+    project.write(A, PENDING);
+    project
+        .lock()
+        .failure()
+        .stderr(contains("passes before the code exists"));
+}
+
+#[test]
+fn an_open_entry_whose_file_is_not_pending_is_ignored_with_a_warning_and_closed() {
+    for gone in [false, true] {
+        let project = Project::new();
+        let locked = project.read(A);
+        project.unlock(&[A, B]).success();
+        if gone {
+            fs::remove_file(project.root().join(A)).unwrap();
+            project.write(
+                "canned.xml",
+                &report(&[case(B, "it AC2 refuses", ""), case(B, "it AC1 cancels", "")]),
+            );
+        } else {
+            project.write(A, &locked);
+            project.outcomes("", "");
+        }
+
+        project
+            .lock()
+            .success()
+            .stderr(contains(format!("warning: {A}: in the unlock record")))
+            .stdout(contains(format!("red check skipped for {B}")))
+            .stdout(contains("a_test.php (unlocked").not());
+        let record = project.read(RECORD);
+        assert!(!record.contains("open "), "{record}");
+    }
+}
+
+#[test]
+fn a_record_that_cannot_be_read_stops_lock_and_runs_nothing() {
+    let project = Project::new();
+    project.unlock(&[A]).success();
+    project.write(RECORD, "round: 1\nopen 1\n");
+    project.write("fake-runner.sh", "touch ran\n");
+    project
+        .lock()
+        .failure()
+        .stdout("")
+        .stderr(contains("cannot read the unlock record"));
+    assert!(!project.root().join("ran").exists());
+    assert_eq!(project.read(A), PENDING);
+}
+
+#[test]
+fn a_ticket_with_no_record_writes_none() {
+    let project = Project::new();
+    assert!(!project.root().join(RECORD).exists());
+}
+
+// --- who says so ------------------------------------------------------------------------------
+
+#[test]
+fn spec_prints_the_unlocked_files_only_while_they_wait() {
+    let project = Project::new();
+    let spec = || {
+        let assert = project.run(&["acceptance", "spec", "SHOP-214"]).success();
+        String::from_utf8(assert.get_output().stdout.clone()).unwrap()
+    };
+    let before = spec();
+    assert!(!before.contains("=== Unlocked tests ==="), "{before}");
+
+    project.unlock(&[A]).success();
+    let out = spec();
+    let section = out.split_once("=== Unlocked tests ===").unwrap().1;
+    assert!(section.contains(&format!("- {A} (round 1 of 2)")), "{out}");
+    assert!(!section.contains("b_test.php"), "{out}");
+    assert!(section.contains("Fix exactly these files"), "{out}");
+    assert!(section.contains("word for word"), "{out}");
+    assert!(
+        section.contains("Do not weaken them to pass the code"),
+        "{out}"
+    );
+    assert!(
+        out.find("=== Unlocked tests ===") < out.find("=== Next step ==="),
+        "{out}"
+    );
+
+    project.outcomes("", "");
+    project.lock().success();
+    assert_eq!(spec(), before, "once locked, the spec is what it was");
+}
+
+#[test]
+fn verify_says_which_files_were_unlocked_on_stderr_and_keeps_its_one_line() {
+    let project = Project::new();
+    project
+        .run(&["acceptance", "verify", "SHOP-214"])
+        .success()
+        .stdout("verified 2 locked file(s)\n")
+        .stderr(contains("unlocked by the developer").not());
+
+    project.unlock(&[A]).success();
+    // Pending: `verify` refuses, as for any pending line (§10.3).
+    project
+        .run(&["acceptance", "verify", "SHOP-214"])
+        .failure()
+        .stderr(contains("a pending line for SHOP-214"));
+
+    project.outcomes("", "");
+    project.lock().success();
+    project
+        .run(&["acceptance", "verify", "SHOP-214"])
+        .success()
+        .stdout("verified 2 locked file(s)\n")
+        .stderr(contains(format!(
+            "unlocked by the developer: {A} (round 1)\n"
+        )));
+    // With no ticket there is no Plan to read a record beside.
+    project
+        .run(&["acceptance", "verify"])
+        .success()
+        .stderr(contains("unlocked by the developer").not());
+}
+
+#[test]
+fn done_says_which_files_were_unlocked_and_the_record_goes_with_the_plan() {
+    let project = Project::new();
+    project.unlock(&[A]).success();
+    project.outcomes("", "");
+    project.lock().success();
+
+    project
+        .run(&["done", "SHOP-214"])
+        .success()
+        .stdout(contains(format!(
+            "unlocked by the developer: {A} (round 1)\nremoved: "
+        )));
+    assert!(!project.root().join(PLAN_DIR).exists());
+}
+
+#[test]
+fn done_refuses_an_unlocked_file_that_was_never_locked_again() {
+    let project = Project::new();
+    project.unlock(&[A]).success();
+    project
+        .run(&["done", "SHOP-214"])
+        .failure()
+        .stderr(contains("a pending line for SHOP-214"));
+    assert!(project.root().join(RECORD).exists());
+}
+
+#[test]
+fn a_record_that_cannot_be_read_is_a_warning_for_verify_and_done() {
+    let project = Project::new();
+    project.write(RECORD, "nonsense\n");
+    project
+        .run(&["acceptance", "verify", "SHOP-214"])
+        .success()
+        .stdout("verified 2 locked file(s)\n")
+        .stderr(contains("warning: cannot read the unlock record"));
+    project
+        .run(&["done", "SHOP-214"])
+        .success()
+        .stderr(contains("warning: cannot read the unlock record"));
+}

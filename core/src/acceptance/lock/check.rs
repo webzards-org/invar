@@ -29,6 +29,7 @@ pub fn check(
     ticket: &str,
     criteria: &[Criterion],
     found: &Found,
+    unlocked: &[&str],
     cases: &[TestCase],
 ) -> Result<Coverage, Problems> {
     let mut coverage: Coverage = criteria
@@ -76,6 +77,8 @@ pub fn check(
         if new {
             match case.outcome {
                 Outcome::Failure => {}
+                // The code exists now, so a corrected test may pass (D-28).
+                Outcome::Passed if unlocked.contains(&case.file.as_str()) => {}
                 Outcome::Passed => wrong.push(Wrong::Passed),
                 Outcome::Skipped => wrong.push(Wrong::Skipped),
                 Outcome::Error => wrong.push(Wrong::Error {

@@ -81,6 +81,25 @@ impl Record {
         out
     }
 
+    /// Every file unlocked so far, with its round, for saying so (§11.4).
+    pub fn entries(&self) -> impl Iterator<Item = &Entry> {
+        self.closed.iter().chain(&self.open)
+    }
+
+    /// The round of a file waiting for `lock`, which is what grants the skip.
+    pub fn open_round(&self, path: &str) -> Option<u32> {
+        self.open
+            .iter()
+            .find(|entry| entry.path == path)
+            .map(|entry| entry.round)
+    }
+
+    /// `lock` succeeded: nothing is open any more, and no old entry can grant a skip
+    /// later. The round stays (D-29).
+    pub fn close_all(&mut self) {
+        self.closed.append(&mut self.open);
+    }
+
     /// Whether every round is used.
     pub fn exhausted(&self) -> bool {
         self.round >= MAX_ROUNDS
@@ -148,6 +167,20 @@ mod tests {
             "round: 2\nopen 2 tests/a b.php\nclosed 1 tests/a b.php\nclosed 1 tests/c.php\n"
         );
         assert_eq!(Record::parse(&text).unwrap(), record);
+    }
+
+    #[test]
+    fn closing_keeps_the_history_and_the_round_and_grants_nothing_more() {
+        let mut record = Record::default();
+        record.unlock(&["a".to_owned()]);
+        assert_eq!(record.open_round("a"), Some(1));
+        assert_eq!(record.open_round("b"), None);
+        record.close_all();
+        assert_eq!(record.open_round("a"), None);
+        assert_eq!(record.round, 1);
+        record.unlock(&["a".to_owned()]);
+        let rounds: Vec<u32> = record.entries().map(|entry| entry.round).collect();
+        assert_eq!(rounds, [1, 2]);
     }
 
     #[test]

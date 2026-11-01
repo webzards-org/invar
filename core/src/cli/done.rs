@@ -82,6 +82,10 @@ fn close(args: Args) -> Result<()> {
     for warning in &closed.warnings {
         eprintln!("warning: {warning}");
     }
+    // On stdout, which is what `/invar:done` shows (D-31), and above the line it keys on.
+    for line in &closed.unlocked {
+        println!("{line}");
+    }
     let shown = target::shown(&closed.plan_dir, &cwd);
     match (&closed.staged, &closed.committed) {
         (_, Committed::Yes(message)) => {

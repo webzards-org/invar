@@ -10,7 +10,10 @@
 //!    new text and one more arm in [`conventions`], with no branches inside a text;
 //! 4. the approved Plan's **criteria**, each with its id and full text;
 //! 5. its **Scope** and **Implementation context**;
-//! 6. the **next step**.
+//! 6. its **Acceptance tests to change**, when it has any, and what to do with them;
+//! 7. the **unlocked** files, when there are any, and what to do with them
+//!    (`acceptance-lock.md` §11.4);
+//! 8. the **next step**.
 //!
 //! What it never contains: `BUSINESS_CONTEXT.md` beyond what the Plan quotes, the
 //! decision log, the pasted ticket, the questions or the rejected alternatives. The
@@ -22,13 +25,18 @@
 //! approved text from the agent that must test it.
 
 use std::fmt::{self, Write as _};
+use std::fs;
 use std::path::Path;
 
 use crate::format::config::{ACCEPTANCE_SECTION_EXAMPLE, AcceptanceConfig, AcceptanceStyle};
+use crate::format::lock;
 use crate::format::plan::{Acceptance, Mode, Plan, PlanError};
+use crate::format::unlock::{Entry, MAX_ROUNDS};
 use crate::fs::ProjectRoot;
 use crate::gate::check::{self, CheckError};
 use crate::review_input::section;
+
+use super::unlock::{self, ReadError};
 
 #[cfg(test)]
 mod tests;
@@ -69,7 +77,23 @@ pub fn build(
     config: Option<&AcceptanceConfig>,
 ) -> Result<String, SpecError> {
     let (plan, config) = usable(root, spec, mode, config)?;
-    Ok(render(&plan, config))
+    let plan_dir = spec.parent().unwrap_or(root.path());
+    let record = unlock::read_record(plan_dir).map_err(SpecError::Record)?;
+    // An open entry whose file is not pending is `lock`'s to warn about (§11.3). There is
+    // nothing here for the test-writer to fix.
+    let unlocked: Vec<Entry> = record
+        .open
+        .into_iter()
+        .filter(|entry| is_pending(&root.path().join(&entry.path)))
+        .collect();
+    Ok(render(&plan, config, &unlocked))
+}
+
+fn is_pending(path: &Path) -> bool {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| lock::read(&bytes).ok().flatten())
+        .is_some_and(|line| line.recorded.is_none())
 }
 
 /// The Plan and the section, if tests may be written or locked for this ticket: the
@@ -101,8 +125,9 @@ pub fn usable<'a>(
 /// the environment or the file system.
 ///
 /// The caller decides that the Plan may be used: approved, unchanged since, `required`
-/// and with ids, as [`build`] does.
-pub fn render(plan: &Plan, config: &AcceptanceConfig) -> String {
+/// and with ids, as [`build`] does. `unlocked` is the files of the unlock record that
+/// are waiting to be fixed.
+pub fn render(plan: &Plan, config: &AcceptanceConfig, unlocked: &[Entry]) -> String {
     let ticket = &plan.header().ticket;
     let mut out = String::new();
 
@@ -138,6 +163,40 @@ pub fn render(plan: &Plan, config: &AcceptanceConfig) -> String {
         heading(&mut out, name);
         out.push_str(&section(plan, name));
         out.push('\n');
+    }
+
+    if !plan.tests_to_change().is_empty() {
+        heading(&mut out, "Acceptance tests to change");
+        out.push_str(&section(plan, "Acceptance tests to change"));
+        out.push('\n');
+        let _ = writeln!(
+            out,
+            "\nFor a `delete` item, remove the file, and test what this ticket's criteria need in \
+             a file of its own. For a `change` item, stop and answer `BLOCKED`, naming the file: \
+             a file locked for another ticket cannot be made this ticket's yet."
+        );
+    }
+
+    if !unlocked.is_empty() {
+        heading(&mut out, "Unlocked tests");
+        let _ = writeln!(
+            out,
+            "The developer unlocked these files, because a locked test was believed wrong:\n"
+        );
+        for entry in unlocked {
+            let _ = writeln!(
+                out,
+                "- {} (round {} of {MAX_ROUNDS})",
+                entry.path, entry.round
+            );
+        }
+        let _ = writeln!(
+            out,
+            "\nFix exactly these files to match their criteria, word for word, and change no \
+             other file. Do not weaken them to pass the code: they are checked against the \
+             criteria, not against the code. The code exists now, so a test in these files may \
+             pass, and need not fail first; an error or a skipped test is still refused."
+        );
     }
 
     heading(&mut out, "Next step");
@@ -181,6 +240,7 @@ pub enum SpecError {
         ticket: String,
     },
     Read(PlanError),
+    Record(ReadError),
 }
 
 impl fmt::Display for SpecError {
@@ -207,6 +267,7 @@ impl fmt::Display for SpecError {
                  it again with `--reapprove`"
             ),
             Self::Read(err) => err.fmt(f),
+            Self::Record(err) => err.fmt(f),
         }
     }
 }

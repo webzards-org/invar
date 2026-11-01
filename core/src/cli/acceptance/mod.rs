@@ -17,7 +17,9 @@ pub enum Command {
     /// style, `acceptance.dir`, the `run` command, `fakes_allowed`, the conventions
     /// of the style, every criterion with its id, and the Plan's Scope and
     /// Implementation context. Never `BUSINESS_CONTEXT.md` beyond what the Plan
-    /// quotes, and never the decision log. Nothing is cut for size.
+    /// quotes, and never the decision log. Nothing is cut for size. When there are any, also
+    /// the files the developer unlocked, and the Plan's `## Acceptance tests to change`, each
+    /// with what to do.
     ///
     /// The same Plan and config print the same bytes. Refuses, with nothing on
     /// stdout, what `plan check` refuses; a ticket approved as `skipped`; an
@@ -33,8 +35,10 @@ pub enum Command {
     ///
     /// Every criterion needs a test, every test exactly one `AC<n>` token of this
     /// Plan, and every new test has to fail on an assertion: one that passes, errors
-    /// or is skipped is refused, and there is no override. All the problems are
-    /// listed at once, and a refusal writes nothing.
+    /// or is skipped is refused, and there is no override. The one difference is a
+    /// file the developer unlocked with `invar acceptance unlock`, which may pass too, and
+    /// the output names it. All the problems are listed at once, and a refusal writes
+    /// nothing.
     ///
     /// Refuses first what `invar acceptance spec` refuses. On success the last line
     /// is `locked <TICKET> <N> file(s)`.
@@ -63,7 +67,8 @@ pub enum Command {
     /// ticket when its Plan says `required`, with no pending line left.
     ///
     /// Prints `verified <N> locked file(s)`, or every problem on stderr and exits
-    /// non-zero. With no `acceptance:` section it warns and exits 0.
+    /// non-zero. With no `acceptance:` section it warns and exits 0. With a ticket, it
+    /// says on stderr which files the developer unlocked.
     Verify(verify::Args),
 }
 

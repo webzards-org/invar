@@ -6,6 +6,7 @@
 
 use anyhow::{Context as _, Result};
 
+use crate::acceptance::unlock;
 use crate::acceptance::verify::{self, Report, Stage};
 use crate::cli::plan::require_approved;
 use crate::cli::plan::target;
@@ -39,10 +40,12 @@ pub fn run(args: Args) -> Result<()> {
         return Ok(());
     };
 
+    let mut plan_dir = None;
     let report: Report = match &args.target {
         None => verify::whole_directory(&root, acceptance),
         Some(ticket) => {
             let (_, spec) = target::resolve(ticket, &cwd)?;
+            plan_dir = spec.parent().map(ToOwned::to_owned);
             match check::check(&root, &spec, Mode::of(&config)) {
                 Ok(approved) => verify::for_ticket(&root, &config, &approved, Stage::Closing),
                 Err(CheckError::Invalid(report)) => {
@@ -59,6 +62,14 @@ pub fn run(args: Args) -> Result<()> {
     }
     for warning in &report.warnings {
         eprintln!("warning: {warning}");
+    }
+    // On stderr: the main session reads stdout, and it is one line (§10.4, D-31).
+    match plan_dir.as_deref().map(unlock::said).transpose() {
+        Ok(said) => said
+            .unwrap_or_default()
+            .iter()
+            .for_each(|line| eprintln!("{line}")),
+        Err(err) => eprintln!("warning: {err}"),
     }
     println!("verified {} locked file(s)", report.locked);
     Ok(())

@@ -218,6 +218,20 @@ pub fn read_record(plan_dir: &Path) -> Result<Record, ReadError> {
     Record::parse(&text).map_err(|source| ReadError::Invalid { path, source })
 }
 
+/// A line per file unlocked, as `verify` and `done` print them (§11.4), or the warning
+/// to give instead. A record is information here, and refuses nothing.
+pub fn said(plan_dir: &Path) -> Result<Vec<String>, ReadError> {
+    Ok(read_record(plan_dir)?
+        .entries()
+        .map(|entry| {
+            format!(
+                "unlocked by the developer: {} (round {})",
+                entry.path, entry.round
+            )
+        })
+        .collect())
+}
+
 /// Beside the original and then a rename, so that the record is never half written, and a
 /// link at its path is replaced and not followed.
 pub fn write_record(plan_dir: &Path, record: &Record) -> io::Result<()> {

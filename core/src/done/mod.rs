@@ -9,7 +9,8 @@
 //!    reviewed, and that is the one way this flow could lose it silently.
 //! 3. refuse unless the acceptance locks hold (`acceptance-lock.md` §10), with
 //!    no pending line left. No test is run (A-2).
-//! 4. delete the Plan directory.
+//! 4. delete the Plan directory, and with it the unlock record, having read what
+//!    it says for the output (`acceptance-lock.md` §11.4).
 //! 5. stage the deletion (`git rm -r --cached`), so it goes into the same
 //!    commit — and the same PR — as the code.
 //! 6. with `--commit <MESSAGE>` — or `done.commit: true` in `invar.yaml`,
@@ -38,6 +39,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::acceptance::unlock;
 use crate::acceptance::verify::{self, Report, Stage};
 use crate::format::config::Config;
 use crate::format::decision::DRAFT_FILE;
@@ -59,6 +61,8 @@ pub struct Closed {
     pub committed: Committed,
     /// What the check of the locks said without refusing.
     pub warnings: Vec<String>,
+    /// Which files the developer unlocked in this cycle, a line each.
+    pub unlocked: Vec<String>,
 }
 
 /// Whether the deletion was committed.
@@ -108,10 +112,15 @@ pub fn close(
     }
 
     // 3. The locks hold, and none is half done.
-    let report = verify::for_ticket(root, config, &approved, Stage::Closing);
+    let mut report = verify::for_ticket(root, config, &approved, Stage::Closing);
     if !report.holds() {
         return Err(DoneError::Locks(report));
     }
+    // Read now, because the record goes with the directory.
+    let unlocked = unlock::said(&plan_dir).unwrap_or_else(|err| {
+        report.warnings.push(err.to_string());
+        Vec::new()
+    });
 
     // `--commit` is checked before anything is deleted: a message that is
     // empty, or a project outside git, refuses with the Plan still in place.
@@ -165,6 +174,7 @@ pub fn close(
         staged,
         committed,
         warnings: report.warnings,
+        unlocked,
     })
 }
 
