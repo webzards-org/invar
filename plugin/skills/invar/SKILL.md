@@ -139,8 +139,8 @@ things.
 
 ### The coder
 
-**Start the coder** (`coder`; `invar:coder` if namespaced) with the ticket line and
-nothing else. It runs the check again itself, reads the Plan and the project's
+**Start the coder** (`coder`; `invar:coder` if namespaced), one per work unit when the
+Plan declares them, with the ticket line and nothing else. It runs the check again itself, reads the Plan and the project's
 conventions, implements inside the Scope, and runs the project's own checks.
 
 It answers with one of two things.

@@ -511,6 +511,7 @@ fn a_required_ticket_starts_the_test_writer_then_verify_then_the_coder() {
 
     // The coder's section comes after the test-writer's.
     assert!(flat.find("### `acceptance: required`") < flat.find("**Start the coder**"));
+    assert!(flat.contains("one per work unit when the Plan declares them"));
 }
 
 #[test]
