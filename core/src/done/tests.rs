@@ -8,12 +8,17 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 use super::{Closed, DoneError, Staged, plan_for_branch};
-use crate::format::plan::Mode;
+use crate::format::config::{self, Config};
 use crate::fs::ProjectRoot;
 
+/// An `invar.yaml` with nothing in it: `tests/acceptance_verify.rs` covers the locks.
+fn no_section() -> Config {
+    config::parse("", Path::new("invar.yaml")).unwrap().config
+}
+
 /// `done` without `--commit`.
-fn close(root: &ProjectRoot, spec: &Path, mode: Mode) -> Result<Closed, DoneError> {
-    super::close(root, spec, mode, None)
+fn close(root: &ProjectRoot, spec: &Path) -> Result<Closed, DoneError> {
+    super::close(root, spec, &no_section(), None)
 }
 
 fn contract_example(number: &str) -> String {
@@ -51,7 +56,7 @@ fn deletes_the_plan_and_writes_nothing_else() {
     let (_dir, root, spec) = project(&approved_plan());
     let plan_dir = spec.parent().unwrap().to_owned();
 
-    let closed = close(&root, &spec, Mode::Light).unwrap();
+    let closed = close(&root, &spec).unwrap();
 
     assert_eq!(closed.plan_dir, plan_dir);
     assert!(!plan_dir.exists());
@@ -70,7 +75,7 @@ fn deletes_the_plan_and_writes_nothing_else() {
 fn a_draft_plan_refuses_and_changes_nothing() {
     let (_dir, root, spec) = project(&contract_example("9.1"));
 
-    let err = close(&root, &spec, Mode::Light).unwrap_err();
+    let err = close(&root, &spec).unwrap_err();
 
     assert!(matches!(err, DoneError::Check(_)), "{err}");
     assert!(err.to_string().contains("is still a draft"), "{err}");
@@ -85,7 +90,7 @@ fn a_changed_plan_refuses_and_changes_nothing() {
         .replace("refused with 403", "refused with 409");
     fs::write(&spec, edited).unwrap();
 
-    let err = close(&root, &spec, Mode::Light).unwrap_err();
+    let err = close(&root, &spec).unwrap_err();
 
     assert!(
         err.to_string().contains("changed after it was approved"),
@@ -102,7 +107,7 @@ fn an_unapproved_draft_entry_refuses_and_keeps_both() {
     let draft = spec.with_file_name("decision.md");
     fs::write(&draft, "---\nticket: SHOP-214\n---\n\nKept.\n").unwrap();
 
-    let err = close(&root, &spec, Mode::Light).unwrap_err();
+    let err = close(&root, &spec).unwrap_err();
 
     assert!(matches!(err, DoneError::DraftPending { .. }), "{err}");
     let message = err.to_string();
@@ -120,7 +125,7 @@ fn a_decision_entry_is_not_required() {
     // nor looks for one.
     let (_dir, root, spec) = project(&approved_plan());
     assert!(!root.decisions_dir().exists());
-    close(&root, &spec, Mode::Light).unwrap();
+    close(&root, &spec).unwrap();
     assert!(!root.decisions_dir().exists());
 }
 
@@ -141,7 +146,7 @@ fn a_plan_that_cannot_be_removed_is_reported() {
     // Removing a directory needs write permission on its *parent*.
     fs::set_permissions(&plans_dir, fs::Permissions::from_mode(0o500)).unwrap();
 
-    let result = close(&root, &spec, Mode::Light);
+    let result = close(&root, &spec);
 
     fs::set_permissions(&plans_dir, fs::Permissions::from_mode(0o700)).unwrap();
 
@@ -160,7 +165,7 @@ fn a_plan_that_cannot_be_removed_is_reported() {
 fn an_empty_commit_message_refuses_and_changes_nothing() {
     let (_dir, root, spec) = project(&approved_plan());
     for message in ["", "   ", "\n"] {
-        let err = super::close(&root, &spec, Mode::Light, Some(message)).unwrap_err();
+        let err = super::close(&root, &spec, &no_section(), Some(message)).unwrap_err();
         assert!(matches!(err, DoneError::EmptyCommitMessage), "{err}");
         assert!(spec.exists());
     }
@@ -171,7 +176,7 @@ fn commit_outside_a_repository_refuses_and_changes_nothing() {
     // Not a git repository: there is nothing to commit into, so the Plan is
     // not deleted only to fail afterwards.
     let (_dir, root, spec) = project(&approved_plan());
-    let err = super::close(&root, &spec, Mode::Light, Some("chore: remove")).unwrap_err();
+    let err = super::close(&root, &spec, &no_section(), Some("chore: remove")).unwrap_err();
     assert!(
         matches!(err, DoneError::CommitOutsideRepository { .. }),
         "{err}"

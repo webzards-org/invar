@@ -1,11 +1,13 @@
 //! `invar plan check <TICKET | PATH>`.
 //!
 //! `ok: <path> — …` and `acceptance: required|skipped` on stdout when the
-//! approval holds; otherwise one error on stderr that says what happened and
-//! what to do, and a non-zero exit.
+//! approval and the acceptance locks hold (`acceptance-lock.md` §10); otherwise
+//! an error on stderr that says what happened and what to do, and a non-zero exit.
 
 use anyhow::{Context as _, Result};
 
+use crate::acceptance::verify::{self, Stage};
+use crate::format::plan::Mode;
 use crate::gate::check::{self, CheckError};
 
 use super::target;
@@ -24,10 +26,19 @@ pub struct Args {
 pub fn run(args: Args) -> Result<()> {
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
     let (root, spec) = target::resolve(&args.target, &cwd)?;
-    let mode = super::mode(&root)?;
+    let config = crate::cli::config(&root)?;
+    let mode = Mode::of(&config);
 
     match check::check(&root, &spec, mode) {
         Ok(approved) => {
+            // Before the lines below, so that they are only ever there when it holds.
+            let report = verify::for_ticket(&root, &config, &approved, Stage::Working);
+            if !report.holds() {
+                return Err(report.into());
+            }
+            for warning in &report.warnings {
+                eprintln!("warning: {warning}");
+            }
             println!(
                 "ok: {} — approved by {} on {}, unchanged since ({})",
                 target::shown(&approved.spec, &cwd),

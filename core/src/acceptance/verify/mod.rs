@@ -6,9 +6,11 @@
 
 use std::fmt;
 
-use crate::format::config::AcceptanceConfig;
+use crate::format::config::{AcceptanceConfig, Config};
 use crate::format::lock::LockLine;
+use crate::format::plan::{Acceptance, Mode, Plan};
 use crate::fs::ProjectRoot;
+use crate::gate::check::Approved;
 
 use super::lock::find::{self, Scan, Scanned};
 
@@ -50,8 +52,82 @@ impl fmt::Display for Report {
 
 impl std::error::Error for Report {}
 
+/// How far along the cycle is, which decides whether a pending line may be there (D-18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stage {
+    /// `plan check`: the test-writer may not have locked anything yet.
+    Working,
+    /// `done`, and `verify` with a ticket.
+    Closing,
+}
+
+/// The check for a ticket whose Plan holds: §10.1, §10.2 and, when closing, §10.3.
+pub fn for_ticket(
+    root: &ProjectRoot,
+    config: &Config,
+    approved: &Approved,
+    stage: Stage,
+) -> Report {
+    let mut report = Report::default();
+    let Some(acceptance) = &config.acceptance else {
+        // No directory to look in (D-21). Said once, when the cycle closes, and not for
+        // a ticket that never wanted tests.
+        if stage == Stage::Closing && approved.acceptance == Acceptance::Required {
+            report.warnings.push(format!(
+                "{}: the Plan says `Acceptance: required`, and invar.yaml has no `acceptance:` \
+                 section, so there is nothing to verify",
+                approved.ticket
+            ));
+        }
+        return report;
+    };
+
+    let files = integrity(root, &acceptance.dir, &mut report);
+
+    match Plan::read(&approved.spec, Mode::of(config)) {
+        Ok(plan) => branch::check(
+            root,
+            &acceptance.dir,
+            &approved.ticket,
+            &plan.tests_to_change(),
+            config.git.base_branch.as_deref(),
+            &mut report,
+        ),
+        Err(err) => report.problems.push(err.to_string()),
+    }
+
+    if stage == Stage::Closing {
+        closing(&files, approved, &acceptance.dir, &mut report);
+    }
+    report
+}
+
+/// §10.3.
+fn closing(files: &[Scanned], approved: &Approved, dir: &str, report: &mut Report) {
+    let ticket = &approved.ticket;
+    let lines = || {
+        files.iter().filter_map(|file| {
+            let line = file.line.as_ref().ok()?;
+            (line.ticket == *ticket).then_some((&file.path, line))
+        })
+    };
+    if approved.acceptance == Acceptance::Required
+        && !lines().any(|(_, line)| line.recorded.is_some())
+    {
+        report.problems.push(format!(
+            "{ticket}: the Plan says `Acceptance: required`, and no file under {dir} is locked \
+             for it. The test-writer writes the tests and runs `invar acceptance lock {ticket}`"
+        ));
+    }
+    for (path, line) in lines().filter(|(_, line)| line.recorded.is_none()) {
+        report.problems.push(pending_problem(path, line));
+    }
+}
+
 /// What `invar acceptance verify` with no ticket checks: §10.1, and a pending line
 /// anywhere is a problem (D-17, D-18). Needs no Plan, and never runs git.
+// `invar acceptance verify` is the caller (AT-9); remove this with its arrival.
+#[allow(dead_code)]
 pub fn whole_directory(root: &ProjectRoot, config: &AcceptanceConfig) -> Report {
     let mut report = Report::default();
     for file in integrity(root, &config.dir, &mut report) {

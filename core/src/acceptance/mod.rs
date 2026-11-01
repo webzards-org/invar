@@ -6,7 +6,4 @@
 
 pub mod lock;
 pub mod spec;
-// `plan check`, `done` and `invar acceptance verify` arrive later in AT-9; remove this
-// with them.
-#[allow(dead_code)]
 pub mod verify;
