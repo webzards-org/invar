@@ -86,7 +86,7 @@ is a change to one command's output, not to the agent.
 
 **A-8 — A locked test the coder believes wrong is `BLOCKED-TEST`, and only the
 developer can unlock it.** The unlock is `/invar:relock`, mirroring
-`/invar:approve`. The coder must not be the one who decides that a test is
+`/invar:approve`, which runs `invar acceptance unlock` (`acceptance-lock.md` D-25). The coder must not be the one who decides that a test is
 wrong. A corrected test would pass once code exists, so A-4 alone could never
 relock it; unlocking therefore has to be explicit and human.
 
@@ -131,6 +131,12 @@ Each one is closed by the task named. A recommendation is not a decision.
   *Recommendation (not a decision):* `Approved-checksum` covers the body plus the
   canonical line `Acceptance: <value>`, and a Plan approved before this contract
   (no field) keeps today's digest.
+- **OQ-4 — How does a file locked for another ticket become the current ticket's?** Open. Its test
+  names carry that ticket's ids, so a `change` declared in `## Acceptance tests to change` has no
+  route through the test-writer: it answers `BLOCKED`, naming the file (AT-13). A `delete` works
+  today: the test-writer removes the file, and the branch rule allows it.
+  *Recommendation (not a decision):* delete it and rewrite it under the current ticket's criteria,
+  which a planner can already declare as `delete`.
 
 ---
 
@@ -591,7 +597,7 @@ under `acceptance.dir` are judged, and only for `Write` and `Edit`:
 - Same failure rule as today: any doubt lets the call through, including a malformed
   lock line in the target; exit 2 only for deny.
 
-`--relock` moved to AT-13, where the flag is made.
+`--relock` moved to AT-13, where it became `acceptance unlock`.
 
 ### Purpose
 
@@ -727,13 +733,18 @@ shell block runs. Done the first way (`plugin/NOTES.md` §15).
   `Acceptance: required` it never writes tests with a lock line; with `skipped` it
   writes its own tests without one.
 - **Main session:** reports `BLOCKED-TEST` to the developer and stops.
-- **`/invar:relock <TICKET> [file]`:** a skill with `disable-model-invocation: true`
-  and shell injection, like `/invar:approve`. It runs
-  `invar acceptance lock <TICKET> --relock`: clears the digest so the test-writer can
-  fix the test, and on the next `lock` the red check is skipped **only** for files
-  the developer relocked. `--relock` is human-only: it goes on `HUMAN_ONLY` here, where the flag is made.
-- After the developer relocks, the main session starts the test-writer for the fix,
-  then the coder again. At most two such rounds; then the cycle is `failed`.
+- **`invar acceptance unlock <TICKET> <file>...`:** the developer's, on `HUMAN_ONLY`. All or
+  nothing, it takes each named file back to pending and notes it in the unlock record,
+  `.invar/plans/<TICKET>-<slug>/unlocked`. A subcommand of its own, in place of the
+  `lock --relock` first planned (`acceptance-lock.md` D-25).
+- **`/invar:relock <TICKET> <file>...`:** a skill with `disable-model-invocation: true`
+  and shell injection, like `/invar:approve`, running that command.
+- **`invar acceptance lock`:** for a file that is open in the record and pending, no red check; an
+  error or a skipped test is still refused. The output names it, and the entry closes.
+- After the developer relocks, the main session starts the test-writer for the fix, then
+  `verify`, then the coder again. At most two such rounds; a third is refused, and the cycle
+  is `failed`.
+- `invar acceptance spec` prints the unlocked files, and `## Acceptance tests to change` (OQ-4).
 
 ### Purpose
 
@@ -744,12 +755,12 @@ a person's decision, exactly as approval is, so a weakening is never automatic.
 
 - [ ] `plugin_prompts.rs`: the coder has all three answer shapes; the relock skill
       has `disable-model-invocation: true` spelled exactly
-- [ ] `--relock` skips the red check only for the named files, and is recorded in
-      the command output
-- [ ] `acceptance lock --relock` is on `HUMAN_ONLY`: from the agent's Bash it is denied,
+- [ ] The red check is skipped only for the named files, and the command output says so
+- [ ] `acceptance unlock` is on `HUMAN_ONLY`: from the agent's Bash it is denied,
       and `--help` is allowed
 - [ ] Walkthrough ticket with a seeded wrong test ends in `BLOCKED-TEST`, a relock,
-      and `DONE`; no criterion text changed
+      and `DONE`; no criterion text changed (run on a throwaway project,
+      `plugin/NOTES.md` §14)
 
 ---
 
@@ -812,7 +823,9 @@ as always (L-7).
   `/invar:log` drafts it from the Plan; `invar decision approve` validates it.
   Absent means unknown (entries before this contract).
 - PR description (`pr_body`): shows `Acceptance` and, when required, the locked
-  tests per criterion; when skipped, says so plainly in the first lines.
+  tests per criterion; when skipped, says so plainly in the first lines. It also lists
+  the files the developer unlocked and their rounds (AT-13): `invar done` deletes the
+  unlock record with the Plan, so the PR is where that has to survive.
 
 ### Purpose
 

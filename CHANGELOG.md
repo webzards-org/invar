@@ -94,11 +94,35 @@
   and a passing `invar acceptance verify`. A test-writer's `BLOCKED` goes to the developer
   and starts no coder. Approval is still the developer's only manual step.
 
+- **`BLOCKED-TEST` and `/invar:relock`: a locked test can be wrong, and only the developer
+  can say so** (`acceptance-lock.md` 1.3.0 §11). The coder answers `BLOCKED-TEST <file> <AC>
+  <reason>` and changes no test, and the main session puts it to the developer and stops.
+  `/invar:relock <TICKET> <file>...` runs `invar acceptance unlock`, which agents are denied. It
+  takes each file back to pending, all or nothing, and notes it in an `unlocked` record beside the
+  Plan. The main session then starts the test-writer, runs `invar acceptance verify`, and starts
+  the coder again. A ticket has two rounds; a third is refused and says to end the cycle as
+  `failed`.
+
+- **`invar acceptance lock` skips the red check for a file the developer unlocked**, and only for
+  that file, once per unlock. It may pass or fail on an assertion. An error or a skipped test is
+  still refused, tokens and coverage apply as always, and the output names each file that skipped
+  the check. `invar acceptance verify <TICKET>` (on stderr) and `invar done` (on stdout) list what
+  was unlocked. `plan guard` denies `Write` and `Edit` of the record; a shell can still write it,
+  and a skip is never quiet (D-30).
+
+- **`invar acceptance spec` prints more, when there is more.** The unlocked files, and a Plan's
+  `## Acceptance tests to change`, each with what to do: a `delete` is removed, and a `change` is
+  answered with `BLOCKED` for now (OQ-4). A ticket with neither prints the same bytes as before.
+
+- **The coder knows who writes the criteria's tests.** With `acceptance: required` it makes the
+  locked tests pass and never writes an `invar-lock:` line; with `skipped` it writes its own, with
+  no such line. Its unit tests are its own either way.
+
 - **`plan approve --skill` reports argument errors as `error: …` with exit 0**, including
   `--acceptance --no-acceptance` and an unknown flag, so `/invar:approve` shows the reason
   instead of "no output at all". Without `--skill` they still exit 1 on stderr, and other
-  commands are unchanged. The text for the two flags together changed: it now names them in
-  invar's words, not clap's.
+  commands are unchanged, except `acceptance unlock --skill`, which does the same. The text for
+  the two flags together changed: it now names them in invar's words, not clap's.
 
 - **`--colors=never` in the Pest examples** of `invar init`, the messages and the contract
   (`invar-yaml.md` 2.2.2), because Pest's colour codes reached the "tests did not run"
