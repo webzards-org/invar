@@ -67,6 +67,10 @@ pub enum Command {
     /// pass silently (exit 0). Input it cannot make sense of passes too, with
     /// the problem reported: a broken guard must not halt a session.
     ///
+    /// Under `acceptance.dir`, a locked test is denied the same way, and so is a
+    /// call that would write a digest into a lock line, which only `invar
+    /// acceptance lock` does. `invar acceptance verify` is the boundary there.
+    ///
     /// A `Bash` call is read by its `tool_input.command` instead: one that runs
     /// `invar plan approve` is denied the same way, because approving is the
     /// developer's decision, made from their own terminal. Every other command

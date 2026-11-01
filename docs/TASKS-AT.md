@@ -567,37 +567,44 @@ without a manifest (A-3).
 
 ---
 
-## AT-10 — Guard: locked tests and `--relock`
+## AT-10 — Guard: locked tests
 
 **Branch:** `feat/at-10-guard-locked-tests`
 **Labels:** `area:core`, `area:plugin`
 **Design:** §11, §13
-**Decisions:** A-3, A-8
+**Decisions:** A-3, A-4, A-8
 **Depends on:** AT-5
 **Issue:** #88
 
 ### Description
 
-Extend `invar plan guard` (the `PreToolUse` hook on `Write|Edit|Bash`):
+Extend `invar plan guard` (the `PreToolUse` hook on `Write|Edit|Bash`). Only files
+under `acceptance.dir` are judged, and only for `Write` and `Edit`:
 
-- **Deny** `Write` and `Edit` on a file whose lock line is **locked**, with a reason
-  that says what the file is, which ticket locked it, and what to do instead
-  (answer `BLOCKED-TEST`, AT-13). Pending files are not guarded.
-- Add `acceptance lock --relock` to `HUMAN_ONLY` (AT-13).
-- Same failure rule as today: any doubt lets the call through; exit 2 only for deny.
+- **Deny** on a file whose lock line is **locked**, of any ticket and whether or not
+  its digest still matches, with a reason that says what the file is, which ticket
+  locked it, and what to do instead (answer `BLOCKED-TEST`, AT-13, or declare it in the
+  Plan). Pending files are not guarded.
+- **Deny** a call that would write a digest into a lock line, by `content`, by
+  `new_string`, or in the file an `Edit` would leave: only `invar acceptance lock`
+  writes one (A-4). A pending line in new content is the test-writer's job.
+- Same failure rule as today: any doubt lets the call through, including a malformed
+  lock line in the target; exit 2 only for deny.
+
+`--relock` moved to AT-13, where the flag is made.
 
 ### Purpose
 
 A convenience that saves the coder a wasted edit, exactly like the guard on an
 approved Plan. The boundary remains the digest (AT-9); `sed -i` still gets past the
-guard and is still caught at `plan check` and `done`.
+guard and is still caught at `plan check`, `done` and `acceptance verify`.
 
 ### Acceptance criteria
 
 - [ ] `tests/plan_guard.rs`: deny on a locked file, pass on a pending file and on a
       file without a line
 - [ ] Reason text names the ticket and `BLOCKED-TEST`
-- [ ] `--relock` from the agent's Bash is denied; `--help` is allowed
+- [ ] A `Write` or `Edit` that writes a digest into a lock line is denied
 - [ ] NOTES.md records the guard is not a boundary, with the `sed -i` case
 
 ---
@@ -719,7 +726,7 @@ shell block runs.
   and shell injection, like `/invar:approve`. It runs
   `invar acceptance lock <TICKET> --relock`: clears the digest so the test-writer can
   fix the test, and on the next `lock` the red check is skipped **only** for files
-  the developer relocked. `--relock` is human-only (AT-10).
+  the developer relocked. `--relock` is human-only: it goes on `HUMAN_ONLY` here, where the flag is made.
 - After the developer relocks, the main session starts the test-writer for the fix,
   then the coder again. At most two such rounds; then the cycle is `failed`.
 
@@ -734,6 +741,8 @@ a person's decision, exactly as approval is, so a weakening is never automatic.
       has `disable-model-invocation: true` spelled exactly
 - [ ] `--relock` skips the red check only for the named files, and is recorded in
       the command output
+- [ ] `acceptance lock --relock` is on `HUMAN_ONLY`: from the agent's Bash it is denied,
+      and `--help` is allowed
 - [ ] Walkthrough ticket with a seeded wrong test ends in `BLOCKED-TEST`, a relock,
       and `DONE`; no criterion text changed
 

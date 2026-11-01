@@ -79,6 +79,15 @@
   over 10 minutes is killed and refused. On success the last line is
   `locked <TICKET> <N> file(s)`. No agent uses it yet.
 
+- **`invar plan guard` keeps `Write` and `Edit` off locked acceptance tests.** Under
+  `acceptance.dir` it denies a call on a file with a locked line, naming the ticket and
+  what to do instead (`BLOCKED-TEST`, or declaring the change in the Plan), and a call
+  that would write a digest into a lock line, since only `invar acceptance lock` writes
+  one. Pending files, new files and everything outside `acceptance.dir` pass, as does
+  everything with no `acceptance:` section. A malformed line or an unreadable
+  `invar.yaml` passes with the problem reported. This is a convenience and not a boundary:
+  `sed -i` gets past it, and `plan check`, `done` and `invar acceptance verify` catch that.
+
 - **`invar acceptance verify [<TICKET>]`, and the same check in `plan check` and `invar
   done`** (`acceptance-lock.md` 1.2.0 §10). None of them runs a test.
   - Every locked file under `acceptance.dir` has the digest its line records, and no

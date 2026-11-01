@@ -1,8 +1,9 @@
 //! `invar plan guard`, for a `PreToolUse` hook on `Write|Edit|Bash`.
 //!
-//! A `Write` or `Edit` of an approved Plan is denied, and so is a `Bash` call
-//! that runs `invar plan approve`: that is the developer's decision, run from
-//! their own terminal. Both answer in the same way, below.
+//! A `Write` or `Edit` of an approved Plan or a locked acceptance test is denied, as
+//! is one that writes a lock digest by hand, and so is a `Bash` call that runs
+//! `invar plan approve`: that is the developer's decision, run from their own
+//! terminal. All of them answer in the same way, below.
 //!
 //! The output follows what Claude Code does with it, verified against
 //! version 2.1.291 (`plugin/NOTES.md` §11):

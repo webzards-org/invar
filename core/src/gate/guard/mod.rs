@@ -1,8 +1,8 @@
 //! `invar plan guard` (M1-10): keep the agent's `Write` and `Edit` off an
-//! approved Plan, and keep the agent from running the commands that record a
-//! person's decision.
+//! approved Plan and off a locked acceptance test, and keep the agent from running
+//! the commands that record a person's decision.
 //!
-//! Two jobs, one hook, told apart by `tool_name`: a `Write` or `Edit` is judged
+//! Two kinds of job, one hook, told apart by `tool_name`: a `Write` or `Edit` is judged
 //! by the file it targets; a `Bash` call is judged by the command line it runs
 //! (`HUMAN_ONLY`, at the end of this file). Both answer with the same
 //! [`Verdict`]. The second job exists because `plan approve`, `decision
@@ -19,22 +19,37 @@
 //! **Convenience, not the gate.** A `Write|Edit` matcher never sees a file
 //! changed through `Bash` (`plugin/NOTES.md` §8), so the guard can only save
 //! the agent a wasted edit. The boundary is `Approved-checksum`, which
-//! `plan check` and `done` verify whatever tool changed the file. The command
+//! `plan check` and `done` verify whatever tool changed the file. The guard on
+//! locked tests is no different, and its boundary is the digest those two and
+//! `acceptance verify` check: `sed -i` gets past it, and is caught there. The command
 //! guard is the same kind of thing: a shell can spell a command in ways no
 //! scan recognises, and a hook that fails lets the call through, so it makes
 //! an honest agent stop, and does not stop one that is determined.
 //!
 //! **A broken guard must not halt a session.** Anything it cannot make sense
 //! of — input that is not JSON, a payload without a path, an unreadable
-//! file — allows the edit and says why. Only one thing denies: the path is an
-//! existing `.invar/plans/<name>/spec.md` whose header says
-//! `Status: approved`. A draft Plan is edited freely; that is Phase 1 working.
+//! file, an unreadable `invar.yaml`, a malformed lock line — allows the edit and says
+//! why. Malformed lines are `acceptance verify`'s to report. A `Write` or `Edit` is
+//! denied in these cases only:
+//!
+//! - the path is an existing `.invar/plans/<name>/spec.md` whose header says
+//!   `Status: approved`. A draft Plan is edited freely; that is Phase 1 working;
+//! - the path is under `acceptance.dir` and the file has a locked line, of any
+//!   ticket, whether or not its digest still matches. A pending file is the
+//!   test-writer working;
+//! - the path is under `acceptance.dir` and the call would write a digest into a lock
+//!   line. Only `invar acceptance lock` writes one, after it has run the tests (A-4).
+//!
+//! Only files under `acceptance.dir` are judged for a lock line, because anywhere else
+//! `invar-lock:` is just text, such as in invar's own contract.
 
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::format::config;
+use crate::format::lock::{self, MARKER};
 use crate::format::plan::{Mode, Plan, Status};
 use crate::fs::plans::SPEC_FILE;
 use crate::fs::{ProjectRoot, RootError};
@@ -45,11 +60,11 @@ mod tests;
 /// What the guard tells the hook.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
-    /// Not an approved Plan: the tool call takes its normal course, including
+    /// Nothing the guard holds: the tool call takes its normal course, including
     /// any permission prompt. The guard never answers "allow" outright.
     Pass,
-    /// An approved Plan: the tool call is denied, and `reason` tells the
-    /// agent why and what to do instead.
+    /// An approved Plan, a locked test, or a digest written by hand: the tool call is
+    /// denied, and `reason` tells the agent why and what to do instead.
     Deny { reason: String },
     /// The guard could not decide. The tool call takes its normal course and
     /// `problem` is reported to the developer.
@@ -71,7 +86,7 @@ pub fn decide(input: &[u8], fallback_cwd: &Path) -> Verdict {
         return judge_command(&payload);
     }
     match target(&payload, tool, fallback_cwd) {
-        Ok(path) => judge(&path),
+        Ok(path) => judge(&path, tool, &payload),
         Err(problem) => Verdict::Unsure { problem },
     }
 }
@@ -108,7 +123,7 @@ fn target(payload: &Value, tool: &str, fallback_cwd: &Path) -> Result<PathBuf, S
     Ok(cwd.join(path))
 }
 
-fn judge(path: &Path) -> Verdict {
+fn judge(path: &Path, tool: &str, payload: &Value) -> Verdict {
     // The file may not exist yet (`Write` creates it); its project is found
     // from the nearest directory that does.
     let Some(start) = path.ancestors().find(|dir| dir.exists()) else {
@@ -133,10 +148,16 @@ fn judge(path: &Path) -> Verdict {
             };
         }
     };
-    let Some(name) = plan_dir_name(&relative) else {
-        return Verdict::Pass;
-    };
+    match plan_dir_name(&relative) {
+        Some(name) => judge_plan(path, &relative, &name),
+        // The tools whose payloads are known (`plugin/NOTES.md` §11). Any other keeps
+        // what it had: the Plan is all it is judged for.
+        None if matches!(tool, "Write" | "Edit") => judge_test(path, &root, &relative, payload),
+        None => Verdict::Pass,
+    }
+}
 
+fn judge_plan(path: &Path, relative: &Path, name: &str) -> Verdict {
     let text = match std::fs::read(path) {
         Ok(bytes) => match String::from_utf8(bytes) {
             Ok(text) => text,
@@ -167,7 +188,7 @@ fn judge(path: &Path) -> Verdict {
     let ticket = checked
         .ticket
         .map(|(ticket, _)| ticket)
-        .unwrap_or_else(|| name.clone());
+        .unwrap_or_else(|| name.to_owned());
     Verdict::Deny {
         reason: format!(
             "{} is the approved Plan for {ticket}. Its text is what the developer \
@@ -193,6 +214,137 @@ fn plan_dir_name(relative: &Path) -> Option<String> {
         [".invar", "plans", name, SPEC_FILE] => Some((*name).to_owned()),
         _ => None,
     }
+}
+
+// --- locked acceptance tests ---------------------------------------------------
+
+fn judge_test(path: &Path, root: &ProjectRoot, relative: &Path, payload: &Value) -> Verdict {
+    let loaded = match config::load(root) {
+        Ok(loaded) => loaded,
+        Err(err) => {
+            return Verdict::Unsure {
+                problem: format!(
+                    "cannot tell whether {} is a locked acceptance test: {err}",
+                    relative.display()
+                ),
+            };
+        }
+    };
+    let Some(acceptance) = loaded.config.acceptance else {
+        return Verdict::Pass;
+    };
+    if !is_under(relative, &acceptance.dir) {
+        return Verdict::Pass;
+    }
+
+    let (existing, target) = match std::fs::read(path) {
+        Ok(bytes) => {
+            let verdict = judge_existing(&bytes, relative);
+            (Some(bytes), verdict)
+        }
+        // A test being written for the first time.
+        Err(err) if err.kind() == io::ErrorKind::NotFound => (None, Verdict::Pass),
+        Err(err) => (
+            None,
+            Verdict::Unsure {
+                problem: format!("cannot read {}: {err}", relative.display()),
+            },
+        ),
+    };
+    if matches!(target, Verdict::Deny { .. }) {
+        return target;
+    }
+    // Asked even when the target is in doubt: what the call writes is known.
+    if writes_digest(payload, existing.as_deref()) {
+        return Verdict::Deny {
+            reason: format!(
+                "this would write a digest into the `{MARKER}` line of {}. Only `invar acceptance \
+                 lock` writes a digest, after it has run the tests, and writing one by hand skips \
+                 the check that they fail before the code exists. Write the pending line, \
+                 `{MARKER} <TICKET>`, and run `invar acceptance lock <TICKET>`",
+                relative.display()
+            ),
+        };
+    }
+    target
+}
+
+/// The verdict on the file as it stands.
+fn judge_existing(bytes: &[u8], relative: &Path) -> Verdict {
+    // Not `read` alone, which refuses any file that is not UTF-8: a file with no marker
+    // has no lock, as `acceptance.dir` is walked (`acceptance-lock.md` §9.1).
+    if !bytes
+        .windows(MARKER.len())
+        .any(|at| at == MARKER.as_bytes())
+    {
+        return Verdict::Pass;
+    }
+    match lock::read(bytes) {
+        Ok(Some(line)) if line.recorded.is_some() => Verdict::Deny {
+            reason: format!(
+                "{} is a locked acceptance test of {ticket}. Neither the coder nor the \
+                 test-writer changes it once it is locked, through any tool, and \
+                 `invar acceptance verify` checks its digest. If the test is wrong, stop and \
+                 answer `BLOCKED-TEST <file> <AC> <reason>`; the developer decides whether it \
+                 is unlocked. If the Plan is meant to change it, the developer lists it in \
+                 `## Acceptance tests to change` and approves the Plan again; the change then \
+                 goes through the test-writer and `invar acceptance lock`",
+                relative.display(),
+                ticket = line.ticket,
+            ),
+        },
+        Ok(_) => Verdict::Pass,
+        // `acceptance verify` reports it. Blocking here would keep the agent from fixing it.
+        Err(err) => Verdict::Unsure {
+            problem: format!("{}: {err}", relative.display()),
+        },
+    }
+}
+
+/// Whether the `Write` or `Edit` in `payload` puts a digest into a lock line. `existing`
+/// is the file as it is, if it is there.
+///
+/// An `Edit` is also judged by the file it would leave, because `new_string` need not
+/// hold the marker: replacing `SHOP-214` with `SHOP-214 sha256:…` writes a digest into
+/// the line all the same. A digest the file already had is not this call's doing: a
+/// malformed one stays `acceptance verify`'s to report, and may be being fixed.
+fn writes_digest(payload: &Value, existing: Option<&[u8]>) -> bool {
+    let input = payload.get("tool_input");
+    let text_of = |key: &str| input.and_then(|i| i.get(key)).and_then(Value::as_str);
+    if let Some(content) = text_of("content") {
+        return lock::holds_digest(content);
+    }
+    let Some(new) = text_of("new_string") else {
+        return false;
+    };
+    if lock::holds_digest(new) {
+        return true;
+    }
+    let before = existing.and_then(|bytes| std::str::from_utf8(bytes).ok());
+    let (Some(before), Some(old)) = (before, text_of("old_string").filter(|old| !old.is_empty()))
+    else {
+        return false;
+    };
+    let replace_all = input
+        .and_then(|i| i.get("replace_all"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let after = if replace_all {
+        before.replace(old, new)
+    } else {
+        before.replacen(old, new, 1)
+    };
+    lock::holds_digest(&after) && !lock::holds_digest(before)
+}
+
+/// Whether `relative` is a path below `dir`, as `acceptance.dir` may write it (`./t`).
+fn is_under(relative: &Path, dir: &str) -> bool {
+    let dir: Vec<Component> = Path::new(dir)
+        .components()
+        .filter(|part| matches!(part, Component::Normal(_)))
+        .collect();
+    let parts: Vec<Component> = relative.components().collect();
+    parts.len() > dir.len() && parts[..dir.len()] == dir[..]
 }
 
 // --- commands only the developer runs -----------------------------------------

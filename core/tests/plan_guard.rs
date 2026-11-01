@@ -94,6 +94,378 @@ fn guard(stdin: impl Into<Vec<u8>>) -> assert_cmd::assert::Assert {
         .assert()
 }
 
+// --- locked acceptance tests ------------------------------------------------------
+
+const ACCEPTANCE: &str = "acceptance:\n  dir: tests/Acceptance\n  \
+    run: [\"pest\", \"{report}\", \"{files}\"]\n";
+const TEST: &str = "tests/Acceptance/sub/cancel_test.php";
+/// Example 8.2's digest, of what [`LOCKED`] covers.
+const DIGEST: &str = "sha256:5d5da6ccd3116bee608b2a6c15d4c9f0d20f32b17b220cc13a643169ab874e07";
+const LOCKED: &str = "# invar-lock: SHOP-214 sha256:5d5da6ccd3116bee608b2a6c15d4c9f0d20f32b17b220cc13a643169ab874e07\ndef test_ac1():\n    assert False\n";
+const PENDING: &str = "# invar-lock: SHOP-214\ndef test_ac1():\n    assert False\n";
+
+/// A project with an `acceptance:` section, and `file` holding `text`.
+fn with_test(file: &str, text: &str) -> Project {
+    let project = Project::new(APPROVED);
+    fs::write(project.root().join("invar.yaml"), ACCEPTANCE).unwrap();
+    let path = project.root().join(file);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, text).unwrap();
+    project
+}
+
+fn passes_silently(stdin: String) {
+    guard(stdin).code(0).stdout("").stderr("");
+}
+
+/// Let through, with the problem reported, as an unreadable Plan is.
+fn passes_with_problem(stdin: String, problem: &str) {
+    guard(stdin).code(0).stderr(contains(problem));
+}
+
+fn denied_as_locked(stdin: String) {
+    guard(stdin)
+        .code(2)
+        .stderr(contains(format!(
+            "{TEST} is a locked acceptance test of SHOP-214"
+        )))
+        .stderr(contains("BLOCKED-TEST <file> <AC> <reason>"))
+        .stderr(contains("`## Acceptance tests to change`"))
+        .stderr(contains("invar acceptance lock"));
+}
+
+#[test]
+fn an_edit_and_a_write_to_a_locked_test_are_denied() {
+    let project = with_test(TEST, LOCKED);
+    denied_as_locked(edit(&project.root(), &project.path(TEST)));
+    denied_as_locked(write(&project.root(), &project.path(TEST)));
+    // A relative path, as the payload may carry one.
+    denied_as_locked(edit(&project.root(), TEST));
+}
+
+#[test]
+fn a_locked_test_whose_digest_no_longer_matches_is_still_denied() {
+    let project = with_test(TEST, &LOCKED.replace("assert False", "assert True"));
+    denied_as_locked(edit(&project.root(), &project.path(TEST)));
+}
+
+#[test]
+fn a_test_locked_by_another_ticket_is_denied_naming_that_ticket() {
+    let project = with_test(TEST, &LOCKED.replace("SHOP-214", "SHOP-1"));
+    guard(edit(&project.root(), &project.path(TEST)))
+        .code(2)
+        .stderr(contains("a locked acceptance test of SHOP-1."));
+}
+
+#[test]
+fn a_pending_test_a_file_with_no_line_and_a_new_file_pass() {
+    let project = with_test(TEST, PENDING);
+    passes_silently(edit(&project.root(), &project.path(TEST)));
+    passes_silently(write(&project.root(), &project.path(TEST)));
+
+    let project = with_test(TEST, "def helper():\n    pass\n");
+    passes_silently(edit(&project.root(), &project.path(TEST)));
+
+    let project = with_test(TEST, PENDING);
+    passes_silently(write(
+        &project.root(),
+        &project.path("tests/Acceptance/new/test.php"),
+    ));
+}
+
+#[test]
+fn a_binary_file_with_no_marker_passes() {
+    let project = with_test(TEST, PENDING);
+    fs::write(project.root().join(TEST), [0xff, 0xfe, 0x00]).unwrap();
+    passes_silently(edit(&project.root(), &project.path(TEST)));
+}
+
+#[test]
+fn a_locked_line_outside_the_directory_passes() {
+    for file in [
+        "contracts/formats/acceptance-lock.md",
+        "tests/AcceptanceOther/test.php",
+        "tests/test.php",
+    ] {
+        let project = with_test(file, LOCKED);
+        passes_silently(edit(&project.root(), &project.path(file)));
+    }
+}
+
+#[test]
+fn with_no_section_a_locked_line_passes() {
+    let project = with_test(TEST, LOCKED);
+    fs::write(project.root().join("invar.yaml"), "").unwrap();
+    passes_silently(edit(&project.root(), &project.path(TEST)));
+}
+
+#[test]
+fn a_directory_written_with_a_dot_is_the_same_directory() {
+    let project = with_test(TEST, LOCKED);
+    fs::write(
+        project.root().join("invar.yaml"),
+        ACCEPTANCE.replace("dir: tests/Acceptance", "dir: ./tests//Acceptance"),
+    )
+    .unwrap();
+    denied_as_locked(edit(&project.root(), &project.path(TEST)));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_path_through_a_symlink_is_judged_where_it_leads() {
+    let project = with_test(TEST, LOCKED);
+    let link = project.root().join("link.php");
+    std::os::unix::fs::symlink(project.root().join(TEST), &link).unwrap();
+    denied_as_locked(edit(&project.root(), &link.display().to_string()));
+}
+
+#[test]
+fn an_unreadable_config_passes_with_the_problem_reported_and_the_plan_stays_guarded() {
+    let project = with_test(TEST, LOCKED);
+    fs::write(
+        project.root().join("invar.yaml"),
+        "acceptance: [not, a, mapping\n",
+    )
+    .unwrap();
+    passes_with_problem(
+        edit(&project.root(), &project.path(TEST)),
+        "cannot tell whether tests/Acceptance/sub/cancel_test.php is a locked acceptance test",
+    );
+    // The Plan never depended on the config.
+    guard(edit(&project.root(), &project.path(SPEC))).code(2);
+}
+
+#[test]
+fn a_malformed_line_in_the_target_passes_with_the_problem_reported() {
+    for text in [
+        "# invar-lock: shop-214\n",
+        "# invar-lock: SHOP-214 sha256:abc\n",
+        "# invar-lock: SHOP-1\n# invar-lock: SHOP-2\n",
+    ] {
+        let project = with_test(TEST, text);
+        passes_with_problem(edit(&project.root(), &project.path(TEST)), TEST);
+    }
+    // Not UTF-8, with the marker in it: whether it is locked cannot be read.
+    let project = with_test(TEST, PENDING);
+    let mut bytes = PENDING.as_bytes().to_vec();
+    bytes.push(0xff);
+    fs::write(project.root().join(TEST), bytes).unwrap();
+    passes_with_problem(edit(&project.root(), &project.path(TEST)), TEST);
+}
+
+#[test]
+fn a_tool_the_guard_does_not_know_is_judged_for_the_plan_only() {
+    let project = with_test(TEST, LOCKED);
+    let call = |file: &str| {
+        json!({
+            "cwd": project.root(),
+            "tool_name": "NotebookEdit",
+            "tool_input": { "file_path": file },
+        })
+        .to_string()
+    };
+    passes_silently(call(&project.path(TEST)));
+    guard(call(&project.path(SPEC))).code(2);
+}
+
+#[test]
+fn a_change_through_bash_gets_past_the_guard_and_is_caught_by_the_digest() {
+    let project = with_test(TEST, LOCKED);
+    passes_silently(bash(
+        &project.root(),
+        &format!("sed -i s/False/True/ {TEST}"),
+    ));
+    fs::write(
+        project.root().join(TEST),
+        LOCKED.replace("assert False", "assert True"),
+    )
+    .unwrap();
+    Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(project.root())
+        .args(["acceptance", "verify"])
+        .assert()
+        .failure()
+        .stderr(contains("changed after it was locked"))
+        .stderr(contains(TEST))
+        .stderr(contains(DIGEST));
+}
+
+// --- a digest written by hand --------------------------------------------------------
+
+fn write_with(cwd: &Path, file_path: &str, content: &str) -> String {
+    json!({
+        "cwd": cwd,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": { "file_path": file_path, "content": content },
+    })
+    .to_string()
+}
+
+fn edit_with(cwd: &Path, file_path: &str, old_string: &str, new_string: &str) -> String {
+    json!({
+        "cwd": cwd,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": file_path,
+            "old_string": old_string,
+            "new_string": new_string,
+            "replace_all": false
+        },
+    })
+    .to_string()
+}
+
+fn denied_as_hand_written(stdin: String) {
+    guard(stdin)
+        .code(2)
+        .stderr(contains("this would write a digest"))
+        .stderr(contains(TEST))
+        .stderr(contains("Only `invar acceptance lock` writes a digest"))
+        .stderr(contains("run the tests"));
+}
+
+#[test]
+fn a_write_holding_a_digest_is_denied_on_a_new_file_and_on_a_pending_one() {
+    let project = with_test(TEST, PENDING);
+    denied_as_hand_written(write_with(&project.root(), &project.path(TEST), LOCKED));
+
+    let project = with_test("tests/Acceptance/other.php", PENDING);
+    denied_as_hand_written(write_with(&project.root(), &project.path(TEST), LOCKED));
+}
+
+#[test]
+fn an_edit_whose_new_string_holds_a_digest_is_denied() {
+    let project = with_test(TEST, PENDING);
+    denied_as_hand_written(edit_with(
+        &project.root(),
+        &project.path(TEST),
+        "# invar-lock: SHOP-214",
+        &format!("# invar-lock: SHOP-214 {DIGEST}"),
+    ));
+}
+
+#[test]
+fn a_malformed_digest_field_is_denied_too() {
+    let project = with_test(TEST, PENDING);
+    denied_as_hand_written(edit_with(
+        &project.root(),
+        &project.path(TEST),
+        "# invar-lock: SHOP-214",
+        "# invar-lock: SHOP-214 sha256:abc",
+    ));
+    denied_as_hand_written(write_with(
+        &project.root(),
+        &project.path(TEST),
+        "# invar-lock: SHOP-214 sha256:abc\n",
+    ));
+}
+
+#[test]
+fn an_edit_that_adds_the_digest_without_repeating_the_marker_is_denied() {
+    let project = with_test(TEST, PENDING);
+    denied_as_hand_written(edit_with(
+        &project.root(),
+        &project.path(TEST),
+        "SHOP-214",
+        &format!("SHOP-214 {DIGEST}"),
+    ));
+}
+
+#[test]
+fn a_line_past_the_window_in_new_content_is_still_a_digest() {
+    let project = with_test(TEST, PENDING);
+    let content = format!("{}# invar-lock: SHOP-214 {DIGEST}\n", "x\n".repeat(20));
+    denied_as_hand_written(write_with(&project.root(), &project.path(TEST), &content));
+}
+
+#[test]
+fn new_content_with_only_a_pending_line_passes() {
+    let project = with_test(TEST, PENDING);
+    passes_silently(write_with(&project.root(), &project.path(TEST), PENDING));
+    passes_silently(edit_with(
+        &project.root(),
+        &project.path(TEST),
+        "assert False",
+        "assert 1 == 2",
+    ));
+    passes_silently(edit_with(
+        &project.root(),
+        &project.path(TEST),
+        "# invar-lock: SHOP-214",
+        "// invar-lock: SHOP-214",
+    ));
+    passes_silently(write_with(
+        &project.root(),
+        &project.path("tests/Acceptance/new.php"),
+        PENDING,
+    ));
+}
+
+#[test]
+fn a_digest_outside_the_directory_or_with_no_section_passes() {
+    let project = with_test(TEST, PENDING);
+    let outside = project.path("contracts/formats/acceptance-lock.md");
+    passes_silently(write_with(&project.root(), &outside, LOCKED));
+    passes_silently(edit_with(&project.root(), &outside, "a", LOCKED));
+
+    fs::write(project.root().join("invar.yaml"), "").unwrap();
+    passes_silently(write_with(&project.root(), &project.path(TEST), LOCKED));
+}
+
+#[test]
+fn a_locked_file_gets_the_reason_about_the_lock_whatever_the_content() {
+    let project = with_test(TEST, LOCKED);
+    denied_as_locked(write_with(&project.root(), &project.path(TEST), LOCKED));
+}
+
+#[test]
+fn a_target_in_doubt_stays_a_doubt_unless_the_call_itself_writes_a_digest() {
+    // A malformed digest already there: an edit elsewhere, or one that fixes it, is let
+    // through with the problem reported.
+    let project = with_test(TEST, "# invar-lock: SHOP-214 sha256:abc\nassert False\n");
+    passes_with_problem(
+        edit_with(
+            &project.root(),
+            &project.path(TEST),
+            "assert False",
+            "assert 1 == 2",
+        ),
+        TEST,
+    );
+    passes_with_problem(
+        edit_with(
+            &project.root(),
+            &project.path(TEST),
+            "# invar-lock: SHOP-214 sha256:abc",
+            "# invar-lock: SHOP-214",
+        ),
+        TEST,
+    );
+    // What this call writes is known, whatever the file holds.
+    denied_as_hand_written(edit_with(
+        &project.root(),
+        &project.path(TEST),
+        "# invar-lock: SHOP-214 sha256:abc",
+        &format!("# invar-lock: SHOP-214 {DIGEST}"),
+    ));
+}
+
+#[test]
+fn a_tool_the_guard_does_not_know_is_not_judged_for_a_digest() {
+    let project = with_test(TEST, PENDING);
+    passes_silently(
+        json!({
+            "cwd": project.root(),
+            "tool_name": "NotebookEdit",
+            "tool_input": { "file_path": project.path(TEST), "content": LOCKED },
+        })
+        .to_string(),
+    );
+}
+
 // --- deny -----------------------------------------------------------------------
 
 #[test]
