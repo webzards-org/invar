@@ -1,6 +1,6 @@
 //! `invar.yaml` — the project config (§6).
 //!
-//! Implements `contracts/formats/invar-yaml.md` v2.2.1. The contract is the
+//! Implements `contracts/formats/invar-yaml.md` v2.2.2. The contract is the
 //! authority; section numbers below (`§3.4`, `D-2`) point into it.
 //!
 //! Light mode reads `scenarios`, `review.offer`, `git.base_branch`,
@@ -58,7 +58,7 @@ pub const FILES_PLACEHOLDER: &str = "{files}";
 /// The smallest `acceptance` section, for a message that says what to add (§3.6).
 pub const ACCEPTANCE_SECTION_EXAMPLE: &str = "acceptance:\n  \
      dir: tests/Acceptance\n  \
-     run: [\"vendor/bin/pest\", \"--log-junit\", \"{report}\", \"{files}\"]";
+     run: [\"vendor/bin/pest\", \"--colors=never\", \"--log-junit\", \"{report}\", \"{files}\"]";
 
 /// Top-level keys of §6 that belong to later milestones (§5). Ignored
 /// silently, together with everything under them.
@@ -491,13 +491,13 @@ fn acceptance_section(
     match &section.run {
         None => problems.push(
             "`acceptance.run` is required: a list with the program first, such as \
-             [\"vendor/bin/pest\", \"--log-junit\", \"{report}\", \"{files}\"]"
+             [\"vendor/bin/pest\", \"--colors=never\", \"--log-junit\", \"{report}\", \"{files}\"]"
                 .to_owned(),
         ),
         Some(RawRun::Text) => problems.push(
             "`acceptance.run` is a list, not a string: write the program and each argument \
              as its own element, such as \
-             [\"vendor/bin/pest\", \"--log-junit\", \"{report}\", \"{files}\"] \
+             [\"vendor/bin/pest\", \"--colors=never\", \"--log-junit\", \"{report}\", \"{files}\"] \
              (invar-yaml.md §3.6)"
                 .to_owned(),
         ),

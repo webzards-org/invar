@@ -166,6 +166,8 @@ fn the_commented_acceptance_section_is_valid_once_uncommented() {
     assert!(acceptance.required);
     assert_eq!(acceptance.dir, "tests/Acceptance");
     assert_eq!(acceptance.fakes_allowed.len(), 4);
+    // The runner's output is shown as it is when the tests did not run.
+    assert!(acceptance.run.contains(&"--colors=never".to_owned()));
 }
 
 #[test]

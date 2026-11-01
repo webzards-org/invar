@@ -79,6 +79,18 @@
   over 10 minutes is killed and refused. On success the last line is
   `locked <TICKET> <N> file(s)`. No agent uses it yet.
 
+- **The test-writer sub-agent** (`plugin/agents/test-writer.md`, `model: opus`) turns a
+  ticket's criteria into acceptance tests between the gate and the coder, following
+  `invar acceptance spec`, and locks them with `invar acceptance lock`. It answers
+  `LOCKED` only after the command's `locked <TICKET> <N> file(s)` line, or `BLOCKED` with
+  the reason. It never changes application code, factories, seeders or the Plan, and reads
+  neither `BUSINESS_CONTEXT.md` nor the decision log. `AI_CONTEXT.md` reaches it through a
+  second `SubagentStart` hook. The main session does not start it yet.
+
+- **`--colors=never` in the Pest examples** of `invar init`, the messages and the contract
+  (`invar-yaml.md` 2.2.2), because Pest's colour codes reached the "tests did not run"
+  messages. An existing `run` keeps working, and adding the flag to it is your choice.
+
 - **`invar plan guard` keeps `Write` and `Edit` off locked acceptance tests.** Under
   `acceptance.dir` it denies a call on a file with a locked line, naming the ticket and
   what to do instead (`BLOCKED-TEST`, or declaring the change in the Plan), and a call

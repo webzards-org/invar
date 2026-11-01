@@ -8,9 +8,9 @@
 //!   `SessionStart` hook (M1-17), which does not reach a sub-agent
 //!   (`plugin/NOTES.md` §17).
 //! - **Conventions** (M1-23) — `AI_CONTEXT.md` alone, labelled the same way.
-//!   What the coder reads (§5c, §13c): it describes how code is written, and
-//!   the coder is the one writing it. Never `BUSINESS_CONTEXT.md` and never a
-//!   decision entry — the coder meets business rules only as the approved Plan
+//!   What the coder and the test-writer read (§5c, §13c): it describes how code
+//!   is written, and they are the ones writing it. Never `BUSINESS_CONTEXT.md` and
+//!   never a decision entry — they meet business rules only as the approved Plan
 //!   states them.
 //! - **Planning context** — the binding context plus the decision log's
 //!   entries, newest first, within a budget. Only the planner receives it

@@ -129,7 +129,13 @@ fn contract_10_7_a_full_acceptance_section() {
             required: true,
             style: AcceptanceStyle::Integration,
             dir: "tests/Acceptance".to_owned(),
-            run: strings(&["vendor/bin/pest", "--log-junit", "{report}", "{files}"]),
+            run: strings(&[
+                "vendor/bin/pest",
+                "--colors=never",
+                "--log-junit",
+                "{report}",
+                "{files}"
+            ]),
             fakes_allowed: strings(&["http", "mail", "queue", "notification"]),
         })
     );
@@ -452,7 +458,7 @@ fn a_string_run_is_refused_by_name_and_never_split() {
             message.contains(
                 "`acceptance.run` is a list, not a string: write the program and each \
                  argument as its own element, such as \
-                 [\"vendor/bin/pest\", \"--log-junit\", \"{report}\", \"{files}\"] \
+                 [\"vendor/bin/pest\", \"--colors=never\", \"--log-junit\", \"{report}\", \"{files}\"] \
                  (invar-yaml.md §3.6)"
             ),
             "{run}: {message}"

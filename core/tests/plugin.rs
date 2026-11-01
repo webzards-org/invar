@@ -87,12 +87,12 @@ fn hook_for(event: &str) -> Hook {
 }
 
 #[test]
-fn there_are_exactly_four_hooks_on_exactly_these_events() {
+fn there_are_exactly_five_hooks_on_exactly_these_events() {
     let events: Vec<String> = hooks().into_iter().map(|hook| hook.event).collect();
 
     // No lint hook and no test hook (L-3): nothing on `PostToolUse` or `Stop`.
-    // `SubagentStart` is the coder's conventions (M1-24): `SessionStart` output
-    // does not reach a sub-agent (plugin/NOTES.md §17).
+    // `SubagentStart` is the conventions of the coder (M1-24) and of the test-writer
+    // (AT-11): `SessionStart` output does not reach a sub-agent (plugin/NOTES.md §17).
     assert_eq!(
         events.iter().cloned().collect::<BTreeSet<_>>(),
         BTreeSet::from(
@@ -106,7 +106,11 @@ fn there_are_exactly_four_hooks_on_exactly_these_events() {
         ),
         "{events:?}"
     );
-    assert_eq!(events.len(), 4, "one hook for each: {events:?}");
+    assert_eq!(
+        events.len(),
+        5,
+        "one hook for each, and two sub-agents get the conventions: {events:?}"
+    );
 }
 
 #[test]
@@ -163,13 +167,23 @@ fn the_matchers_select_what_each_hook_is_for() {
         .matcher
         .expect("a matcher for the planner");
     assert!(planner.contains("planner"), "{planner}");
-    // Only the coder gets the conventions pushed: the planner and the reviewer
-    // read their own context. M1-22 verified that `.*coder` selects the
+    // Only the coder and the test-writer get the conventions pushed: the planner and
+    // the reviewer read their own context. M1-22 verified that `.*coder` selects the
     // plugin's agent by its namespaced type and no other agent.
     let coder = hook_for("SubagentStart")
         .matcher
         .expect("a matcher for the coder");
     assert_eq!(coder, ".*coder");
+    let started: Vec<_> = hooks()
+        .into_iter()
+        .filter(|hook| hook.event == "SubagentStart")
+        .collect();
+    let matchers: Vec<Option<&str>> = started.iter().map(|hook| hook.matcher.as_deref()).collect();
+    assert_eq!(matchers, [Some(".*coder"), Some(".*test-writer")]);
+    // The same command for both.
+    for hook in &started {
+        assert_eq!(hook.args, ["context", "show", "--conventions", "--hook"]);
+    }
 }
 
 #[test]
