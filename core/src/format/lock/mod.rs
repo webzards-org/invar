@@ -57,8 +57,6 @@ pub fn read(bytes: &[u8]) -> Result<Option<LockLine>, LockError> {
 /// and no other byte changes: this works on the file as it is, not on its canonical
 /// form, so its line endings, BOM and trailing whitespace survive. Refuses a file
 /// with no line, a line for another ticket, and a line already locked.
-// `invar acceptance lock` is the caller (AT-8); remove this with its arrival.
-#[allow(dead_code)]
 pub fn with_digest(bytes: &[u8], ticket: &str) -> Result<Vec<u8>, LockError> {
     let lock = read(bytes)?.ok_or(LockError::NoLine)?;
     if lock.ticket != ticket {

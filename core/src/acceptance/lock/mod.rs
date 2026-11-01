@@ -4,8 +4,8 @@
 //! Implements `contracts/formats/acceptance-lock.md` §9. The contract is the
 //! authority; section numbers and `D-n` below point into it.
 //!
-//! [`find`] says which files belong to the ticket, [`run`] runs them, and [`check`]
-//! decides on the report.
+//! [`find`] says which files belong to the ticket, [`run`] runs them, [`check`]
+//! decides on the report, and [`write`] writes the digests.
 
 use std::fmt::{self, Write as _};
 use std::path::Path;
@@ -19,26 +19,29 @@ use super::spec::{self, SpecError};
 use check::{Coverage, Problems};
 use find::{FindError, Found};
 use run::{Output, RunError, TIME_LIMIT};
+use write::{WriteError, Written};
 
 pub mod check;
 pub mod find;
 pub mod run;
+pub mod write;
 
 #[cfg(test)]
 mod tests;
 
-/// What a run that passed every check established.
+/// What a run that locked its files established.
 #[derive(Debug)]
-pub struct Checked {
+pub struct Locked {
     pub ticket: String,
     pub coverage: Coverage,
-    pub files: Vec<String>,
+    pub files: Vec<Written>,
 }
 
-impl Checked {
-    /// The output on success (§9.5).
+impl Locked {
+    /// The output on success (§9.5). The last line is what the test-writer keys on.
     pub fn render(&self) -> String {
         let mut out = String::new();
+        let _ = writeln!(out, "Coverage:");
         for (id, tests) in &self.coverage {
             let _ = writeln!(out, "{id}:");
             for test in tests {
@@ -46,18 +49,23 @@ impl Checked {
             }
         }
         let _ = writeln!(out);
-        let _ = writeln!(out, "checked {} {} file(s)", self.ticket, self.files.len());
+        let _ = writeln!(out, "Locked:");
+        for file in &self.files {
+            let _ = writeln!(out, "  {} {}", file.path, file.digest);
+        }
+        let _ = writeln!(out);
+        let _ = writeln!(out, "locked {} {} file(s)", self.ticket, self.files.len());
         out
     }
 }
 
-/// Run the checks of §9 on the ticket of the Plan at `spec`.
+/// Lock the ticket of the Plan at `spec`, or say why not (§9).
 pub fn lock(
     root: &ProjectRoot,
     spec: &Path,
     mode: Mode,
     config: Option<&AcceptanceConfig>,
-) -> Result<Checked, LockError> {
+) -> Result<Locked, LockError> {
     let (plan, config) = spec::usable(root, spec, mode, config).map_err(LockError::Plan)?;
     let ticket = plan.header().ticket.clone();
     let found: Found = find::find(root, &config.dir, &ticket).map_err(LockError::Find)?;
@@ -90,10 +98,11 @@ pub fn lock(
 
     let coverage =
         check::check(&ticket, &plan.criteria(), &found, &cases).map_err(LockError::Checks)?;
-    Ok(Checked {
+    let files = write::write(root, &ticket, &found.to_lock).map_err(LockError::Write)?;
+    Ok(Locked {
         ticket,
         coverage,
-        files: found.to_lock.into_iter().map(|file| file.path).collect(),
+        files,
     })
 }
 
@@ -115,6 +124,7 @@ pub enum LockError {
         status: String,
     },
     Checks(Problems),
+    Write(WriteError),
 }
 
 impl fmt::Display for LockError {
@@ -136,6 +146,7 @@ impl fmt::Display for LockError {
                 "cannot read the report, and nothing was locked. The command ended with                  {status}: {source}"
             ),
             Self::Checks(problems) => problems.fmt(f),
+            Self::Write(err) => err.fmt(f),
         }
     }
 }

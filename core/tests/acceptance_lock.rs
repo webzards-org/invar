@@ -546,13 +546,178 @@ fn the_success_output_names_the_tests_of_each_criterion_in_the_plans_order() {
     ]));
     let assert = project.lock().success().stderr("");
     let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-    assert!(
-        out.starts_with(&format!(
-            "AC1:\n  {A}: it AC1 cancels\nAC2:\n  {B}: it AC2 refuses\n"
-        )),
-        "{out}"
+    let (a, b) = (digest_of(&project, A), digest_of(&project, B));
+    assert_eq!(
+        out,
+        format!(
+            "Coverage:\nAC1:\n  {A}: it AC1 cancels\nAC2:\n  {B}: it AC2 refuses\n\n\
+             Locked:\n  {A} {a}\n  {B} {b}\n\nlocked SHOP-214 2 file(s)\n"
+        )
     );
     assert!(project.temp_is_empty());
+}
+
+// --- writing --------------------------------------------------------------------
+
+/// The digest `invar hash --lock` computes for a file, independently of the command.
+fn digest_of(project: &Project, path: &str) -> String {
+    let output = Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(project.root())
+        .args(["hash", "--lock", path])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(output.stdout).unwrap();
+    text.split_whitespace()
+        .find(|field| field.starts_with("sha256:"))
+        .unwrap_or_else(|| panic!("no digest in {text}"))
+        .to_owned()
+}
+
+#[test]
+fn locking_writes_each_digest_and_changes_nothing_else() {
+    let project = Project::new();
+    // Line endings, a BOM and trailing whitespace all stay.
+    let odd = "\u{FEFF}<?php\r\n// invar-lock: SHOP-214 written by the writer  \r\n  it();  \r\n";
+    project.write(B, odd);
+    project.canned(&all_red());
+    let before = project.tree();
+
+    project
+        .lock()
+        .success()
+        .stdout(predicates::str::ends_with("\nlocked SHOP-214 2 file(s)\n"));
+
+    let a = digest_of(&project, A);
+    let b = digest_of(&project, B);
+    assert_eq!(
+        fs::read_to_string(project.root().join(A)).unwrap(),
+        PENDING.replace("SHOP-214 written", &format!("SHOP-214 {a} written"))
+    );
+    assert_eq!(
+        fs::read_to_string(project.root().join(B)).unwrap(),
+        odd.replace("SHOP-214 written", &format!("SHOP-214 {b} written"))
+    );
+
+    // Every other file, including the Plan, is as it was.
+    let mut after = project.tree();
+    let mut expected = before;
+    for path in [A, B] {
+        after.remove(&project.root().join(path));
+        expected.remove(&project.root().join(path));
+    }
+    assert_eq!(after, expected);
+    assert!(project.temp_is_empty());
+}
+
+#[test]
+fn a_file_changed_during_the_run_writes_nothing() {
+    let project = Project::new();
+    project.canned(&all_red());
+    project.runner(&format!("echo '// edited' >> {A}\n{COPY}"));
+
+    let assert = project.lock().failure().stdout("");
+    let message = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+
+    assert!(
+        message.contains(A) && message.contains("changed while"),
+        "{message}"
+    );
+    assert_eq!(
+        fs::read_to_string(project.root().join(A)).unwrap(),
+        format!("{PENDING}// edited\n")
+    );
+    assert_eq!(fs::read_to_string(project.root().join(B)).unwrap(), PENDING);
+    assert!(project.temp_is_empty());
+}
+
+/// [`B`] locked by a run of its own, with `AC2`. [`A`] waits, with `AC1`.
+fn with_b_locked() -> Project {
+    let project = Project::new();
+    project.write(A, "<?php\n// no line yet\n");
+    project.canned(&report(&[
+        case(B, "it AC1 first", "failure"),
+        case(B, "it AC2 refuses", "failure"),
+    ]));
+    project
+        .lock()
+        .success()
+        .stdout(contains("locked SHOP-214 1 file(s)"));
+    project.write(A, PENDING);
+    project
+}
+
+#[test]
+fn a_locked_file_counts_for_coverage_whatever_its_outcome_and_is_not_rewritten() {
+    let project = with_b_locked();
+    let locked = fs::read(project.root().join(B)).unwrap();
+    project.canned(&report(&[
+        case(A, "it AC1 cancels", "failure"),
+        // Green, an error and skipped: its code may exist by now (D-13).
+        case(B, "it AC2 refuses", ""),
+        case(B, "it AC2 errors", "error"),
+        case(B, "it AC2 skips", "skipped"),
+    ]));
+
+    project
+        .lock()
+        .success()
+        .stdout(contains(format!("AC2:\n  {B}: it AC2 refuses\n")))
+        .stdout(contains(format!("  {A} sha256:")))
+        .stdout(predicates::str::ends_with("\nlocked SHOP-214 1 file(s)\n"));
+
+    assert_eq!(fs::read(project.root().join(B)).unwrap(), locked);
+    assert!(
+        fs::read_to_string(project.root().join(A))
+            .unwrap()
+            .contains("sha256:")
+    );
+}
+
+#[test]
+fn a_locked_file_runs_with_the_new_ones() {
+    let project = with_b_locked();
+    project.canned(&all_red());
+    project.runner(
+        "report=\"$1\"\nshift\nprintf '%s\\n' \"$@\" > \"$TMPDIR/files.log\"\n\
+         cp canned.xml \"$report\"\n",
+    );
+    project.lock().success();
+    let log = fs::read_to_string(project.temp.path().join("files.log")).unwrap();
+    assert_eq!(log, format!("{A}\n{B}\n"));
+}
+
+#[test]
+fn the_tokens_of_a_locked_file_are_still_checked() {
+    let project = with_b_locked();
+    project.canned(&report(&[
+        case(A, "it AC1 cancels", "failure"),
+        case(B, "it AC2 refuses", "failure"),
+        case(B, "no token", "failure"),
+        case(B, "it AC9 unknown", "failure"),
+    ]));
+    project.refuses(&[B, "`no token`", "`it AC9 unknown`"]);
+}
+
+#[test]
+fn a_tampered_locked_file_is_refused_naming_it_before_anything_runs() {
+    let project = with_b_locked();
+    project.runner("touch ran\n");
+    let path = project.root().join(B);
+    let tampered = fs::read_to_string(&path)
+        .unwrap()
+        .replace("toBeTrue", "toBeFalse");
+    fs::write(path, tampered).unwrap();
+    project.refuses(&[B, "changed after it was locked"]);
+    assert!(!project.root().join("ran").exists());
+}
+
+#[test]
+fn nothing_is_left_to_lock_after_locking() {
+    let project = Project::new();
+    project.canned(&all_red());
+    project.lock().success();
+    project.refuses(&["nothing to lock for SHOP-214"]);
 }
 
 #[test]

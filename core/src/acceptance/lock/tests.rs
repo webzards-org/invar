@@ -7,8 +7,10 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
+use super::find::TestFile;
 use super::find::{FindError, find};
 use super::run::{self, RunError, TIME_LIMIT, argv};
+use super::write::{WriteError, install, prepare, write as write_files};
 use crate::fs::ProjectRoot;
 
 const DIR: &str = "tests/Acceptance";
@@ -293,4 +295,175 @@ fn the_time_limit_is_named_in_minutes() {
         output: run::Output::default(),
     };
     assert!(err.to_string().contains("within 10 minutes"), "{err}");
+}
+
+// --- write ----------------------------------------------------------------------
+
+const PENDING: &[u8] = b"# invar-lock: SHOP-214\nassert False\n";
+
+fn pending(root: &ProjectRoot, path: &str) -> TestFile {
+    write(root, path, std::str::from_utf8(PENDING).unwrap());
+    TestFile {
+        path: path.to_owned(),
+        bytes: PENDING.to_vec(),
+    }
+}
+
+fn entries(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn every_file_gets_its_digest_and_no_temporary_file_stays() {
+    let (_dir, root) = project();
+    let files = [
+        pending(&root, "tests/Acceptance/a.py"),
+        pending(&root, "tests/Acceptance/b.py"),
+    ];
+
+    let written = write_files(&root, "SHOP-214", &files).unwrap();
+
+    assert_eq!(written.len(), 2);
+    for one in &written {
+        let bytes = fs::read(root.path().join(&one.path)).unwrap();
+        let line = crate::format::lock::read(&bytes).unwrap().unwrap();
+        assert!(line.matches(), "{one:?}");
+        assert_eq!(line.digest, one.digest);
+    }
+    assert_eq!(
+        entries(&root.path().join(DIR)),
+        ["a.py", "b.py"],
+        "a temporary file stayed"
+    );
+}
+
+#[test]
+fn a_changed_file_writes_nothing_and_all_changed_files_are_named() {
+    let (_dir, root) = project();
+    let files = [
+        pending(&root, "tests/Acceptance/a.py"),
+        pending(&root, "tests/Acceptance/b.py"),
+        pending(&root, "tests/Acceptance/c.py"),
+    ];
+    write(
+        &root,
+        "tests/Acceptance/b.py",
+        "# invar-lock: SHOP-214\nedited\n",
+    );
+    fs::remove_file(root.path().join("tests/Acceptance/c.py")).unwrap();
+
+    let message = write_files(&root, "SHOP-214", &files)
+        .unwrap_err()
+        .to_string();
+
+    assert!(message.contains("tests/Acceptance/b.py"), "{message}");
+    assert!(message.contains("tests/Acceptance/c.py"), "{message}");
+    assert!(!message.contains("a.py"), "{message}");
+    let a = fs::read(root.path().join("tests/Acceptance/a.py")).unwrap();
+    assert_eq!(a, PENDING);
+    assert_eq!(entries(&root.path().join(DIR)), ["a.py", "b.py"]);
+}
+
+#[test]
+fn a_failure_while_preparing_touches_no_file_and_leaves_no_temporary_file() {
+    let (_dir, root) = project();
+    let good = pending(&root, "tests/Acceptance/a.py");
+    // Its temporary file cannot be written: a directory holds that name, and removing
+    // a leftover does not remove a directory.
+    let bad = pending(&root, "tests/Acceptance/b.py");
+    fs::create_dir(root.path().join("tests/Acceptance/.b.py.invar-tmp")).unwrap();
+
+    let err = prepare(&root, "SHOP-214", &[good, bad]).unwrap_err();
+
+    assert!(matches!(err, WriteError::Prepare { .. }), "{err}");
+    assert!(err.to_string().contains("nothing was locked"), "{err}");
+    assert_eq!(
+        fs::read(root.path().join("tests/Acceptance/a.py")).unwrap(),
+        PENDING
+    );
+    assert_eq!(
+        fs::read(root.path().join("tests/Acceptance/b.py")).unwrap(),
+        PENDING
+    );
+    assert!(
+        !root
+            .path()
+            .join("tests/Acceptance/.a.py.invar-tmp")
+            .exists()
+    );
+}
+
+#[test]
+fn a_failure_between_renames_names_what_was_written_and_what_was_not() {
+    let (_dir, root) = project();
+    let files = [
+        pending(&root, "tests/Acceptance/a.py"),
+        pending(&root, "tests/Acceptance/b.py"),
+        pending(&root, "tests/Acceptance/c.py"),
+    ];
+    let prepared = prepare(&root, "SHOP-214", &files).unwrap();
+    // The rename of the second one fails: its temporary file has gone.
+    fs::remove_file(root.path().join("tests/Acceptance/.b.py.invar-tmp")).unwrap();
+
+    let err = install(prepared).unwrap_err();
+
+    let WriteError::Partial {
+        failed,
+        written,
+        not_written,
+        ..
+    } = &err
+    else {
+        panic!("{err}");
+    };
+    assert_eq!(failed, "tests/Acceptance/b.py");
+    assert_eq!(written, &["tests/Acceptance/a.py"]);
+    assert_eq!(
+        not_written,
+        &["tests/Acceptance/b.py", "tests/Acceptance/c.py"]
+    );
+    let message = err.to_string();
+    assert!(
+        message.contains("Locked: tests/Acceptance/a.py."),
+        "{message}"
+    );
+    assert!(
+        message.contains("Not locked: tests/Acceptance/b.py, tests/Acceptance/c.py"),
+        "{message}"
+    );
+
+    // What was written is locked, the rest is as it was, and nothing else stays.
+    let a = fs::read(root.path().join("tests/Acceptance/a.py")).unwrap();
+    assert!(crate::format::lock::read(&a).unwrap().unwrap().matches());
+    assert_eq!(
+        fs::read(root.path().join("tests/Acceptance/c.py")).unwrap(),
+        PENDING
+    );
+    assert_eq!(entries(&root.path().join(DIR)), ["a.py", "b.py", "c.py"]);
+
+    // Running again finds the first as locked and the others still pending.
+    let found = find(&root, DIR, "SHOP-214").unwrap();
+    assert_eq!(found.locked, ["tests/Acceptance/a.py"]);
+    assert_eq!(found.to_lock.len(), 2);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_locked_file_keeps_its_permissions() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let (_dir, root) = project();
+    let file = pending(&root, "tests/Acceptance/a.py");
+    let path = root.path().join(&file.path);
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o751)).unwrap();
+
+    write_files(&root, "SHOP-214", &[file]).unwrap();
+
+    let mode = fs::metadata(&path).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o751);
 }
