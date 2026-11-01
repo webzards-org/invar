@@ -1,11 +1,12 @@
-//! Which files under `acceptance.dir` belong to a ticket (`acceptance-lock.md` §9.1).
+//! The files under `acceptance.dir`, and which of them belong to a ticket
+//! (`acceptance-lock.md` §9.1).
 
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use crate::format::lock::{self, MARKER};
+use crate::format::lock::{self, LockError as LineError, LockLine, MARKER};
 use crate::fs::ProjectRoot;
 
 /// What a temporary file of an interrupted write ends with (§9.4). It holds a lock
@@ -38,27 +39,48 @@ impl Found {
     }
 }
 
-/// The ticket's files under `dir`, or why they cannot be locked.
-pub fn find(root: &ProjectRoot, dir: &str, ticket: &str) -> Result<Found, FindError> {
-    let nothing = || FindError::Nothing {
-        ticket: ticket.to_owned(),
-        dir: dir.to_owned(),
-    };
+/// One file under `acceptance.dir` that has a lock line, or a malformed one.
+#[derive(Debug)]
+pub struct Scanned {
+    /// Relative to the project root, with `/` separators. Lossy when it is not UTF-8,
+    /// and then `utf8_path` says so.
+    pub path: String,
+    pub utf8_path: bool,
+    pub bytes: Vec<u8>,
+    pub line: Result<LockLine, LineError>,
+}
+
+/// What is under `acceptance.dir`.
+#[derive(Debug)]
+pub enum Scan {
+    /// The path does not exist.
+    Missing,
+    /// The path exists, and is not a directory, or is a symlink to one (D-16).
+    NotADirectory,
+    /// The files with a line, in sorted order.
+    Files(Vec<Scanned>),
+}
+
+/// Every file with a lock line under `dir`, of any ticket (§9.1).
+pub fn scan(root: &ProjectRoot, dir: &str) -> Result<Scan, FindError> {
     let start = root.path().join(dir);
     // Not `is_dir`, which follows a link (D-16).
     match fs::symlink_metadata(&start) {
         Ok(metadata) if metadata.is_dir() => {}
-        _ => return Err(nothing()),
+        Ok(_) => return Ok(Scan::NotADirectory),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Scan::Missing),
+        Err(source) => {
+            return Err(FindError::Io {
+                path: start,
+                source,
+            });
+        }
     }
 
     let mut paths = Vec::new();
     walk(&start, &mut paths)?;
 
-    let mut found = Found {
-        to_lock: Vec::new(),
-        locked: Vec::new(),
-    };
-    let mut problems = Vec::new();
+    let mut files = Vec::new();
     for path in paths {
         let bytes = fs::read(&path).map_err(|source| FindError::Io {
             path: path.clone(),
@@ -67,33 +89,63 @@ pub fn find(root: &ProjectRoot, dir: &str, ticket: &str) -> Result<Found, FindEr
         if !contains(&bytes, MARKER.as_bytes()) {
             continue;
         }
+        let line = match lock::read(&bytes) {
+            Ok(Some(line)) => Ok(line),
+            Ok(None) => continue,
+            Err(err) => Err(err),
+        };
         let shown = relative(root.path(), &path);
-        let read = match lock::read(&bytes) {
-            Ok(read) => read,
+        files.push(Scanned {
+            utf8_path: shown.is_some(),
+            path: shown.unwrap_or_else(|| path.display().to_string()),
+            bytes,
+            line,
+        });
+    }
+    Ok(Scan::Files(files))
+}
+
+/// The ticket's files under `dir`, or why they cannot be locked.
+pub fn find(root: &ProjectRoot, dir: &str, ticket: &str) -> Result<Found, FindError> {
+    let nothing = || FindError::Nothing {
+        ticket: ticket.to_owned(),
+        dir: dir.to_owned(),
+    };
+    let Scan::Files(files) = scan(root, dir)? else {
+        return Err(nothing());
+    };
+
+    let mut found = Found {
+        to_lock: Vec::new(),
+        locked: Vec::new(),
+    };
+    let mut problems = Vec::new();
+    for file in files {
+        let line = match file.line {
+            Ok(line) => line,
             Err(err) => {
-                problems.push((
-                    shown.unwrap_or_else(|| path.display().to_string()),
-                    err.to_string(),
-                ));
+                problems.push((file.path, err.to_string()));
                 continue;
             }
         };
-        let Some(line) = read else { continue };
         if line.ticket != ticket {
             continue;
         }
-        let Some(shown) = shown else {
+        if !file.utf8_path {
             problems.push((
-                path.display().to_string(),
+                file.path,
                 "the path is not valid UTF-8, so it cannot be matched against a report".to_owned(),
             ));
             continue;
-        };
-        match line.recorded {
-            None => found.to_lock.push(TestFile { path: shown, bytes }),
-            Some(_) if line.matches() => found.locked.push(shown),
+        }
+        match &line.recorded {
+            None => found.to_lock.push(TestFile {
+                path: file.path,
+                bytes: file.bytes,
+            }),
+            Some(_) if line.matches() => found.locked.push(file.path),
             Some(recorded) => problems.push((
-                shown,
+                file.path,
                 format!(
                     "line {}: it changed after it was locked: the line records {recorded}, and \
                      the file's digest is {}",
