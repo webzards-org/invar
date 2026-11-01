@@ -325,6 +325,17 @@ pub fn merge_base(dir: &Path, base: &str) -> Result<String, GitError> {
     Ok(text(MERGE_BASE, &output.stdout)?.trim().to_owned())
 }
 
+/// Whether the repository has only part of its history:
+/// `git rev-parse --is-shallow-repository`.
+pub fn is_shallow(dir: &Path) -> Result<bool, GitError> {
+    const COMMAND: &str = "git rev-parse --is-shallow-repository";
+    let output = run(dir, &["rev-parse", "--is-shallow-repository"])?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(text(COMMAND, &output.stdout)?.trim() == "true")
+}
+
 /// The files under `path` (relative to `dir`, as the results are) that differ from
 /// `fork` in `HEAD`, in the index or in the work tree, sorted.
 ///

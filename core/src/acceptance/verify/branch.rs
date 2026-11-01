@@ -62,9 +62,54 @@ pub fn check(
         }
     }
 
-    if let Err(err) = compare(root.path(), dir, ticket, &declared, configured, report) {
+    let fork = match merge_base(root.path(), configured) {
+        Ok(fork) => fork,
+        Err(problem) => {
+            report.problems.push(problem);
+            return;
+        }
+    };
+    if let Err(err) = compare(root.path(), dir, ticket, &declared, &fork, report) {
         report.problems.push(cannot_compare(&err.to_string()));
     }
+}
+
+/// The merge base, or the problem to report. A shallow clone gets a message of its own,
+/// because CI checks out that way by default and the fix is not a guess.
+fn merge_base(root: &Path, configured: Option<&str>) -> Result<String, String> {
+    let base =
+        git::base_branch(root, configured).map_err(|err| cannot_compare(&err.to_string()))?;
+    git::merge_base(root, &base).map_err(|err| {
+        if matches!(git::is_shallow(root), Ok(true)) {
+            shallow_clone(&base, &err.to_string())
+        } else {
+            cannot_compare(&err.to_string())
+        }
+    })
+}
+
+/// The commands are the ones that work. `git fetch origin <base>` alone only sets
+/// `FETCH_HEAD` in a shallow clone, whose fetch refspec names one branch, and a checkout
+/// with `fetch-depth: 0` makes `origin/<base>` but no `<base>`: neither gives git the name
+/// that `base` is, so each has to create it.
+fn shallow_clone(base: &str, said: &str) -> String {
+    let (refspec, full_history) = match base.strip_prefix("origin/") {
+        Some(branch) => (
+            format!("+refs/heads/{branch}:refs/remotes/origin/{branch}"),
+            "check out with `fetch-depth: 0`".to_owned(),
+        ),
+        None => (
+            format!("{base}:{base}"),
+            format!("check out with `fetch-depth: 0` and run `git branch {base} origin/{base}`"),
+        ),
+    };
+    format!(
+        "this is a shallow clone, and it does not have the base branch `{base}` or its merge base \
+         with this branch, so changes to other tickets' locked tests cannot be checked: {said}. \
+         Fetch the base branch with enough history, with `git fetch --deepen=200 origin {refspec}` \
+         (or `--unshallow` in place of `--deepen=200`), or in CI {full_history}. If `{base}` is \
+         not the base branch, set `git.base_branch` in invar.yaml"
+    )
 }
 
 fn cannot_compare(said: &str) -> String {
@@ -140,13 +185,10 @@ fn compare(
     dir: &str,
     ticket: &str,
     declared: &[Declaration],
-    configured: Option<&str>,
+    fork: &str,
     report: &mut Report,
 ) -> Result<(), GitError> {
-    let base = git::base_branch(root, configured)?;
-    let fork = git::merge_base(root, &base)?;
-
-    let mut paths: BTreeSet<String> = git::changed_since(root, &fork, dir)?.into_iter().collect();
+    let mut paths: BTreeSet<String> = git::changed_since(root, fork, dir)?.into_iter().collect();
     paths.extend(declared.iter().map(|item| item.path.clone()));
 
     for path in &paths {
@@ -155,7 +197,7 @@ fn compare(
             .filter(|item| item.path == *path)
             .map(|item| item.action)
             .collect();
-        let at_fork = git::file_at(root, &fork, path)?;
+        let at_fork = git::file_at(root, fork, path)?;
         let locked = at_fork
             .as_deref()
             .and_then(|bytes| lock::read(bytes).ok().flatten())
@@ -191,7 +233,7 @@ fn compare(
         if !allowed.contains(&needed) {
             report
                 .problems
-                .push(undeclared(path, &locked, needed, &allowed, &fork));
+                .push(undeclared(path, &locked, needed, &allowed, fork));
         }
     }
     Ok(())

@@ -127,6 +127,23 @@ digest no longer matches, a malformed `invar-lock:` line, or a pending line nobo
 Whether the tests pass is your own test step. With no `acceptance:` section in `invar.yaml`
 it warns and exits 0.
 
+`verify` needs no history, but `invar done` does: it compares the branch with its merge base,
+and refuses when it cannot. To run `done` in CI, check out with full history and give git the
+base branch by the name invar looks for, since `actions/checkout` creates only `origin/develop`:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+# Install the CLI as above, then, with `develop` as your base branch:
+- run: git branch develop origin/develop
+- name: Close the cycle
+  run: invar done SHOP-214 --commit "chore: remove the Plan of SHOP-214"
+```
+
+In a checkout you already have, `git fetch --deepen=200 origin develop:develop` does the same.
+Without the `develop:develop`, the fetch deepens the clone and still creates no branch.
+
 ---
 
 ## Troubleshooting

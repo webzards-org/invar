@@ -491,6 +491,8 @@ fn a_base_branch_that_is_not_there_is_a_problem_and_not_a_way_past_the_rule() {
         &report,
         &["cannot be compared", "develop", "git.base_branch"],
     );
+    // A full clone is not told to fetch more of what it already has.
+    assert!(!report.problems[0].contains("--deepen"), "{report:?}");
 }
 
 #[test]

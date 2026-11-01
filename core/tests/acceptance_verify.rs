@@ -755,3 +755,184 @@ fn verify_works_from_a_subdirectory() {
         .success()
         .stdout("verified 2 locked file(s)\n");
 }
+
+// --- a shallow clone ---------------------------------------------------------------
+
+/// [`Project::new`] with `git.base_branch: develop`, and all of it committed, ready for
+/// `done`; `develop` is one commit past where the branch left it.
+fn ready_on_develop() -> Project {
+    let project = Project::with_config(&format!("git:\n  base_branch: develop\n{CONFIG}"));
+    project.git(&["branch", "develop", "main"]);
+    project.lock_mine();
+    project.commit("the work");
+    project.git(&["checkout", "-q", "develop"]);
+    project.git(&["commit", "-q", "--allow-empty", "-m", "later on develop"]);
+    project.git(&["checkout", "-q", "feat/SHOP-214-cancel"]);
+    project
+}
+
+/// A checkout that is not the project's own, with the project's git settings.
+struct Clone {
+    dir: TempDir,
+    config: PathBuf,
+}
+
+impl Clone {
+    fn empty(project: &Project) -> Self {
+        Self {
+            dir: tempfile::tempdir().unwrap(),
+            config: project.root().join(".gitconfig-test"),
+        }
+    }
+
+    /// As `git clone --depth 1` of the branch leaves it.
+    fn shallow(project: &Project) -> Self {
+        let clone = Self::empty(project);
+        let url = format!("file://{}", project.root().display());
+        clone.git(&[
+            "clone",
+            "-q",
+            "--depth",
+            "1",
+            "--branch",
+            "feat/SHOP-214-cancel",
+            &url,
+            ".",
+        ]);
+        clone
+    }
+
+    /// As `actions/checkout` with `fetch-depth: 0` leaves it: every branch under
+    /// `origin/`, no local branch but the one checked out, and no `origin/HEAD`.
+    fn full_as_actions_does(project: &Project) -> Self {
+        let clone = Self::empty(project);
+        let url = format!("file://{}", project.root().display());
+        clone.git(&["init", "-q"]);
+        clone.git(&["remote", "add", "origin", &url]);
+        clone.git(&[
+            "fetch",
+            "-q",
+            "origin",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ]);
+        clone.git(&[
+            "checkout",
+            "-q",
+            "--force",
+            "-B",
+            "feat/SHOP-214-cancel",
+            "refs/remotes/origin/feat/SHOP-214-cancel",
+        ]);
+        clone
+    }
+
+    fn git(&self, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(self.dir.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", &self.config)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn done(&self) -> Assert {
+        Command::cargo_bin("invar")
+            .unwrap()
+            .current_dir(self.dir.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", &self.config)
+            .args(["done", "SHOP-214"])
+            .assert()
+    }
+
+    fn has_plan(&self) -> bool {
+        self.dir.path().join(SPEC).exists()
+    }
+
+    fn write(&self, path: &str, text: &str) {
+        fs::write(self.dir.path().join(path), text).unwrap();
+    }
+}
+
+#[test]
+fn done_in_a_shallow_clone_refuses_and_says_how_to_fix_it() {
+    let project = ready_on_develop();
+    let clone = Clone::shallow(&project);
+    refused(
+        clone.done(),
+        &[
+            "shallow clone",
+            "`develop`",
+            "git fetch --deepen=200 origin develop:develop",
+            "--unshallow",
+            "fetch-depth: 0",
+            "git branch develop origin/develop",
+            "git.base_branch",
+        ],
+    );
+    assert!(clone.has_plan());
+}
+
+#[test]
+fn the_fetch_the_message_gives_lets_done_pass_the_branch_rule() {
+    let project = ready_on_develop();
+    let clone = Clone::shallow(&project);
+    clone.done().failure();
+    clone.git(&["fetch", "-q", "--deepen=200", "origin", "develop:develop"]);
+    clone.done().success();
+    assert!(!clone.has_plan());
+}
+
+#[test]
+fn the_unshallow_the_message_gives_works_too() {
+    let project = ready_on_develop();
+    let clone = Clone::shallow(&project);
+    clone.git(&["fetch", "-q", "--unshallow", "origin", "develop:develop"]);
+    clone.done().success();
+}
+
+#[test]
+fn after_the_fetch_the_branch_rule_really_compares() {
+    let project = ready_on_develop();
+    let weaker = project.locked("SHOP-1", "it('AC1 works', fn () => true);\n");
+    let clone = Clone::shallow(&project);
+    clone.git(&["fetch", "-q", "--deepen=200", "origin", "develop:develop"]);
+    clone.write(OTHERS, &weaker);
+    refused(
+        clone.done(),
+        &[OTHERS, "locked for SHOP-1", "changed on this branch"],
+    );
+    assert!(clone.has_plan());
+}
+
+#[test]
+fn a_fetch_that_makes_no_ref_is_not_enough() {
+    // The form that looks right: it deepens, and creates no branch. The clone is not
+    // shallow any more, so this is the message for a base that is simply not there.
+    let project = ready_on_develop();
+    let clone = Clone::shallow(&project);
+    clone.git(&["fetch", "-q", "--unshallow", "origin", "develop"]);
+    let assert = clone.done().failure().stdout("");
+    let message = stderr_of(&assert);
+    assert!(
+        message.contains("the base branch `develop` is not a branch"),
+        "{message}"
+    );
+    assert!(!message.contains("--deepen"), "{message}");
+}
+
+#[test]
+fn the_ci_recipe_in_install_works_on_a_checkout_like_the_one_actions_makes() {
+    let project = ready_on_develop();
+    let clone = Clone::full_as_actions_does(&project);
+    // Full history, and still no `develop`.
+    clone.done().failure();
+    clone.git(&["branch", "develop", "origin/develop"]);
+    clone.done().success();
+}

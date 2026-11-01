@@ -8,7 +8,7 @@ use std::path::Path;
 
 use super::{
     GitError, Instant, WorkTree, base_branch, changed_since, current_branch, file_at,
-    file_in_index, merge_base, stage_removal, today, user_name, work_tree,
+    file_in_index, is_shallow, merge_base, stage_removal, today, user_name, work_tree,
 };
 use crate::calendar::civil_from_days;
 
@@ -517,4 +517,21 @@ fn bytes_come_back_as_they_are() {
 fn a_revision_that_is_not_there_is_an_error_and_not_an_absent_file() {
     let (repo, _) = repo_with_tests();
     assert!(file_at(repo.path(), "no-such-rev", "t/a.txt").is_err());
+}
+
+#[test]
+fn a_repository_with_its_history_is_not_shallow_and_a_depth_one_clone_is() {
+    let (repo, _) = repo_with_tests();
+    assert!(!is_shallow(repo.path()).unwrap());
+    let clone = tempfile::tempdir().unwrap();
+    let url = format!("file://{}", repo.path().display());
+    repo.git(&[
+        "clone",
+        "--quiet",
+        "--depth",
+        "1",
+        &url,
+        &clone.path().to_string_lossy(),
+    ]);
+    assert!(is_shallow(clone.path()).unwrap());
 }

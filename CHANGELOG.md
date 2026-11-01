@@ -120,7 +120,10 @@
   the given message (`git commit --only`): anything else that is staged stays
   out of it. Hooks, signing and identity apply and are never bypassed; nothing is
   pushed. For CI: `invar done <TICKET> --commit "chore: remove the Plan of
-  <TICKET>" && git push`.
+  <TICKET>" && git push`. With an `acceptance:` section this needs history, while
+  `invar acceptance verify` does not: a shallow checkout such as the `fetch-depth: 1` of
+  GitHub Actions is refused, and the refusal and `docs/INSTALL.md` say how to fetch the
+  base branch.
 
 - **`done.commit` in `invar.yaml`** (contract 2.1.0) makes `invar done` and
   `/invar:done` commit the deletion without `--commit`, under
