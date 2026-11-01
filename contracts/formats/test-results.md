@@ -1,6 +1,6 @@
 # Contract: test results (JUnit XML)
 
-**Version:** 1.0.0 — initial version; see §9
+**Version:** 1.1.0 — a failure's type and message are read; see §9
 **Status:** stable
 **Implements:** §14.2, §14.3; A-2, A-4, A-5 (`docs/TASKS-AT.md`)
 **Read by:** the core (`format/junit`), any later reimplementation
@@ -61,8 +61,22 @@ take the ticket from (§5).
 | `<skipped>` | `skipped` | Skipped, or marked incomplete or todo by the runner |
 | More than one kind | The first of `error`, `failure`, `skipped` | D-5 |
 
-Their attributes and text are not read. So any other child reads as `passed`, such as a
-`<warning>`.
+Any other child reads as `passed`, such as a `<warning>`.
+
+### 2.2 What a failure says
+
+From the child that decided the outcome, the first of its kind when there are several, for a
+person reading a refusal (D-8):
+
+| From | Means |
+|---|---|
+| `type` | The failure's type. None when absent or blank |
+| Its own text, trimmed, including CDATA | The message. Text inside its child elements is not read |
+| `message` | The message, when there is no such text |
+
+A message keeps its first 2000 characters. XML's five entities and numeric references in the
+text are resolved. Anything else stays as written and is **never an error**, because a message
+is only shown: no outcome depends on it.
 
 ## 3. The path in `file`
 
@@ -141,8 +155,8 @@ Each is a distinct failure, and the first in the document is the one reported.
 | **Outside the root** | §3 | The test case's name, and the `file` value |
 
 **No entity is ever resolved** from a DTD. A `<!DOCTYPE>` is skipped, so an external entity
-is not fetched, and a reference to it in an attribute is **Not XML**. References in an
-element's text are in what is not read, and stay unread.
+is not fetched, and a reference to it in an attribute is **Not XML**. In text, a
+reference is either in what is not read, or in a message (§2.2), where it stays as written.
 
 ## 7. Decisions and their reasons
 
@@ -187,6 +201,12 @@ reads the lock line.
 on fixtures with a fixed root. Resolving symlinks would need the file system, and would hide
 a runner that sees the project at another path. That is reported instead, and the caller
 passes the root as the runner sees it.
+
+**D-8 — The message is read, and only for showing.** A test-writer told only that a test "fails
+for the wrong reason" has to run it again to learn the reason, and `Class "X" not found` is
+usually all it needs. Nothing decides on the text, so a strange message cannot change a verdict
+and is never an error. It is bounded because a stack trace can be any size, and the caller shows
+only the first lines.
 
 ## 8. Examples
 
@@ -284,5 +304,8 @@ cannot load, and exit non-zero.
 **Wrong root**, naming `html`. A file holding `this is not xml` is **Not XML**.
 
 ## 9. Version history
+
+**1.1.0** — §2.2 and D-8: a failure's type and message are read, for AT-8's refusals. No report
+reads differently otherwise: the same test cases, outcomes and errors.
 
 **1.0.0** — initial version (AT-6).

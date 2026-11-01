@@ -1,6 +1,6 @@
 //! The subset of JUnit XML the core reads.
 //!
-//! Implements `contracts/formats/test-results.md` v1.0.0. The contract is the
+//! Implements `contracts/formats/test-results.md` v1.1.0. The contract is the
 //! authority; section numbers below (`§3`, `D-5`) point into it.
 //!
 //! Bytes and the project root come in, and a list of test cases comes out. No
@@ -12,11 +12,15 @@
 use std::fmt;
 use std::path::Path;
 
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::escape::resolve_predefined_entity;
+use quick_xml::events::{BytesRef, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 
 #[cfg(test)]
 mod tests;
+
+/// How much of a failure's message is kept, in characters (§2.2).
+const MESSAGE_LIMIT: usize = 2000;
 
 /// What a test case's direct children say (§2.1). In order of precedence: the
 /// greatest one present decides (D-5).
@@ -47,6 +51,10 @@ pub struct TestCase {
     pub file: String,
     pub outcome: Outcome,
     pub criterion: Criterion,
+    /// The `type` of the child that decided the outcome (§2.2).
+    pub failure_type: Option<String>,
+    /// What that child says, trimmed and bounded (§2.2).
+    pub message: Option<String>,
 }
 
 /// Why a report cannot be read (§6). **Missing** is not here: this takes bytes, so
@@ -98,6 +106,8 @@ enum Open {
     Suite,
     /// The last of the cases found so far.
     Case,
+    /// The child that decided the last case's outcome: its text is the message.
+    Message,
     /// Not read, and neither is anything inside it (§2).
     Ignored,
 }
@@ -134,6 +144,8 @@ pub fn read(bytes: &[u8], root: &Path) -> Result<Vec<TestCase>, JunitError> {
     let mut cases: Vec<TestCase> = Vec::new();
     let mut open: Vec<Open> = Vec::new();
     let mut root_seen = false;
+    // Of the `Open::Message` that is open.
+    let mut text = String::new();
     loop {
         // Text never sits between this position and a tag's own `<`: it is an event
         // of its own, so this is where the next tag starts.
@@ -145,7 +157,13 @@ pub fn read(bytes: &[u8], root: &Path) -> Result<Vec<TestCase>, JunitError> {
             Event::Start(element) => (element, false),
             Event::Empty(element) => (element, true),
             Event::End(_) => {
-                open.pop();
+                if open.pop() == Some(Open::Message) {
+                    let said = text.trim();
+                    if let (false, Some(case)) = (said.is_empty(), cases.last_mut()) {
+                        case.message = Some(said.to_owned());
+                    }
+                    text.clear();
+                }
                 continue;
             }
             Event::Eof => {
@@ -171,8 +189,24 @@ pub fn read(bytes: &[u8], root: &Path) -> Result<Vec<TestCase>, JunitError> {
             Event::CData(_) | Event::GeneralRef(_) if open.is_empty() => {
                 return Err(not_xml(start, "text outside the root element".into()));
             }
-            // An element's own text is never read (§2.1).
-            Event::Text(_) | Event::CData(_) | Event::GeneralRef(_) => continue,
+            // No other element's text is ever read (§2.1).
+            Event::Text(_) | Event::CData(_) | Event::GeneralRef(_)
+                if open.last() != Some(&Open::Message) =>
+            {
+                continue;
+            }
+            Event::Text(content) => {
+                append(&mut text, &content.xml_content(XmlVersion::Implicit1_0));
+                continue;
+            }
+            Event::CData(content) => {
+                append(&mut text, &content.xml_content(XmlVersion::Implicit1_0));
+                continue;
+            }
+            Event::GeneralRef(reference) => {
+                append(&mut text, &reference_text(&reference));
+                continue;
+            }
         };
 
         let attributes = attributes_of(&element).map_err(|reason| not_xml(start, reason))?;
@@ -206,12 +240,27 @@ pub fn read(bytes: &[u8], root: &Path) -> Result<Vec<TestCase>, JunitError> {
                     "skipped" => Some(Outcome::Skipped),
                     _ => None,
                 };
-                if let (Some(outcome), Some(case)) = (outcome, cases.last_mut()) {
-                    case.outcome = case.outcome.max(outcome);
+                match (outcome, cases.last_mut()) {
+                    (Some(outcome), Some(case)) if outcome > case.outcome => {
+                        case.outcome = outcome;
+                        let attribute = |key: &str| {
+                            attributes
+                                .iter()
+                                .find(|(name, value)| name == key && !value.trim().is_empty())
+                                .map(|(_, value)| value.as_str())
+                        };
+                        case.failure_type = attribute("type").map(str::to_owned);
+                        case.message = attribute("message").map(|said| {
+                            let mut bounded = String::new();
+                            append(&mut bounded, said.trim());
+                            bounded
+                        });
+                        Open::Message
+                    }
+                    _ => Open::Ignored,
                 }
-                Open::Ignored
             }
-            Some(Open::Ignored) => Open::Ignored,
+            Some(Open::Message | Open::Ignored) => Open::Ignored,
         };
         if !closes_at_once {
             open.push(frame);
@@ -265,7 +314,28 @@ fn test_case(
         })?,
         outcome: Outcome::Passed,
         criterion: criterion(name),
+        failure_type: None,
+        message: None,
     })
+}
+
+/// `more` added to `text`, up to [`MESSAGE_LIMIT`] characters in all.
+fn append(text: &mut String, more: &str) {
+    let room = MESSAGE_LIMIT.saturating_sub(text.chars().count());
+    text.extend(more.chars().take(room));
+}
+
+/// What a reference in a message stands for. Never an error, because a message is
+/// only ever shown, and never looked up in a DTD: anything else stays as written (§6).
+fn reference_text(reference: &BytesRef<'_>) -> String {
+    let name = reference.xml_content(XmlVersion::Implicit1_0);
+    match reference.resolve_char_ref() {
+        Ok(Some(character)) => character.to_string(),
+        _ => match resolve_predefined_entity(&name) {
+            Some(resolved) => resolved.to_owned(),
+            None => format!("&{name};"),
+        },
+    }
 }
 
 /// `file` without `::<name>` at its end, and otherwise as it is (§3 step 1, D-6).
