@@ -49,8 +49,8 @@
   in `contracts/fixtures/acceptance/`): one line near the top of an acceptance test,
   with any comment prefix, naming its ticket and, once locked, the digest of the file
   without that line. `invar hash --lock <file>` prints that digest and says what the
-  line records. `invar acceptance lock` writes the digest, and nothing enforces the
-  line yet.
+  line records. `invar acceptance lock` writes the digest, and `plan check`, `done` and
+  `invar acceptance verify` check it.
 
 - **A reader for JUnit XML test results** (new contract `test-results.md` 1.0.0, with
   real Pest and PHPUnit reports in `contracts/fixtures/junit/`): each test case's
@@ -77,7 +77,28 @@
   missing report is refused as "the tests did not run", with the runner's own output.
   All the problems are listed at once, and a refusal writes nothing. A run that takes
   over 10 minutes is killed and refused. On success the last line is
-  `locked <TICKET> <N> file(s)`. No agent uses it yet, and nothing enforces a lock yet.
+  `locked <TICKET> <N> file(s)`. No agent uses it yet.
+
+- **`invar acceptance verify [<TICKET>]`, and the same check in `plan check` and `invar
+  done`** (`acceptance-lock.md` 1.2.0 §10). None of them runs a test.
+  - Every locked file under `acceptance.dir` has the digest its line records, and no
+    line is malformed.
+  - A test that another ticket locked at the merge base may change on this branch, in
+    the working tree, the index or `HEAD`, only if the approved Plan lists it in
+    `## Acceptance tests to change` with `change`, and be deleted only with `delete`. A
+    rename is a delete. A declared path that is not a locked test, or did not change, is
+    a warning (Plan contract 1.7.1).
+  - `done`, and `verify` with a ticket, also ask for a locked test for a `required`
+    ticket, and refuse a pending line left for it.
+  - `verify` with no ticket is for CI: it needs no Plan and no git, works in a shallow
+    clone, and refuses a pending line of any ticket.
+
+  **Upgrading:** nothing changes without an `acceptance:` section, except that `done`
+  warns when the Plan says `required`. With one, `plan check` and `done` refuse inside a
+  repository whose base branch or merge base cannot be found: fetch it, or set
+  `git.base_branch`. Outside git they warn and skip the branch rule. A digest is not a
+  signature: for a ticket's own new files, review and the PR diff catch a digest written
+  by hand. See `docs/INSTALL.md` for the CI step.
 
 - **`plan check` prints one more line** on success: `acceptance: required` or
   `acceptance: skipped`. Every existing line stays as it was.

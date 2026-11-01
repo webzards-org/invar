@@ -108,6 +108,25 @@ rm -rf /tmp/invar-dist
 invar --version
 ```
 
+## Optional: verify the locks in CI
+
+A locked acceptance test is only worth something if CI notices when it changes. Run
+`invar acceptance verify` on every push. It runs no tests and needs no Plan and no git
+history, so a shallow checkout is enough and it still works after `invar done` has deleted
+the Plan:
+
+```yaml
+- uses: actions/checkout@v4
+# Install the CLI as above, then:
+- name: Verify acceptance locks
+  run: invar acceptance verify
+```
+
+It prints `verified <N> locked file(s)`, or fails with every problem: a locked file whose
+digest no longer matches, a malformed `invar-lock:` line, or a pending line nobody locked.
+Whether the tests pass is your own test step. With no `acceptance:` section in `invar.yaml`
+it warns and exits 0.
+
 ---
 
 ## Troubleshooting
