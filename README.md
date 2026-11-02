@@ -35,9 +35,9 @@ Each ticket goes through one cycle:
 All decisions are made by the `invar` CLI, a static binary inside the plugin.
 The plugin only runs it. The same checks run in CI with no agent at all.
 
-Invar does not depend on your language. The pilot is a Laravel + Vue
-application with Pest, and anything that writes JUnit XML can run the
-acceptance tests.
+Invar does not depend on your language. It has been used so far on a
+Laravel + Vue application with Pest, and anything that writes JUnit XML can
+run the acceptance tests.
 
 ## Status
 
@@ -87,9 +87,25 @@ hold across all of them (§15):
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for branch naming, commit scope and
-what a contract change requires.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for branch naming, commit scope,
+sign-off and what a contract change requires. Work is tracked in
+[GitHub issues](https://github.com/webzards-org/invar/issues).
+
+## Security
+
+Please report vulnerabilities privately, as described in
+[`SECURITY.md`](SECURITY.md), not in a public issue.
 
 ## License
 
-MIT, see [`LICENSE`](LICENSE).
+Licensed under either of
+
+- Apache License, Version 2.0 ([`LICENSE-APACHE`](LICENSE-APACHE))
+- MIT license ([`LICENSE-MIT`](LICENSE-MIT))
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in this project by you, as defined in the Apache-2.0
+license, shall be dual licensed as above, without any additional terms or
+conditions.

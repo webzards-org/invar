@@ -7,6 +7,6 @@
   "author": {
     "name": "Radomir Brkovic"
   },
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "keywords": ["spec-driven", "plan", "gate", "context"]
 }

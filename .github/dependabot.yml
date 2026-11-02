@@ -1,0 +1,22 @@
+# The actions are pinned to commit SHAs (a tag can be moved, a commit
+# cannot). Dependabot keeps the pins and the `# vX.Y.Z` comments current.
+# Cargo updates arrive as PRs too: CI builds with `--locked`, so a dependency
+# only changes through a reviewed commit (CONTRIBUTING.md, "CI").
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: cargo
+    directory: /core
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(core)

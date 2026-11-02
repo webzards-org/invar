@@ -17,6 +17,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The repository is public: a pull request from a fork runs this workflow, so
+# its token can read and nothing more.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   # Fail on warnings everywhere, not only in the clippy step.
@@ -27,7 +32,7 @@ jobs:
     name: contract fixtures
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Verifies that every fixture on disk still has the bytes the table
       # claims, and that digests.json agrees with them. This is the check that
@@ -59,7 +64,7 @@ jobs:
         working-directory: core
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Show toolchain
         run: |
@@ -69,7 +74,7 @@ jobs:
       # Caches ~/.cargo (registry, git checkouts) and core/target, keyed on
       # Cargo.lock and the toolchain. Without it every run recompiles clap and
       # sha2 from scratch.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: core
 
@@ -94,9 +99,9 @@ jobs:
     name: plugin (claude plugin validate)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 

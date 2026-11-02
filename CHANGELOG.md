@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **The repository is prepared for public release.** Invar is dual-licensed
+  under MIT or Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`), and both licenses
+  ship with the plugin on `dist`. `SECURITY.md` says how to report a
+  vulnerability privately; `CONTRIBUTING.md` asks for a DCO sign-off on every
+  commit and points new work to GitHub issues.
+- **Every released binary can be verified.** The release workflow attaches a
+  build provenance attestation to each binary, checks it before publishing, and
+  attaches the binaries with `SHA256SUMS` to a GitHub release for the tag.
+  `docs/INSTALL.md` shows how to check a downloaded or installed binary, and
+  takes the terminal CLI from the release instead of a clone of `dist`.
+- **CI's supply chain is pinned.** Every action is pinned to a commit, kept
+  current by Dependabot; CI's token is read-only, and the release builds with
+  no cache.
+- **No private repository access is needed any more**, and `docs/INSTALL.md`
+  no longer describes it.
+- Notes and test comments no longer name the pilot project or its tickets.
+
 ## 0.1.0 — 2026-11-02
 
 The first release. It was beta-tested on one project, and the entries under

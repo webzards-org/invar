@@ -742,8 +742,8 @@ the planner stop, as `plan guard` does for the edit tools.
 1. **`bin/invar`** — chosen. The protocol has the agent run `invar plan validate`,
    `invar plan check` and `invar done` itself, and a `bin/` directory is what puts
    `invar` on the Bash tool's `PATH`. The cost is that claude.ai and Cowork refuse
-   a plugin with a top-level `bin/`; for a pilot inside one company, distributed
-   through a git marketplace, that distribution is irrelevant.
+   a plugin with a top-level `bin/`; a plugin distributed through a git
+   marketplace does not need that channel.
 2. The binary elsewhere, with `${CLAUDE_PLUGIN_ROOT}/…` paths in every protocol
    instruction — rejected: every instruction gets longer and every agent has to
    get a path right.
@@ -828,7 +828,7 @@ silent for a person typing it. To decide once the plugin has run for real.
 The code is small; getting an agent to behave is not. This section is the
 protocol for finding out whether it does, and the log of what changed when it
 did not. **v1 was not run as a whole**; the first observations came from the
-VPK pilot cycles and are row 2 of the log.
+pilot cycles and are row 2 of the log.
 
 ### What exists
 
@@ -931,8 +931,8 @@ the next row's **Observed** once it has one.
 | v | Date | Observed | Changed | Effect |
 |---|---|---|---|---|
 | 1 | 2026-10-11 | Nothing yet; first draft. | Planner: procedure in six steps; one answer shape (`QUESTIONS` or `PLAN`); the regional question mandatory, with one exception (the ticket names the value); Implementation context as a distillate with a test per item ("would the coder get this wrong without it?"); one criterion per invariant, written as the negative case; one worked example, in a different domain from the pilot's; the log reasoned from, never quoted. Skill: when to skip and the sentence to say; Phase 2 begins with `plan check`; never edit an approved Plan; a `failed` entry for an impossible one; `done` to close; the log is the planner's alone. | Not run. |
-| 2 | 2026-10-21 | VPK-2, VPK-3: both cycles were closed by merging the PR, not by `invar done`, so the Plans reached `main`. `invar clean-spec` then refused to delete them, because neither ticket had a decision entry; the only way through was to record an entry for each, which said nothing anyone would read again — cleanup forced a meaningless entry into the log. | The end of a cycle redone. `done` only deletes the Plan and stages the deletion, needs no entry, and is the developer's, from a terminal or CI (`plan guard` denies it to the agent); `clean-spec` removed (a Plan left on `main` goes with `git rm -r`); entries are drafted with `/invar:log` and recorded only by `/invar:log-approve`, and `decision record` is the developer's alone. Skill: closing is commit → `/invar:review` (optional) → push → PR review → `/invar:log` before or during the review and `/invar:log-approve` after it, if an entry is wanted → the developer runs `invar done`; after `BLOCKED`, `/invar:log` with `type: failed`, recorded by the developer. | Not run yet. |
-| 3 | 2026-10-29 | veripkg VPK-11 to VPK-22, read at the gate: the Plans were well-formed and the invariants carried, but most revisions came from two gaps. Callers missed when a signature changed (VPK-11: a service constructor gained an argument and one wiring site was not in Scope; the coder answered `BLOCKED`). Framework behavior assumed instead of read (VPK-14: fastkit's `paginated_response` dumps without `mode="json"`; VPK-15: FastMCP's `http_app` has no `routes`, and `validate_issuer_url` refuses `http://testserver`; VPK-19: PyJWT validates `exp` only when present, and `commit()` inside a savepoint commits the outer transaction). Once (VPK-20), a migration's `down_revision` was left unnamed. | Planner, step 2: find every caller and construction site of a changed signature and name each in Scope; read the one installed definition of a framework function the Plan relies on (the one exception to not reading `vendor/`); name the migration head. The pre-validate check asks for a changed signature whose callers are not in Scope. | Not run yet. |
+| 2 | 2026-10-21 | Two pilot tickets: both cycles were closed by merging the PR, not by `invar done`, so the Plans reached `main`. `invar clean-spec` then refused to delete them, because neither ticket had a decision entry; the only way through was to record an entry for each, which said nothing anyone would read again — cleanup forced a meaningless entry into the log. | The end of a cycle redone. `done` only deletes the Plan and stages the deletion, needs no entry, and is the developer's, from a terminal or CI (`plan guard` denies it to the agent); `clean-spec` removed (a Plan left on `main` goes with `git rm -r`); entries are drafted with `/invar:log` and recorded only by `/invar:log-approve`, and `decision record` is the developer's alone. Skill: closing is commit → `/invar:review` (optional) → push → PR review → `/invar:log` before or during the review and `/invar:log-approve` after it, if an entry is wanted → the developer runs `invar done`; after `BLOCKED`, `/invar:log` with `type: failed`, recorded by the developer. | Not run yet. |
+| 3 | 2026-10-29 | Twelve pilot tickets, read at the gate: the Plans were well-formed and the invariants carried, but most revisions came from two gaps. Callers missed when a signature changed (a service constructor gained an argument and one wiring site was not in Scope; the coder answered `BLOCKED`). Framework behavior assumed instead of read (four tickets: a library function's default serialization, a framework object without an attribute the Plan relied on, a token validation that skips an absent claim, a commit inside a savepoint that commits the outer transaction). Once, a migration's parent revision was left unnamed. | Planner, step 2: find every caller and construction site of a changed signature and name each in Scope; read the one installed definition of a framework function the Plan relies on (the one exception to not reading `vendor/`); name the migration head. The pre-validate check asks for a changed signature whose callers are not in Scope. | Not run yet. |
 
 ### What to watch for, and the lever for each
 
@@ -1196,9 +1196,9 @@ guard — is unchanged.
 
 ### One command, allowed by name (2026-10-23)
 
-**Observed.** VPK-7, in `veripkg`: the developer ran `/invar:approve VPK-7`.
-The model got the skill but no command output, ran `invar plan check VPK-7`
-(still a draft) and asked the developer to type `! invar plan approve VPK-7`.
+**Observed.** On a pilot ticket, the developer ran `/invar:approve <TICKET>`.
+The model got the skill but no command output, ran `invar plan check <TICKET>`
+(still a draft) and asked the developer to type `! invar plan approve <TICKET>`.
 The approval had never run. The day before, the same skill with a simpler
 block had recorded an approval.
 
@@ -1242,7 +1242,7 @@ turns a refusal into `error: …` on stdout with exit 0.
 
 #### Not exercised (needs a real Claude Code session)
 
-- [ ] `/invar:approve VPK-7` records the approval, in auto mode and outside it,
+- [ ] `/invar:approve <TICKET>` records the approval, in auto mode and outside it,
       with no `invar` rule in the project's settings
 - [ ] It then starts Phase 2 without a second prompt
 - [ ] `/invar:approve` with a stale Plan shows `error: …` and starts nothing

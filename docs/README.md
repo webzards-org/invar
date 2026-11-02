@@ -13,10 +13,15 @@ Project documentation.
 - [`TASKS-AT.md`](TASKS-AT.md) — the test-writer feature broken into issues.
   Until v4, its decisions override DESIGN v3.1 and L-3 in `TASKS-M1.md`.
 
+Both task files are closed records: they keep the decisions (L-1 … L-9,
+A-1 … A-8) that other files cite. New work is tracked in
+[GitHub issues](https://github.com/webzards-org/invar/issues), not in a new
+task file.
+
 ## Belongs here
 
-Documents about the system as a whole: the design document, architecture
-decisions, and later the roadmap and task breakdowns.
+Documents about the system as a whole: the design document and architecture
+decisions. Task breakdowns and the roadmap live in GitHub issues.
 
 ## Must not
 
