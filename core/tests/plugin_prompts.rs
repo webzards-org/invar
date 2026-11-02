@@ -1434,7 +1434,7 @@ fn each_developer_skill_runs_one_command_that_its_frontmatter_allows() {
     // it runs it. A command no rule allows does not run: outside auto mode the
     // invocation aborts, in auto mode the model is asked to run it instead —
     // and the model may not, so the approval silently never happens (the
-    // VPK-7 session, plugin/NOTES.md §15). So the block is one simple command,
+    // pilot session in plugin/NOTES.md §15). So the block is one simple command,
     // with no shell syntax a permission check could balk at, and the skill's
     // `allowed-tools` names exactly that command.
     for (file, command) in DEVELOPER_SKILLS {

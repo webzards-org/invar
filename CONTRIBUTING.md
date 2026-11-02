@@ -2,6 +2,34 @@
 
 Section references (§4d, §13a, …) point into [`docs/DESIGN.md`](docs/DESIGN.md).
 
+## Issues first
+
+Work is tracked in [GitHub issues](https://github.com/webzards-org/invar/issues).
+Open one before a non-trivial PR, so the change is agreed before it is written,
+and link the PR to it (`Closes #123`). A typo fix needs no issue.
+
+Security problems are the exception: report them privately, as
+[`SECURITY.md`](SECURITY.md) says, never in an issue.
+
+## Licensing and sign-off
+
+Invar is licensed under either of MIT or Apache-2.0, at the user's option
+([`LICENSE-MIT`](LICENSE-MIT), [`LICENSE-APACHE`](LICENSE-APACHE)). Unless you
+explicitly state otherwise, any contribution you intentionally submit for
+inclusion is licensed the same way, without any additional terms or conditions.
+
+Every commit carries a sign-off, certifying the
+[Developer Certificate of Origin](https://developercertificate.org/): that you
+wrote the change or otherwise have the right to submit it under these licenses.
+
+```bash
+git commit -s -m "fix(core): …"
+```
+
+`-s` adds `Signed-off-by: Your Name <you@example.com>` from your git config. A PR
+with an unsigned commit is not merged; `git rebase --signoff main` signs a branch
+after the fact.
+
 ## Branch naming
 
 ```
@@ -68,6 +96,7 @@ docs(contracts): specify the .feature header/body boundary
 
 - `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` pass for
   changes under `core/`
+- Every commit is signed off (`git commit -s`)
 - Acceptance criteria of the linked issue are all ticked
 - Anything that changed a documented behavior is reflected in
   `docs/DESIGN.md`, in the same PR

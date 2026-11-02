@@ -11,6 +11,12 @@ name: Release plugin
 #
 # The binaries are static (musl on Linux): nothing to install first on a
 # developer's machine, which is why the core is written in Rust (design 14.2).
+#
+# Anyone can check that a binary was built here, from the tagged commit:
+# each one gets a build provenance attestation, and on a tag the binaries and
+# their SHA256SUMS are also attached to a GitHub release (docs/INSTALL.md,
+# "Verifying a binary"). No build cache: a release is built from the source
+# alone, never from what an earlier run left behind.
 
 on:
   push:
@@ -49,7 +55,7 @@ jobs:
         working-directory: core
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install the musl toolchain
         if: contains(matrix.target, 'musl')
@@ -60,18 +66,13 @@ jobs:
       - name: Add the target
         run: rustup target add ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: core
-          key: ${{ matrix.target }}
-
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Name the binary for the launcher
         run: cp target/${{ matrix.target }}/release/invar "$GITHUB_WORKSPACE/${{ matrix.name }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.name }}
           path: ${{ matrix.name }}
@@ -82,23 +83,29 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
+      # Pushing `dist` and creating the release.
       contents: write
+      # Signing the attestations (Sigstore, through GitHub's OIDC token).
+      id-token: write
+      attestations: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
 
       # The marketplace is `dist` itself: `.claude-plugin/marketplace.json` at
-      # its root, the plugin in `invar/`. Only what runs is copied — no notes,
-      # no README, no spike.
+      # its root, the plugin in `invar/`. Only what runs is copied, and the
+      # licenses that cover it — no notes, no README, no spike.
       - name: Assemble the marketplace
         run: |
           set -eu
           mkdir -p dist/.claude-plugin dist/invar
           cp plugin/marketplace.json dist/.claude-plugin/marketplace.json
+          cp LICENSE-MIT LICENSE-APACHE dist/
+          cp LICENSE-MIT LICENSE-APACHE dist/invar/
           for part in .claude-plugin hooks agents skills bin; do
             if [ -e "plugin/$part" ]; then
               cp -R "plugin/$part" dist/invar/
@@ -122,6 +129,31 @@ jobs:
       - name: Smoke test
         run: dist/invar/bin/invar --version
 
+      - name: Checksums
+        run: |
+          set -eu
+          cd dist/invar/bin
+          sha256sum invar-* > "$GITHUB_WORKSPACE/SHA256SUMS"
+          cat "$GITHUB_WORKSPACE/SHA256SUMS"
+
+      # Signed statement that each binary was built by this workflow, from this
+      # commit. Checked with `gh attestation verify <file> --repo <owner>/invar`.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: dist/invar/bin/invar-*
+
+      # The check a user would run, here first: a release that cannot be
+      # verified is not published.
+      - name: Verify the attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          for f in dist/invar/bin/invar-*; do
+            gh attestation verify "$f" --repo "${{ github.repository }}"
+          done
+
       - name: Publish on dist
         run: |
           set -eu
@@ -132,3 +164,19 @@ jobs:
           git add -A
           git commit -q -m "invar plugin ${GITHUB_REF_NAME}"
           git push --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:dist
+
+      # For the CLI outside Claude Code and for CI: the same binaries as on
+      # `dist`, with their checksums, without cloning a branch. Only on a tag;
+      # a manual run publishes `dist` alone.
+      - name: GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "${{ github.repository }}" \
+            --verify-tag \
+            --title "invar $GITHUB_REF_NAME" \
+            --notes "See CHANGELOG.md. Verify a binary with: gh attestation verify <file> --repo ${{ github.repository }}" \
+            dist/invar/bin/invar-* SHA256SUMS

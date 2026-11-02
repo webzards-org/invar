@@ -18,7 +18,6 @@ automatically when they open the project in Claude Code.
 **You need:**
 - Claude Code
 - `git`
-- read access to `github.com/webzards-org/invar` (see [Private repository access](#private-repository-access))
 
 **1. Register the marketplace and install the plugin for this project.** Run
 in the project's root, in your shell:
@@ -162,16 +161,38 @@ Not required: the plugin brings its own binary. You need the CLI in a terminal
 only to run `invar` outside Claude Code, for example `invar plan approve` from
 your own shell or in CI.
 
-Take the binary from the `dist` branch:
+Take the binary for your platform from the
+[latest release](https://github.com/webzards-org/invar/releases/latest)
+(`invar-linux-x86_64`, `invar-darwin-arm64` or `invar-darwin-x86_64`), check it,
+and put it on your `PATH`. With the GitHub CLI:
 
 ```bash
-git clone --depth 1 -b dist git@github.com:webzards-org/invar.git /tmp/invar-dist
-# Linux x86_64:
-sudo install -m 755 /tmp/invar-dist/invar/bin/invar-linux-x86_64 /usr/local/bin/invar
-# macOS Apple silicon: invar-darwin-arm64; Intel: invar-darwin-x86_64
-rm -rf /tmp/invar-dist
+gh release download --repo webzards-org/invar --pattern 'invar-linux-x86_64' --pattern SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS      # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
+gh attestation verify invar-linux-x86_64 --repo webzards-org/invar
+sudo install -m 755 invar-linux-x86_64 /usr/local/bin/invar
 invar --version
 ```
+
+Without the GitHub CLI, download the same two files from the release page and
+run the `sha256sum` line.
+
+### Verifying a binary
+
+Each binary is built by `.github/workflows/release.yml` on GitHub's runners, from
+the tagged commit, and gets a signed
+[build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations).
+`gh attestation verify` checks that a file is exactly what that workflow built,
+and prints the commit it was built from. The binaries the plugin runs are the same
+files; check the installed ones with:
+
+```bash
+for f in ~/.claude/plugins/cache/invar/invar/*/bin/invar-*; do
+  gh attestation verify "$f" --repo webzards-org/invar
+done
+```
+
+The code they were built from is the tagged commit in this repository.
 
 ## Optional: verify the locks in CI
 
@@ -245,23 +266,18 @@ the `run` command by hand with one test file to see the full error.
 enabled in a project where `invar init` has not run. Run it, or install the
 plugin per project instead of for your user.
 
-### Private repository access
-
-Claude Code clones the marketplace with your own git credentials and never
-prompts for them:
-
-- **SSH** (the default when it works): your key must be loaded in `ssh-agent`,
-  and `github.com` must be in `known_hosts`. Check with `ssh -T git@github.com`.
-- **HTTPS**: run `gh auth login` and `gh auth setup-git` once, then set
-  `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` so Claude Code skips SSH.
-
 ---
 
 ## For maintainers: publishing a release
 
 `.github/workflows/release.yml` builds the binaries (static musl for Linux,
-both macOS architectures) and publishes the plugin with them on the `dist`
-branch. Users install from `dist`.
+both macOS architectures), attests their provenance, publishes the plugin with
+them on the `dist` branch, and attaches them with `SHA256SUMS` to a GitHub
+release for the tag. Users install the plugin from `dist`.
+
+Attestations need a public repository (on a private one they need GitHub
+Enterprise Cloud): on a private repository the workflow stops at
+**Attest build provenance**, before it publishes anything.
 
 1. **Bump the version** in `plugin/.claude-plugin/plugin.json` and in
    `core/Cargo.toml`, to the same value. Users only receive a release whose
@@ -274,11 +290,12 @@ branch. Users install from `dist`.
    git push origin v0.2.0
    ```
 
-4. Check that the workflow ran, and that `dist` holds
+4. Check that the workflow ran, that `dist` holds
    `invar/bin/invar-linux-x86_64`, `invar-darwin-arm64` and
-   `invar-darwin-x86_64`.
-5. Create a GitHub release for the tag, with that version's section of
-   `CHANGELOG.md` as its notes. The workflow publishes `dist` only.
+   `invar-darwin-x86_64`, and that the release has the same three files and
+   `SHA256SUMS`.
+5. Put that version's section of `CHANGELOG.md` into the release notes:
+   `gh release edit v0.2.0 --notes-file <file>`.
 
 Never commit a binary to `main`; `core/tests/plugin.rs` fails if one appears.
 
