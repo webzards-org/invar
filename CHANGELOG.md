@@ -1,8 +1,44 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — 2026-11-02
 
-### Removed
+The first release. It was beta-tested on one project, and the entries under
+"Changes during the beta" below record what changed for its users on the way.
+A new user can start from this summary, [`docs/INSTALL.md`](docs/INSTALL.md)
+and [`docs/USAGE.md`](docs/USAGE.md).
+
+### What is in it
+
+- **The Plan gate.** A planner agent writes a Plan with numbered acceptance
+  criteria; the developer approves it with `/invar:approve`; a checksum freezes
+  it; `invar plan check` refuses an unapproved or changed Plan before any agent
+  writes code; a hook keeps `Write` and `Edit` off an approved Plan.
+- **Context.** `AI_CONTEXT.md` (conventions) and `BUSINESS_CONTEXT.md`
+  (invariants, regional facts), delivered to the right agents by hooks:
+  business rules reach the coder only through the approved Plan.
+- **Phase 2 in sub-agents.** The main session dispatches; the coder implements
+  with the ticket line only, and answers `DONE`, `BLOCKED` or `BLOCKED-TEST`.
+- **Locked acceptance tests** (optional, per project and per ticket). A
+  test-writer agent turns each criterion into a test; `invar acceptance lock`
+  locks it only if every criterion is covered and every test fails on an
+  assertion before the code exists; `plan check`, `done` and
+  `invar acceptance verify` (for CI) catch any change. `/invar:relock` lets the
+  developer unlock a test the coder showed to be wrong, at most twice per
+  ticket.
+- **Review.** `/invar:review`, advisory: per criterion, per locked test
+  (`asserts`, `weaker`, `unrelated`), shared test code, every invariant, Scope.
+- **Decision log.** `/invar:log` drafts an entry, `/invar:log-approve` records
+  it; the planner reads the log on later tickets. Entries record whether the
+  ticket had acceptance tests.
+- **Closing.** `invar pr-body` renders the Plan as the PR description;
+  `/invar:done` deletes the Plan in the same PR, after checking it and the locks
+  once more.
+- **`invar init`**, and the plugin with static binaries for Linux x86_64 and
+  macOS (Apple silicon and Intel).
+
+### Changes during the beta
+
+#### Removed
 
 - **`invar clean-spec` is gone**, with its flags `--dry-run`, `--force` and
   `--merged`, and the merged-branch detection behind `--merged`.
@@ -21,7 +57,7 @@
   branch. `git.base_branch` in `invar.yaml` stays: it sets the base branch of the
   review diff.
 
-### Added
+#### Added
 
 - **`Acceptance: required | skipped`**, a new Plan header field (Plan contract
   1.7.0) that records whether a ticket needs acceptance tests. `plan approve`
@@ -236,7 +272,7 @@
   the source of the framework or library functions the Plan relies on, instead
   of assuming their defaults. What it found goes into Scope.
 
-### Changed
+#### Changed
 
 - **Every PR description has one more paragraph** after the "Approved by" line, the
   acceptance decision above. For a Plan approved before the `Acceptance` field it reads
