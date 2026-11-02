@@ -197,11 +197,38 @@
   `--commit <MESSAGE>` still wins, and the new `--no-commit` only stages. Absent,
   nothing is committed unless asked, as before.
 
+- **`acceptance: required | skipped` in decision entries** (decision-entry contract
+  1.4.0): how the ticket's approved Plan decided about acceptance tests, kept after
+  the Plan is deleted, as a header key that can be counted. `/invar:log` copies it
+  into the draft from the `acceptance:` line of `invar plan check`. `invar decision
+  approve` checks it against the Plan, read before a `failed` reset: the same value is
+  recorded, another value or one a draft-status Plan cannot confirm is refused, and a
+  draft without the key gets the Plan's value, which the output says in an
+  `acceptance: …` line. A Plan approved before the field counts as `skipped`.
+  `invar decision record --acceptance required|skipped` gives it by hand.
+  **An entry without the key means unknown, not `skipped`**: every existing entry
+  stays valid and is counted neither way.
+
+- **The PR description says how acceptance was decided**, right after the
+  "Approved by" line. For `skipped`: *No acceptance tests: this ticket was approved
+  without them.* For `required`: each file locked for the ticket under
+  `acceptance.dir` with the criterion ids its text names (read by the criterion token
+  rule, not a coverage proof), any criterion no locked file names, and, while the
+  unlock record is there, `unlocked by the developer: <file> (round <R>)` — `done`
+  deletes the record with the Plan, so the PR is where it survives. With no
+  `acceptance:` section, `required` and the warning `done` prints. `pr-body` still runs
+  no test and needs no git.
+
 - **The planner finds every caller before it changes a signature**, and reads
   the source of the framework or library functions the Plan relies on, instead
   of assuming their defaults. What it found goes into Scope.
 
 ### Changed
+
+- **Every PR description has one more paragraph** after the "Approved by" line, the
+  acceptance decision above. For a Plan approved before the `Acceptance` field it reads
+  *No acceptance tests: this ticket was approved before invar recorded that
+  decision, which counts as without them.* Nothing else in the description moves.
 
 - **`Approved-checksum` covers the `Acceptance` value too** (Plan contract 1.7.0):
   it is the digest of the line `Acceptance: <value>` and the body, so changing,
