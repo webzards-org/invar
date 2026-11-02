@@ -54,7 +54,13 @@ git commit -m "chore: set up invar"
 **4. Fill in the context files.** `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`
 hold your team's conventions and business rules. Invar never writes their
 content. Until they hold something under their headings, they are treated as
-absent.
+absent. [`USAGE.md`](USAGE.md) says what goes in each.
+
+**5. Optional: turn on locked acceptance tests.** See
+[Acceptance tests](#acceptance-tests) below. Without them, the cycle works as
+before: the coder writes its own tests.
+
+Then read [`USAGE.md`](USAGE.md) for the cycle itself.
 
 ## For a teammate: nothing to install
 
@@ -65,8 +71,67 @@ the plugin.
 **Check that it works, in a session:**
 - `/plugin` lists `invar`, and the **Errors** tab is empty.
 - `/hooks` shows the invar hooks (`SessionStart`, `SubagentStart`, `SubagentStop`, `PreToolUse`).
-- `/agents` shows `planner`, `coder` and `reviewer`.
-- `/invar:approve`, `/invar:relock`, `/invar:log-approve` and `/invar:done` appear in the command list.
+- `/agents` shows `planner`, `test-writer`, `coder` and `reviewer`.
+- `/invar:approve`, `/invar:relock`, `/invar:review`, `/invar:log`, `/invar:log-approve`
+  and `/invar:done` appear in the command list.
+
+## Acceptance tests
+
+With acceptance tests on, a test-writer agent turns each acceptance criterion
+into a test before the coder starts, proves it fails, and locks it, so the
+coder cannot weaken it. They are on per project, through `invar.yaml`, and
+decided per ticket at approval (`/invar:approve --acceptance` or
+`--no-acceptance`).
+
+**1. Your test setup must work on its own first.** The test-writer writes
+tests; it does not set up your test environment. For a Laravel project with
+Pest:
+
+- **A test database like production's**: MySQL or PostgreSQL, not SQLite in
+  memory. Strict mode, JSON columns and collation differ, and acceptance
+  criteria tend to touch exactly those. Set it in `phpunit.xml` (`DB_CONNECTION`,
+  `DB_DATABASE`) or `.env.testing`.
+- **`RefreshDatabase`** for the acceptance directory too, in `tests/Pest.php`
+  (Pest 3 and later):
+  `pest()->extend(Tests\TestCase::class)->use(Illuminate\Foundation\Testing\RefreshDatabase::class)->in('Feature', 'Acceptance');`
+- **A factory for every model** a criterion may need. The test-writer never
+  writes or changes factories; a missing one is a `BLOCKED`.
+- **The acceptance directory in a test suite**, so your own CI runs these tests
+  too: add `<directory>tests/Acceptance</directory>` to a `<testsuite>` in
+  `phpunit.xml`.
+- **`AI_CONTEXT.md`, under `## Tests`**: how this project writes tests. The
+  framework, the database, what may be faked (`Http::fake`, `Mail::fake`) and
+  what never is (your own models, scopes and policies).
+
+Check it: `vendor/bin/pest` runs green on a clean checkout.
+
+**2. Turn it on in `invar.yaml`.** `invar init` writes the section commented
+out. Uncomment it and adjust:
+
+```yaml
+acceptance:
+  required: true          # the default at /invar:approve; per ticket you can still say otherwise
+  dir: tests/Acceptance
+  run: ["vendor/bin/pest", "--colors=never", "--log-junit", "{report}", "{files}"]
+  fakes_allowed: [http, mail, queue, notification]
+```
+
+- `run` is a list: the program, then each argument as its own element. It runs
+  without a shell, from the project root. `{report}` becomes a temporary path
+  for the JUnit XML report, and `{files}` the test files to run. Both must
+  appear exactly once.
+- For PHPUnit: `["vendor/bin/phpunit", "--colors=never", "--log-junit", "{report}", "{files}"]`.
+  Any runner that writes JUnit XML works.
+- **In a container** (Docker, Sail), the runner must be able to write the report
+  to the path invar gives, which is in the host's temp directory, and see the
+  test files at the paths invar passes, relative to the project root. Sail
+  mounts the project at `/var/www/html` and not `/tmp`, so it does not work as
+  it is in 0.1.0. Run the tests on the host, or use a container started with
+  the project and the temp directory mounted at the same paths, for example
+  `["docker", "run", "--rm", "-v", "/tmp:/tmp", "-v", "/path/to/project:/path/to/project", "-w", "/path/to/project", "<image>", "vendor/bin/pest", "--colors=never", "--log-junit", "{report}", "{files}"]`.
+
+**3. Commit `invar.yaml`, and add the CI check** from
+[Verify the locks in CI](#optional-verify-the-locks-in-ci).
 
 ## For yourself only: install for every project
 
@@ -163,6 +228,19 @@ binary for this platform, or the plugin was copied without its `bin/`
 directory. Install from the `dist` branch as above, never from `main`: `main`
 holds no binaries.
 
+**An agent stops at once, and says the Plan changed or `acceptance:` is
+unknown.** The agents run `invar` through their Bash tool, which takes the first
+`invar` on `PATH`. If an older CLI is there (a `cargo install` from before
+0.1.0), it reads the Plan differently from the plugin's. Hooks are not affected,
+because they name the plugin's binary. Run `which -a invar` as above and remove
+or update the old copy. The main session refuses to start anything when
+`invar plan check` prints no `acceptance:` line, for the same reason.
+
+**`invar acceptance lock` says "the tests did not run".** The runner could not
+even load the tests (a config error, a missing extension, the app failing to
+boot) and wrote an empty report. The message shows the end of its output. Run
+the `run` command by hand with one test file to see the full error.
+
 **`SessionStart` hook error: "not inside an invar project".** The plugin is
 enabled in a project where `invar init` has not run. Run it, or install the
 plugin per project instead of for your user.
@@ -199,6 +277,8 @@ branch. Users install from `dist`.
 4. Check that the workflow ran, and that `dist` holds
    `invar/bin/invar-linux-x86_64`, `invar-darwin-arm64` and
    `invar-darwin-x86_64`.
+5. Create a GitHub release for the tag, with that version's section of
+   `CHANGELOG.md` as its notes. The workflow publishes `dist` only.
 
 Never commit a binary to `main`; `core/tests/plugin.rs` fails if one appears.
 
