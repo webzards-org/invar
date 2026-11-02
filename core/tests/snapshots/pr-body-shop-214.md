@@ -2,6 +2,8 @@
 
 Approved by rade on 2026-10-05.
 
+**No acceptance tests:** this ticket was approved without them.
+
 ## Intent
 
 Let customers cancel their own unpaid orders from the order page. Cancelling

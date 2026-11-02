@@ -395,7 +395,166 @@ fn a_plan_with_tests_to_change_renders_exactly_the_stored_description() {
 
 #[test]
 fn a_section_that_says_none_renders_as_a_plan_without_it() {
+    // Example 9.12's header, as `approved_with_tests_to_change` writes: no
+    // `Acceptance`, so the Plan without the section is the one of 9.12 too.
     let project = Project::new(&approved_with_tests_to_change("_none_\n"));
     let stdout = stdout_of(&project.pr_body(&["SHOP-214"]).success());
+    assert_snapshot("pr-body-shop-214-no-acceptance-field.md", &stdout);
+}
+
+// --- how acceptance was decided (AT-15) ------------------------------------------
+
+const ACCEPTANCE_CONFIG: &str = "acceptance:\n  dir: tests/Acceptance\n  \
+    run: [\"sh\", \"runner.sh\", \"{report}\", \"{files}\"]\n";
+
+/// Example 9.1 approved with `--acceptance` (example 9.10): `required`, and current.
+fn required_plan() -> String {
+    let draft = draft_plan();
+    contract_example("9.10") + draft.split_once("\n---\n").unwrap().1
+}
+
+/// Example 9.1 approved under 1.6.0 (example 9.12): no `Acceptance` at all.
+fn plan_without_the_field() -> String {
+    let draft = draft_plan();
+    contract_example("9.12") + draft.split_once("\n---\n").unwrap().1
+}
+
+impl Project {
+    fn write(&self, path: &str, text: &str) {
+        let path = self.root().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    /// `text` under a lock line for `ticket`, with the digest `invar hash --lock`
+    /// prints for it.
+    fn write_locked(&self, path: &str, ticket: &str, text: &str) {
+        let pending = format!("<?php\n// invar-lock: {ticket}\n{text}");
+        self.write(path, &pending);
+        let output = Command::cargo_bin("invar")
+            .unwrap()
+            .args(["hash", "--lock"])
+            .arg(self.root().join(path))
+            .output()
+            .unwrap();
+        let digest = String::from_utf8(output.stdout).unwrap();
+        self.write(
+            path,
+            &pending.replace(
+                &format!("invar-lock: {ticket}"),
+                &format!("invar-lock: {ticket} {}", digest.trim()),
+            ),
+        );
+    }
+
+    /// An approved `required` Plan with two locked files that name different
+    /// criteria, a pending one, and one locked for another ticket.
+    fn with_locked_tests() -> Self {
+        let project = Self::new(&required_plan());
+        project.write("invar.yaml", ACCEPTANCE_CONFIG);
+        project.write_locked(
+            "tests/Acceptance/Shop214OtherTeamTest.php",
+            "SHOP-214",
+            "it('ac_3: another team gets 404', fn () => ...);\n\
+             it('AC4 the history lists it', fn () => ...);\n",
+        );
+        project.write_locked(
+            "tests/Acceptance/Shop214CancelTest.php",
+            "SHOP-214",
+            "it('AC2 a paid order is refused', fn () => ...);\n\
+             it('AC1: cancels and releases the stock', fn () => ...);\n\
+             // ACME and vac3 are not tokens; AC1 again is the same one.\n",
+        );
+        // Neither is this ticket's lock: one is not locked yet, one is another ticket's.
+        project.write(
+            "tests/Acceptance/Shop214PendingTest.php",
+            "<?php\n// invar-lock: SHOP-214\nit('AC9 later');\n",
+        );
+        project.write_locked(
+            "tests/Acceptance/Shop190PaidTest.php",
+            "SHOP-190",
+            "it('AC7 is another ticket');\n",
+        );
+        project
+    }
+}
+
+#[test]
+fn required_lists_the_locked_files_and_the_criteria_each_names() {
+    let project = Project::with_locked_tests();
+    let stdout = stdout_of(&project.pr_body(&["SHOP-214"]).success().stderr(""));
+    assert_snapshot("pr-body-shop-214-required.md", &stdout);
+}
+
+#[test]
+fn required_with_an_unlock_record_lists_what_the_developer_unlocked() {
+    let project = Project::with_locked_tests();
+    project.write(
+        ".invar/plans/SHOP-214-cancel-unpaid-order/unlocked",
+        "round: 2\nclosed 1 tests/Acceptance/Shop214CancelTest.php\n\
+         closed 2 tests/Acceptance/Shop214OtherTeamTest.php\n",
+    );
+    let stdout = stdout_of(&project.pr_body(&["SHOP-214"]).success().stderr(""));
+    assert_snapshot("pr-body-shop-214-required-unlocked.md", &stdout);
+}
+
+#[test]
+fn an_unlock_record_that_cannot_be_read_is_warned_about_and_left_out() {
+    let project = Project::with_locked_tests();
+    project.write(
+        ".invar/plans/SHOP-214-cancel-unpaid-order/unlocked",
+        "round: 7\n",
+    );
+    let stdout = stdout_of(
+        &project
+            .pr_body(&["SHOP-214"])
+            .success()
+            .stderr(contains("warning: "))
+            .stderr(contains("says nothing about unlocking")),
+    );
+    assert_snapshot("pr-body-shop-214-required.md", &stdout);
+}
+
+#[test]
+fn skipped_says_so_in_the_first_lines() {
+    // Example 9.2 says `Acceptance: skipped`.
+    let project = Project::new(&approved_plan());
+    project.write("invar.yaml", ACCEPTANCE_CONFIG);
+    let stdout = stdout_of(&project.pr_body(&["SHOP-214"]).success());
+    assert!(
+        stdout.starts_with(
+            "# SHOP-214\n\nApproved by rade on 2026-10-05.\n\n\
+             **No acceptance tests:** this ticket was approved without them.\n\n## Intent\n"
+        ),
+        "{stdout}"
+    );
     assert_snapshot("pr-body-shop-214.md", &stdout);
+}
+
+#[test]
+fn a_plan_approved_before_the_field_says_there_were_no_tests() {
+    let project = Project::new(&plan_without_the_field());
+    let stdout = stdout_of(&project.pr_body(&["SHOP-214"]).success());
+    assert_snapshot("pr-body-shop-214-no-acceptance-field.md", &stdout);
+}
+
+#[test]
+fn required_without_a_config_section_warns_and_lists_no_files() {
+    let project = Project::new(&required_plan());
+    // A locked file is there, and there is no `acceptance.dir` to find it by.
+    project.write_locked(
+        "tests/Acceptance/Shop214CancelTest.php",
+        "SHOP-214",
+        "it('AC1 cancels');\n",
+    );
+    let stdout = stdout_of(&project.pr_body(&["SHOP-214"]).success());
+    assert_snapshot("pr-body-shop-214-required-no-config.md", &stdout);
+}
+
+#[test]
+fn the_same_files_render_the_same_bytes() {
+    let project = Project::with_locked_tests();
+    let a = stdout_of(&project.pr_body(&["SHOP-214"]).success());
+    let b = stdout_of(&project.pr_body(&["SHOP-214"]).success());
+    assert_eq!(a, b);
 }

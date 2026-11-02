@@ -382,8 +382,20 @@ fn resolve(path: &str) -> Option<Vec<&str>> {
 
 /// The criterion tokens of a test's name (§4).
 fn criterion(name: &str) -> Criterion {
+    let mut found = criterion_ids(name);
+    match found.len() {
+        0 => Criterion::None,
+        1 => Criterion::One(found.remove(0)),
+        _ => Criterion::Several(found),
+    }
+}
+
+/// Every distinct criterion id the token rule (§4) finds in `text`, written
+/// `AC<n>`, in the order first found. The rule is the same for a test's name and
+/// for any other text, such as a whole test file.
+pub fn criterion_ids(text: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
-    let chars: Vec<char> = name.chars().collect();
+    let chars: Vec<char> = text.chars().collect();
     for start in 0..chars.len() {
         if let Some(number) = token_at(&chars, start)
             && !found.iter().any(|id| id[2..] == number)
@@ -391,11 +403,7 @@ fn criterion(name: &str) -> Criterion {
             found.push(format!("AC{number}"));
         }
     }
-    match found.len() {
-        0 => Criterion::None,
-        1 => Criterion::One(found.remove(0)),
-        _ => Criterion::Several(found),
-    }
+    found
 }
 
 /// The number of the token starting at `start`, if there is one.
