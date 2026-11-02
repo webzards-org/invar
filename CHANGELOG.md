@@ -20,6 +20,7 @@
 - **No private repository access is needed any more**, and `docs/INSTALL.md`
   no longer describes it.
 - Notes and test comments no longer name the pilot project or its tickets.
+- `CODE_OF_CONDUCT.md`: the Contributor Covenant 2.1.
 
 ## 0.1.0 — 2026-11-02
 

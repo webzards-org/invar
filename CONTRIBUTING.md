@@ -11,6 +11,8 @@ and link the PR to it (`Closes #123`). A typo fix needs no issue.
 Security problems are the exception: report them privately, as
 [`SECURITY.md`](SECURITY.md) says, never in an issue.
 
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 ## Licensing and sign-off
 
 Invar is licensed under either of MIT or Apache-2.0, at the user's option
