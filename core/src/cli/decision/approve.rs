@@ -8,8 +8,9 @@
 //! The developer's gate on the decision log. It is run by `/invar:log-approve`,
 //! a skill the model cannot invoke, and `plan guard` denies it to the agent.
 //!
-//! Prints `recorded: <path> (<id>, <type>, <module>)`, then `reset: …` for a
-//! `failed` entry, as `decision record` does. A draft that is not valid is
+//! Prints `recorded: <path> (<id>, <type>, <module>)`, then `acceptance: …` when
+//! the value was the Plan's because the draft had none (decision-entry.md §8.1),
+//! then `reset: …` for a `failed` entry, as `decision record` does. A draft that is not valid is
 //! reported like `decision validate` reports it — `<path>:<line>: <problem>` on
 //! stdout — and nothing is written.
 
@@ -84,6 +85,14 @@ fn approve(args: Args) -> Result<()> {
         recorded.entry.kind,
         recorded.entry.module
     );
+    if recorded.acceptance_from_plan
+        && let Some(acceptance) = recorded.entry.acceptance
+    {
+        println!(
+            "acceptance: {} — the draft did not say, so it is the Plan's",
+            acceptance.as_str()
+        );
+    }
     if let Some(spec) = &recorded.reset {
         println!(
             "reset: {} is `draft` again — `Status`, `Approved-by`, `Approved-at` and \

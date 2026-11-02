@@ -1,11 +1,12 @@
 //! Tests for decision entries (M1-11), against
-//! `contracts/formats/decision-entry.md` v1.2.0. The examples are read out of
+//! `contracts/formats/decision-entry.md` v1.4.0. The examples are read out of
 //! the contract itself, so the two cannot drift apart.
 
 use std::fs;
 use std::path::Path;
 
 use super::{Entry, FileName, Type, check, is_id, normalize_body, parse, utc_stamp_of};
+use crate::format::plan::Acceptance;
 
 fn contract() -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/decision-entry.md");
@@ -47,6 +48,7 @@ fn sample() -> Entry {
         module: "orders".into(),
         kind: Type::Failed,
         scenario: None,
+        acceptance: None,
         body: "Line one.\n\nLine three.".into(),
     }
 }
@@ -352,6 +354,49 @@ fn the_contracts_invalid_draft_reports_the_date_and_the_type() {
     let found = draft_problems(&draft_example("12.5"));
     assert!(found.contains("a draft has no `date`"), "{found}");
     assert!(found.contains("a draft is not a `correction`"), "{found}");
+}
+
+#[test]
+fn examples_12_6_and_12_7_are_valid_with_each_value_and_written_as_they_are() {
+    for (number, value) in [
+        ("12.6", Acceptance::Required),
+        ("12.7", Acceptance::Skipped),
+    ] {
+        let (name, text) = example(number);
+        let entry = check(&name, &text).unwrap_or_else(|p| panic!("{number}: {p}"));
+        assert_eq!(entry.acceptance, Some(value), "{number}");
+        assert_eq!(entry.render(), text, "{number}");
+    }
+}
+
+#[test]
+fn example_12_8_reports_the_unknown_acceptance_value() {
+    let (name, text) = example("12.8");
+    let found = problems(&name, &text);
+    assert!(
+        found.contains(
+            "line 7: `acceptance` must be `required` or `skipped`, exactly; found `none`"
+        ),
+        "{found}"
+    );
+    assert_eq!(found.lines().count(), 1, "{found}");
+}
+
+#[test]
+fn example_12_9_is_a_valid_draft_on_its_own() {
+    // What refuses it is the Plan beside it, when it is recorded (§8.1).
+    let draft = super::parse_draft(&draft_example("12.9")).unwrap();
+    assert_eq!(draft.acceptance, Some(Acceptance::Skipped));
+}
+
+#[test]
+fn an_entry_without_acceptance_is_unknown_and_written_without_the_key() {
+    let (_, text) = example("12.1");
+    let entry = parse(&text).unwrap();
+    assert_eq!(entry.acceptance, None);
+    assert!(!entry.render().contains("acceptance"));
+    let draft = super::parse_draft(&draft_example("12.4")).unwrap();
+    assert_eq!(draft.acceptance, None);
 }
 
 #[test]

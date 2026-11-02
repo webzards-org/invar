@@ -69,11 +69,18 @@ pub enum Acceptance {
 }
 
 impl Acceptance {
+    pub const ALL: [Acceptance; 2] = [Self::Required, Self::Skipped];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Required => "required",
             Self::Skipped => "skipped",
         }
+    }
+
+    /// Exactly `required` or `skipped`.
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|known| known.as_str() == value)
     }
 }
 
@@ -100,6 +107,13 @@ impl Header {
     /// the field existed, when no test-writer did either (§5.1).
     pub fn recorded_acceptance(&self) -> Acceptance {
         self.acceptance.unwrap_or(Acceptance::Skipped)
+    }
+
+    /// What the Plan says about acceptance tests to a decision entry
+    /// (decision-entry.md §4.2): the recorded value of an approval, and nothing
+    /// for a draft, which has decided nothing yet.
+    pub fn decided_acceptance(&self) -> Option<Acceptance> {
+        (self.status == Status::Approved).then(|| self.recorded_acceptance())
     }
 }
 
