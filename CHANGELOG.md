@@ -219,6 +219,19 @@
   `acceptance:` section, `required` and the warning `done` prints. `pr-body` still runs
   no test and needs no git.
 
+- **The review checks the locked acceptance tests.** `invar review-input` prints
+  `=== Acceptance tests ===` after the criteria: the Plan's `Acceptance`, and for
+  `required`, per criterion the locked files whose text names it, the criteria none
+  names, and the files the developer unlocked, with their rounds. It gives files, not
+  test names, which only a run would know. The reviewer reads those tests and reports
+  each as `asserts`, `weaker` or `unrelated`, with `file:line` for the last two, reads
+  unlocked files with extra care, and reports factories, seeders and helpers a locked
+  test uses that the branch changed. With `skipped` it lists the criteria no test
+  covers, as information. A change the Plan declares in `## Acceptance tests to
+  change` is not reported as outside Scope. The report gains three headings after
+  Acceptance criteria; the existing ones are unchanged. Still advisory: `done` does
+  not depend on it.
+
 - **The planner finds every caller before it changes a signature**, and reads
   the source of the framework or library functions the Plan relies on, instead
   of assuming their defaults. What it found goes into Scope.

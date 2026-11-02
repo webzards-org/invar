@@ -1389,6 +1389,17 @@ calls it nor waits for it (`tests/review_input.rs`).
 - The Plan sections it gets are the four the branch is judged against. Not the
   ticket, the questions or the rejected alternatives: they are the planner's
   reasons, and a reviewer that reads reasons starts weighing them.
+- **The locked acceptance tests (AT-14).** After the criteria (and after
+  `## Acceptance tests to change`), `=== Acceptance tests ===` gives the Plan's
+  `Acceptance` and, for `required`, per criterion the locked files whose text names
+  it, the criteria no file names, and the unlock record's files with their rounds. It
+  is AT-15's `pr_body::acceptance::gather`, so the PR description and the review read
+  the same files the same way. **Files, not test names:** names are known only by
+  running the tests, and `review-input` runs nothing; the reviewer reads the tests in
+  each file. Whether a test *means* its criterion — `asserts`, `weaker`,
+  `unrelated` — is the reviewer's judgement, with `file:line`; that it runs and was
+  red is `acceptance lock`'s. Shared test code (factories, seeders, helpers outside
+  `acceptance.dir`) is judged on the diff: the core does not know what a factory is.
 
 **Determinism.** `review-input` is a pure render of the Plan, the context files
 and two `git diff` runs whose options pin everything a git configuration can change
@@ -1403,10 +1414,11 @@ before `done` — which removes the Plan the review needs.
 ### Seeded branches
 
 `eval/review-seeds.sh <empty-dir>` (outside `plugin/`, which holds no scripts)
-builds a small Laravel-shaped repository with two approved Plans — example 9.1's
-`SHOP-214`, and `SHOP-215`, whose Implementation context names no invariant —
-and three branches. In it: `git checkout <branch>`, start Claude Code, run
-`/invar:review <ticket>`.
+builds a small Laravel-shaped repository with three approved Plans — example 9.1's
+`SHOP-214`, `SHOP-215`, whose Implementation context names no invariant, and
+`SHOP-216` (AT-14), approved with acceptance tests, which the real
+`invar acceptance lock` locks with a stand-in runner — and five branches. In it:
+`git checkout <branch>`, start Claude Code, run `/invar:review <ticket>`.
 
 Since M1-26 the report has two invariant headings: **named** ("Invariants the Plan
 names that the change appears to break") and **unnamed** ("Invariants the Plan does
@@ -1417,6 +1429,12 @@ not name that the change appears to break").
 | `seed-invariant` | `SHOP-214` | criterion 2 (a paid order is refused with 403) `not met`, with the `file:line` of `CancelOrder::handle`; criterion 3 (another team's order is a 404) `not met`; under **named**, the `BelongsToTeam` scope broken by `withoutGlobalScopes()` at `app/Actions/Orders/CancelOrder.php`; **unnamed** `None found.`; nothing outside Scope |
 | `seed-scope` | `SHOP-214` | criteria 1–4 `met` or `unclear` (no tests are seeded, so `unclear` is honest for some); both invariant sections `None found.`; under **Changes outside Scope**, `app/Http/Controllers/InvoiceController.php` |
 | `seed-unnamed-invariant` (M1-26) | `SHOP-215` | criteria 1–2 `met` or `unclear`; **named** `None found.` — the Plan names no invariant; under **unnamed**, the `BelongsToTeam` scope broken by `withoutGlobalScopes()` at `app/Actions/Orders/ExportCancelledOrders.php`; nothing outside Scope |
+| `seed-weak-test` (AT-14) | `SHOP-216` | under **Locked acceptance tests**, AC1 `asserts` and AC2 `weaker` at `tests/Acceptance/Shop216ArchiveOrderTest.php:21` — it asserts the 422 and not that the order is unchanged; **Shared test code** `None found.`; nothing outside Scope |
+| `seed-factory` (AT-14) | `SHOP-216` | under **Shared test code changed by the coder**, `database/factories/OrderFactory.php`, used by the AC1 test, whose `cancelled()` state now sets `archived_at`, so that test passes without the archive; AC2 `asserts` |
+
+With `Acceptance: skipped` (the first three), the report's **Locked acceptance tests**
+and **Shared test code** say there are no acceptance tests, and **Criteria no test
+covers** lists, as information, the criteria no test checks.
 
 A report that adds style remarks, a summary or suggestions fails the shape, however
 correct its verdicts.
@@ -1426,6 +1444,7 @@ correct its verdicts.
 | Version | Branch | Result | Changed |
 |---|---|---|---|
 | v1 | — | Not run | — |
+| AT-14 | `seed-weak-test`, `seed-factory` | Both as the table says. Run on 2026-11-02 by starting `invar:reviewer` with the ticket line only, from `claude -p` with `--plugin-dir plugin` (in `-p` mode `/invar:review` runs as a local command and never reaches the model). `seed-weak-test`: AC2 `weaker` at `Shop216ArchiveOrderTest.php:21`, "nothing reloads the order"; Shared test code `None found.` `seed-factory`: `OrderFactory.php` under Shared test code, "both assertions pass even if the archive endpoint does nothing"; also listed under Changes outside Scope, since Scope names no factory; AC1 `asserts` as written, with that caveat beside it | The first run's AC2 test posted a form, and the reviewer rightly called AC2 `unclear` — a stock Laravel app answers a failed validation on a form post with a 302, not 422. The seed now uses `postJson` |
 
 ### Not exercised
 
@@ -1436,7 +1455,9 @@ correct its verdicts.
 - [x] The `Read` deny rule on `.invar/decisions/**` holds inside a subagent —
       for the tools and `cat`, not for `python3` or `grep -r`; only when started at
       the project root (§17, question 3)
-- [ ] Both seeded branches, as in the table above
+- [ ] The first three seeded branches, as in the table above
+- [x] `seed-weak-test` and `seed-factory`, as in the table above (AT-14; the reviewer
+      started directly, not through `/invar:review` — see the iteration log)
 - [ ] With `review.offer: true`, the main session offers `/invar:review` once,
       before `done`, and does not start the reviewer itself
 
