@@ -1,0 +1,58 @@
+=== invar review input: SHOP-214 ===
+The Plan below was approved by rade on 2026-10-05 and has not changed since. Judge the branch against it and the binding context, and nothing else: each acceptance criterion `met`, `not met` or `unclear`, with file:line evidence; every invariant of BUSINESS_CONTEXT.md the change appears to break, whether the Plan names it or not; changes outside Scope.
+
+=== Plan: Intent ===
+
+Let customers cancel their own unpaid orders from the order page. Cancelling
+releases the reserved stock and keeps the order in the history as
+`cancelled`.
+
+=== Plan: Scope ===
+
+Backend: `App\Actions\Orders\CancelOrder`, `OrderPolicy::cancel`, the route
+`POST /orders/{order}/cancel` and its controller method. Frontend: a Cancel
+button on `resources/js/Pages/Orders/Show.vue`, shown only for cancellable
+orders. Out of scope: refunds, cancellation by staff, e-mail notifications.
+
+=== Plan: Acceptance criteria ===
+
+- AC1: Given a pending, unpaid order of mine, when I cancel it, then its status
+  is `cancelled` and its reserved stock is available for sale again.
+- AC2: Given a paid order of mine, when I try to cancel it, then the request is
+  refused with 403 and the order is unchanged.
+- AC3: Given an order that belongs to another team, when I send a cancel request
+  with its id, then the response is 404 and the order is unchanged.
+- AC4: Given an order I cancelled, when I open my order history, then it is
+  listed with status `cancelled`.
+
+=== Acceptance tests ===
+
+Acceptance: required
+
+Per criterion, the files locked for SHOP-214 under `tests/Acceptance` whose text names it. Test names are not listed, since only a run knows them: read the tests in each file, and judge whether each asserts its criterion — `asserts`, `weaker` or `unrelated`.
+
+- AC1: tests/Acceptance/Shop214CancelTest.php
+- AC2: tests/Acceptance/Shop214CancelTest.php
+- AC3: tests/Acceptance/Shop214OtherTeamTest.php
+- AC4: named by no locked file
+
+Unlocked by the developer during the cycle, after the coder objected to them: read these with extra care, since a criterion is likeliest to have been softened here.
+
+- unlocked by the developer: tests/Acceptance/Shop214OtherTeamTest.php (round 1)
+
+=== Plan: Implementation context ===
+
+- AI_CONTEXT: controllers stay thin — the change lives in
+  `App\Actions\Orders\CancelOrder`, and authorization goes through
+  `OrderPolicy`, never through inline checks
+- AI_CONTEXT: stock changes go through `StockLedger`, inside the action's
+  database transaction
+- BUSINESS_CONTEXT invariant: every query on team data is scoped to the
+  current team by the `BelongsToTeam` global scope; request handling never
+  calls `withoutGlobalScopes()`
+
+=== diff against main ===
+
+Nothing is committed on this branch since it left `main` (`.invar/` left out). There is nothing to review yet: commit the change first.
+
+=== end of diff ===

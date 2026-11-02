@@ -1,8 +1,9 @@
 //! `invar review-input <TICKET | PATH>` (M1-20).
 //!
 //! Prints what the reviewer agent reads: the approved Plan's Intent, Scope,
-//! Acceptance criteria, Acceptance tests to change when it declares any, and
-//! Implementation context, the binding context, and the branch's diff against
+//! Acceptance criteria, Acceptance tests to change when it declares any, the
+//! ticket's locked acceptance tests per criterion, and Implementation context,
+//! the binding context, and the branch's diff against
 //! the base branch. stdout carries only that; what a
 //! person needs to know and the reviewer does not goes to stderr.
 //!
@@ -14,6 +15,7 @@ use anyhow::{Context as _, Result};
 use crate::context;
 use crate::format::plan::{Mode, Plan};
 use crate::git;
+use crate::pr_body::acceptance;
 use crate::review_input;
 
 use super::plan::{require_approved, target};
@@ -37,6 +39,12 @@ pub fn run(args: Args) -> Result<()> {
         "a review checks the branch against an approved specification, and this Plan is not one",
     )?;
     let plan = Plan::read(&spec, mode)?;
+
+    let plan_dir = spec.parent().unwrap_or(&spec);
+    let (tests, warnings) = acceptance::gather(&root, &config, &plan, plan_dir)?;
+    for warning in &warnings {
+        eprintln!("warning: {warning}");
+    }
 
     let binding = context::load_binding(&root)?;
     for name in binding.unrecognized() {
@@ -66,6 +74,9 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     let diff = review_input::collect(&root, &base, review_input::DIFF_BUDGET)?;
-    print!("{}", review_input::render(&plan, &binding, &base, &diff));
+    print!(
+        "{}",
+        review_input::render(&plan, &binding, &base, &diff, &tests)
+    );
     Ok(())
 }

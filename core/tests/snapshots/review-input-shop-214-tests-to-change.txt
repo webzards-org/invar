@@ -30,6 +30,12 @@ orders. Out of scope: refunds, cancellation by staff, e-mail notifications.
 - tests/Acceptance/Shop190PaidTest.php — change — its 403 no longer holds within 24 hours
 - tests/Acceptance/Shop177RefundTest.php — delete — refunds moved to SHOP-301
 
+=== Acceptance tests ===
+
+Acceptance: skipped
+
+The ticket was approved without acceptance tests, so no test is locked for it. Judge the coder's own tests, if any, as before, and list the criteria no test covers, as information, not as a defect.
+
 === Plan: Implementation context ===
 
 - AI_CONTEXT: controllers stay thin — the change lives in
