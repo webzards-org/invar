@@ -110,7 +110,7 @@ relock it; unlocking therefore has to be explicit and human.
 | AT-12 | #90 | AT-3, AT-11 |
 | AT-13 | #91 | AT-8, AT-10, AT-12 |
 | AT-14 | #92 | AT-9, AT-11 |
-| AT-15 | #93 | AT-3, AT-9 |
+| AT-15 | #93 | AT-3, AT-9, AT-13 |
 | AT-16 | #94 | AT-12, AT-13, AT-14, AT-15 |
 
 ---
@@ -814,18 +814,24 @@ as always (L-7).
 **Labels:** `area:contracts`, `area:core`, `area:plugin`
 **Design:** §7; L-6
 **Decisions:** A-6
-**Depends on:** AT-3, AT-9
+**Depends on:** AT-3, AT-9, AT-13
 **Issue:** #93
 
 ### Description
 
 - Decision entry contract 1.4.0: optional header key `acceptance: required | skipped`.
-  `/invar:log` drafts it from the Plan; `invar decision approve` validates it.
-  Absent means unknown (entries before this contract).
-- PR description (`pr_body`): shows `Acceptance` and, when required, the locked
-  tests per criterion; when skipped, says so plainly in the first lines. It also lists
-  the files the developer unlocked and their rounds (AT-13): `invar done` deletes the
-  unlock record with the Plan, so the PR is where that has to survive.
+  `/invar:log` drafts it from the `acceptance:` line of `invar plan check`;
+  `invar decision approve` checks it against the Plan, read before a `failed` reset:
+  a disagreement is refused naming both, and a draft without it gets the Plan's
+  value. Absent means unknown (entries before this contract, and `decision record`
+  without `--acceptance`), never `skipped` (decision-entry.md D-13 to D-15).
+- PR description (`pr_body`): right after the approval line, says plainly when
+  there are no acceptance tests; when required, lists the files locked for the ticket
+  and the criterion ids each names (by the token rule of `test-results.md` §4, not a
+  coverage proof), and any criterion none names. It also lists the files the
+  developer unlocked and their rounds (AT-13): `invar done` deletes the unlock record
+  with the Plan, so the PR is where that has to survive. Without the record, nothing
+  is said about unlocking.
 
 ### Purpose
 
@@ -837,7 +843,10 @@ key it can be counted — how often teams skip is the pilot's key metric.
 
 - [ ] Contract 1.4.0 with the key, its values and compatibility
 - [ ] `/invar:log` drafts include the key; `decision approve` rejects other values
+      and a value that disagrees with the Plan
 - [ ] `pr_body` snapshot tests for `required` and `skipped`
+- [ ] The PR description lists unlocked files and their rounds when the unlock
+      record is there
 
 ---
 

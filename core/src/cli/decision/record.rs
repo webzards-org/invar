@@ -1,4 +1,5 @@
-//! `invar decision record --ticket <T> --type <TYPE> [--module <M>] [--message <TEXT>]`.
+//! `invar decision record --ticket <T> --type <TYPE> [--module <M>] [--acceptance <A>]
+//! [--message <TEXT>]`.
 
 use anyhow::Result;
 use clap::builder::{PossibleValuesParser, TypedValueParser as _};
@@ -6,6 +7,7 @@ use clap::builder::{PossibleValuesParser, TypedValueParser as _};
 use crate::cli::shown;
 use crate::decision::{self, Request};
 use crate::format::decision::Type;
+use crate::format::plan::Acceptance;
 use crate::fs;
 use crate::git;
 
@@ -25,6 +27,12 @@ pub struct Args {
     #[arg(long)]
     pub module: Option<String>,
 
+    /// `required` or `skipped`: whether the ticket was approved with acceptance
+    /// tests. Refused when the ticket's approved Plan says otherwise. Without
+    /// it, the entry says nothing about them — unknown, not `skipped`.
+    #[arg(long, value_name = "ACCEPTANCE", value_parser = acceptance_parser())]
+    pub acceptance: Option<Acceptance>,
+
     /// The entry's text. Without it, the text is read from stdin.
     #[arg(long, short)]
     pub message: Option<String>,
@@ -35,6 +43,13 @@ pub struct Args {
 fn type_parser() -> impl clap::builder::TypedValueParser<Value = Type> {
     PossibleValuesParser::new(Type::ALL.map(Type::as_str))
         .map(|name| Type::parse(&name).expect("the parser allows only the names of Type::ALL"))
+}
+
+/// `required` and `skipped`, from [`Acceptance::ALL`], as for the types.
+fn acceptance_parser() -> impl clap::builder::TypedValueParser<Value = Acceptance> {
+    PossibleValuesParser::new(Acceptance::ALL.map(Acceptance::as_str)).map(|name| {
+        Acceptance::parse(&name).expect("the parser allows only the names of Acceptance::ALL")
+    })
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -54,6 +69,7 @@ pub fn run(args: Args) -> Result<()> {
         ticket: args.ticket,
         kind: args.kind,
         module: args.module,
+        acceptance: args.acceptance,
         body,
     };
     let recorded = decision::record(&root, request, now, mode)?;
@@ -81,7 +97,7 @@ pub fn run(args: Args) -> Result<()> {
 mod tests {
     use clap::Parser as _;
 
-    use super::{Args, Type};
+    use super::{Acceptance, Args, Type};
 
     /// `Args` is not a command by itself; this is the smallest one around it.
     #[derive(Debug, clap::Parser)]
@@ -109,6 +125,31 @@ mod tests {
         for name in ["fixed", "Failed", "NOTE", "", "note ", "confirm"] {
             assert!(parse(name).is_err(), "{name:?}");
         }
+    }
+
+    fn parse_acceptance(value: &str) -> Result<Option<Acceptance>, clap::Error> {
+        Wrapper::try_parse_from([
+            "invar",
+            "--ticket",
+            "PROJ-1",
+            "--type",
+            "note",
+            "--acceptance",
+            value,
+        ])
+        .map(|wrapper| wrapper.args.acceptance)
+    }
+
+    #[test]
+    fn acceptance_is_required_or_skipped_and_absent_by_default() {
+        for value in Acceptance::ALL {
+            assert_eq!(parse_acceptance(value.as_str()).unwrap(), Some(value));
+        }
+        for name in ["none", "Required", "", "yes"] {
+            assert!(parse_acceptance(name).is_err(), "{name:?}");
+        }
+        let absent = Wrapper::try_parse_from(["invar", "--ticket", "PROJ-1", "--type", "note"]);
+        assert_eq!(absent.unwrap().args.acceptance, None);
     }
 
     #[test]

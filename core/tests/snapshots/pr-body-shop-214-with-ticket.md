@@ -2,6 +2,8 @@
 
 Approved by rade on 2026-10-05.
 
+**No acceptance tests:** this ticket was approved without them.
+
 ## Ticket
 
 SHOP-214 — As a customer I want to cancel an order that has not been paid

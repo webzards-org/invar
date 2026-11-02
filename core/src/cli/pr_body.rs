@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context as _, Result};
 
-use crate::format::plan::Plan;
+use crate::format::plan::{Mode, Plan};
 use crate::pr_body;
 
 use super::plan::{require_approved, target};
@@ -33,7 +33,8 @@ pub struct Args {
 pub fn run(args: Args) -> Result<()> {
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
     let (root, spec) = target::resolve(&args.target, &cwd)?;
-    let mode = super::mode(&root)?;
+    let config = super::config(&root)?;
+    let mode = Mode::of(&config);
 
     // A PR description describes an approved specification: one that has been
     // approved, and has not changed since. That is the question `plan check`
@@ -47,7 +48,13 @@ pub fn run(args: Args) -> Result<()> {
     let plan = Plan::read(&spec, mode)?;
     let ticket = plan.header().ticket.clone();
 
-    let rendered = pr_body::render(&plan, &ticket, args.with_ticket);
+    let plan_dir = spec.parent().unwrap_or(&spec);
+    let (tests, warnings) = pr_body::acceptance::gather(&root, &config, &plan, plan_dir)?;
+    for warning in &warnings {
+        eprintln!("warning: {warning}");
+    }
+
+    let rendered = pr_body::render(&plan, &ticket, args.with_ticket, &tests);
     match args.out {
         Some(path) => {
             // `.invar/out/` is the usual place, and `init` does not create

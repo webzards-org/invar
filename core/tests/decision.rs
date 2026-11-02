@@ -614,12 +614,17 @@ fn approve_records_the_draft_with_a_new_id_and_date_and_removes_it() {
         .success()
         .stdout(contains(format!("recorded: {ENTRY} (d-")))
         .stdout(contains(", confirmed, orders)"))
+        // The draft did not say; the Plan of example 9.2 does (decision-entry.md §8.1).
+        .stdout(contains(
+            "acceptance: skipped — the draft did not say, so it is the Plan's",
+        ))
         .stdout(contains(format!("removed: {DRAFT}")));
     let text = project.read(ENTRY);
     assert!(text.starts_with("---\nid: d-"), "{text}");
     assert!(
         text.contains(&format!(
-            "\ndate: {NOW}\nticket: SHOP-214\nmodule: orders\ntype: confirmed\n---\n\n\
+            "\ndate: {NOW}\nticket: SHOP-214\nmodule: orders\ntype: confirmed\n\
+             acceptance: skipped\n---\n\n\
              Stock is released inside the cancel transaction, through `StockLedger`.\n"
         )),
         "{text}"
@@ -769,4 +774,106 @@ fn approve_skill_reports_an_invalid_draft_on_stdout_and_exits_0() {
         .stderr(predicate::str::is_empty());
     assert!(project.entries().is_empty());
     assert!(project.exists(DRAFT));
+}
+
+// --- `acceptance` (decision-entry.md §4.2) ----------------------------------------------
+
+#[test]
+fn approve_refuses_a_draft_whose_acceptance_disagrees_with_the_plan() {
+    // Example 9.2 says `Acceptance: skipped`.
+    let project = Project::new(Some(&approved_plan()));
+    project.draft(&VALID_DRAFT.replace(
+        "type: confirmed\n",
+        "type: confirmed\nacceptance: required\n",
+    ));
+    project
+        .approve("SHOP-214")
+        .failure()
+        .stderr(contains("the draft says `acceptance: required`"))
+        .stderr(contains("approved with `acceptance: skipped`"));
+    assert!(project.entries().is_empty());
+    assert!(project.exists(DRAFT));
+}
+
+#[test]
+fn approve_with_the_plans_value_records_it_without_saying_more() {
+    let project = Project::new(Some(&approved_plan()));
+    project.draft(&VALID_DRAFT.replace(
+        "type: confirmed\n",
+        "type: confirmed\nacceptance: skipped\n",
+    ));
+    project
+        .approve("SHOP-214")
+        .success()
+        .stdout(contains("recorded: "))
+        .stdout(contains("the Plan's").not());
+    assert!(project.read(ENTRY).contains("\nacceptance: skipped\n---\n"));
+}
+
+#[test]
+fn record_takes_acceptance_as_a_flag_and_leaves_it_out_without_one() {
+    let project = Project::new(None);
+    project
+        .record(&[
+            "--ticket",
+            "SHOP-9",
+            "--type",
+            "note",
+            "--module",
+            "orders",
+            "--acceptance",
+            "required",
+            "-m",
+            "With tests.",
+        ])
+        .success();
+    project
+        .record(&[
+            "--ticket", "SHOP-10", "--type", "note", "--module", "orders", "-m", "Unknown.",
+        ])
+        .success();
+    let texts: Vec<String> = project
+        .entries()
+        .iter()
+        .map(|name| project.read(&format!(".invar/decisions/{name}")))
+        .collect();
+    assert_eq!(texts.len(), 2);
+    assert_eq!(
+        texts
+            .iter()
+            .filter(|text| text.contains("\nacceptance: required\n"))
+            .count(),
+        1,
+        "{texts:?}"
+    );
+    assert_eq!(
+        texts
+            .iter()
+            .filter(|text| text.contains("acceptance"))
+            .count(),
+        1,
+        "{texts:?}"
+    );
+}
+
+#[test]
+fn record_refuses_an_acceptance_value_that_is_neither() {
+    let project = Project::new(None);
+    project
+        .record(&[
+            "--ticket",
+            "SHOP-9",
+            "--type",
+            "note",
+            "--module",
+            "orders",
+            "--acceptance",
+            "none",
+            "-m",
+            "x",
+        ])
+        .failure()
+        .stderr(contains("required"))
+        .stderr(contains("skipped"));
+    assert!(project.entries().is_empty());
 }

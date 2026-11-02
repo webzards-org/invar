@@ -10,7 +10,7 @@ use super::{
     RecordError, Request, draft, existing_ids, log, new_id, new_id_from, order_key, record,
 };
 use crate::format::decision::{self, Type};
-use crate::format::plan::{Mode, Plan};
+use crate::format::plan::{Acceptance, Mode, Plan};
 use crate::fs::ProjectRoot;
 use crate::git::Instant;
 
@@ -57,6 +57,7 @@ fn request(ticket: &str, kind: Type, module: Option<&str>) -> Request {
         ticket: ticket.into(),
         kind,
         module: module.map(Into::into),
+        acceptance: None,
         body: "What was decided, and why.".into(),
     }
 }
@@ -715,6 +716,243 @@ fn approving_twice_records_once() {
         Err(draft::ApproveError::NoDraft { .. })
     ));
     assert_eq!(names(&root).len(), 1);
+}
+
+// --- `acceptance`, checked against the Plan (decision-entry.md §4.2, §8.1) -------------
+
+/// The approved Plan with `Acceptance: <value>` in its header, or with no
+/// `Acceptance` line when `value` is `None` — approved before plan-header.md 1.7.0.
+fn plan_with_acceptance(value: Option<&str>) -> String {
+    approved_plan()
+        .lines()
+        .filter_map(|line| match (line.starts_with("Acceptance:"), value) {
+            (true, Some(value)) => Some(format!("Acceptance: {value}\n")),
+            (true, None) => None,
+            (false, _) => Some(format!("{line}\n")),
+        })
+        .collect()
+}
+
+/// A draft of `kind` with `acceptance: <value>` in its front matter.
+fn write_draft_with(root: &ProjectRoot, kind: &str, acceptance: &str) -> PathBuf {
+    let path = draft_path(root);
+    fs::write(
+        &path,
+        format!(
+            "---\nticket: SHOP-214\nmodule: orders\ntype: {kind}\nacceptance: {acceptance}\n---\n\n\
+             What was decided.\n"
+        ),
+    )
+    .unwrap();
+    path
+}
+
+fn recorded_text(root: &ProjectRoot) -> String {
+    let names = names(root);
+    assert_eq!(names.len(), 1, "{names:?}");
+    fs::read_to_string(root.decisions_dir().join(&names[0])).unwrap()
+}
+
+#[test]
+fn a_draft_with_the_plans_value_records_it() {
+    let (_dir, root) = project(Some(&plan_with_acceptance(Some("required"))));
+    let path = write_draft_with(&root, "confirmed", "required");
+
+    let recorded = draft::approve(&root, &path, NOW, Mode::Light)
+        .unwrap()
+        .recorded;
+
+    assert_eq!(recorded.entry.acceptance, Some(Acceptance::Required));
+    assert!(!recorded.acceptance_from_plan);
+    assert!(
+        recorded_text(&root).contains("type: confirmed\nacceptance: required\n---\n"),
+        "{}",
+        recorded_text(&root)
+    );
+}
+
+#[test]
+fn a_draft_without_the_key_gets_the_plans_value() {
+    let (_dir, root) = project(Some(&plan_with_acceptance(Some("required"))));
+    let path = write_draft(&root, "orders", "confirmed", "Done.");
+
+    let recorded = draft::approve(&root, &path, NOW, Mode::Light)
+        .unwrap()
+        .recorded;
+
+    assert_eq!(recorded.entry.acceptance, Some(Acceptance::Required));
+    assert!(recorded.acceptance_from_plan, "the output must say so");
+    assert!(recorded_text(&root).contains("\nacceptance: required\n"));
+}
+
+#[test]
+fn a_plan_approved_before_the_field_gives_skipped_as_plan_check_prints_it() {
+    let (_dir, root) = project(Some(&plan_with_acceptance(None)));
+    let path = write_draft(&root, "orders", "confirmed", "Done.");
+
+    let recorded = draft::approve(&root, &path, NOW, Mode::Light)
+        .unwrap()
+        .recorded;
+
+    assert_eq!(recorded.entry.acceptance, Some(Acceptance::Skipped));
+    assert!(recorded.acceptance_from_plan);
+}
+
+#[test]
+fn a_draft_that_disagrees_with_the_plan_is_refused_naming_both() {
+    let (_dir, root) = project(Some(&plan_with_acceptance(Some("required"))));
+    let path = write_draft_with(&root, "confirmed", "skipped");
+    let before = fs::read_to_string(&path).unwrap();
+
+    let err = draft::approve(&root, &path, NOW, Mode::Light).unwrap_err();
+
+    assert!(
+        matches!(
+            &err,
+            draft::ApproveError::Record(RecordError::AcceptanceMismatch {
+                from_plan: Acceptance::Required,
+                given: Acceptance::Skipped,
+                ..
+            })
+        ),
+        "{err:?}"
+    );
+    let message = err.to_string();
+    assert!(message.contains("`acceptance: skipped`"), "{message}");
+    assert!(message.contains("`acceptance: required`"), "{message}");
+    assert!(message.contains("invar plan check SHOP-214"), "{message}");
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        before,
+        "the draft is kept"
+    );
+    assert!(!root.decisions_dir().exists());
+}
+
+#[test]
+fn a_failed_draft_that_disagrees_resets_nothing() {
+    let original = plan_with_acceptance(Some("required"));
+    let (_dir, root) = project(Some(&original));
+    let path = write_draft_with(&root, "failed", "skipped");
+
+    assert!(draft::approve(&root, &path, NOW, Mode::Light).is_err());
+
+    assert_eq!(fs::read_to_string(spec(&root)).unwrap(), original);
+    assert!(!root.decisions_dir().exists());
+}
+
+#[test]
+fn a_value_other_than_required_or_skipped_is_refused() {
+    let (_dir, root) = project(Some(&approved_plan()));
+    let path = write_draft_with(&root, "confirmed", "none");
+
+    match draft::approve(&root, &path, NOW, Mode::Light) {
+        Err(draft::ApproveError::Invalid(report)) => {
+            let problems = report.problems.to_string();
+            assert!(
+                problems.contains("`acceptance` must be `required` or `skipped`"),
+                "{problems}"
+            );
+        }
+        other => panic!("expected Invalid, got {other:?}"),
+    }
+    assert!(!root.decisions_dir().exists());
+}
+
+#[test]
+fn a_failed_entry_carries_the_value_the_plan_had_before_the_reset() {
+    let (_dir, root) = project(Some(&plan_with_acceptance(Some("required"))));
+    let path = write_draft(&root, "orders", "failed", "The gateway has no void call.");
+
+    let recorded = draft::approve(&root, &path, NOW, Mode::Light)
+        .unwrap()
+        .recorded;
+
+    assert_eq!(recorded.reset, Some(spec(&root)));
+    assert_eq!(recorded.entry.acceptance, Some(Acceptance::Required));
+    assert!(recorded_text(&root).contains("\nacceptance: required\n"));
+    // The reset cleared it in the Plan.
+    let plan = fs::read_to_string(spec(&root)).unwrap();
+    assert!(plan.contains("\nAcceptance:\n"), "{plan}");
+}
+
+#[test]
+fn a_draft_without_the_key_and_a_plan_that_says_nothing_records_no_key() {
+    // A pre-1.4.0 draft beside a Plan that is still a draft: nothing is
+    // decided, so the entry says nothing — unknown, not `skipped` (D-14).
+    let (_dir, root) = project(Some(&contract_example("9.1")));
+    let path = write_draft(&root, "orders", "note", "Before approval.");
+
+    let recorded = draft::approve(&root, &path, NOW, Mode::Light)
+        .unwrap()
+        .recorded;
+
+    assert_eq!(recorded.entry.acceptance, None);
+    assert!(!recorded.acceptance_from_plan);
+    assert!(!recorded_text(&root).contains("acceptance"));
+}
+
+#[test]
+fn a_value_the_plan_cannot_confirm_is_refused() {
+    let (_dir, root) = project(Some(&contract_example("9.1")));
+    let path = write_draft_with(&root, "note", "skipped");
+
+    let err = draft::approve(&root, &path, NOW, Mode::Light).unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            draft::ApproveError::Record(RecordError::AcceptanceUnchecked { .. })
+        ),
+        "{err:?}"
+    );
+    assert!(err.to_string().contains("Remove the line"), "{err}");
+    assert!(!root.decisions_dir().exists());
+}
+
+#[test]
+fn record_keeps_an_absent_value_absent_and_checks_a_given_one() {
+    let (_dir, root) = project(Some(&plan_with_acceptance(Some("required"))));
+
+    // Absent stays absent, even with a Plan that has decided: not invented.
+    let recorded = record(
+        &root,
+        request("SHOP-214", Type::Note, None),
+        NOW,
+        Mode::Light,
+    )
+    .unwrap();
+    assert_eq!(recorded.entry.acceptance, None);
+
+    let disagrees = Request {
+        acceptance: Some(Acceptance::Skipped),
+        ..request("SHOP-214", Type::Note, None)
+    };
+    match record(&root, disagrees, NOW, Mode::Light) {
+        Err(err @ RecordError::AcceptanceMismatch { .. }) => {
+            assert!(err.to_string().contains("`--acceptance` says"), "{err}");
+        }
+        other => panic!("expected AcceptanceMismatch, got {other:?}"),
+    }
+
+    let agrees = Request {
+        acceptance: Some(Acceptance::Required),
+        ..request("SHOP-214", Type::Note, None)
+    };
+    let recorded = record(&root, agrees, NOW, Mode::Light).unwrap();
+    assert_eq!(recorded.entry.acceptance, Some(Acceptance::Required));
+    assert_eq!(names(&root).len(), 2);
+}
+
+#[test]
+fn record_without_a_plan_takes_the_developers_value() {
+    let (_dir, root) = project(None);
+    let request = Request {
+        acceptance: Some(Acceptance::Skipped),
+        ..request("SHOP-9", Type::Note, Some("orders"))
+    };
+    let recorded = record(&root, request, NOW, Mode::Light).unwrap();
+    assert_eq!(recorded.entry.acceptance, Some(Acceptance::Skipped));
 }
 
 // --- reading ----------------------------------------------------------------------------

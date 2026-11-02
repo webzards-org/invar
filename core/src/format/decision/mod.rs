@@ -1,7 +1,7 @@
 //! A decision entry: `.invar/decisions/<YYYY-MM-DD>-<HHMMSS>-<module>-<slug>.md`
 //! (§7).
 //!
-//! Implements `contracts/formats/decision-entry.md` v1.3.0, including the
+//! Implements `contracts/formats/decision-entry.md` v1.4.0, including the
 //! draft of §8.1; section numbers and decision ids below point into it.
 //!
 //! **Writing** produces one canonical text: LF line endings, the five keys in
@@ -18,6 +18,7 @@ use std::fmt;
 
 use crate::calendar::days_from_civil;
 use crate::diagnostics::Diagnostics;
+use crate::format::plan::Acceptance;
 use crate::format::values::{is_module, is_slug, is_ticket};
 
 #[cfg(test)]
@@ -73,6 +74,9 @@ pub struct Entry {
     pub kind: Type,
     /// The `.feature` scenario; absent in light mode.
     pub scenario: Option<String>,
+    /// What the Plan decided about acceptance tests (§4.2). `None` is
+    /// unknown, never `skipped` (D-14).
+    pub acceptance: Option<Acceptance>,
     /// Free text, without trailing newline.
     pub body: String,
 }
@@ -89,6 +93,9 @@ impl Entry {
         out.push_str(&format!("type: {}\n", self.kind));
         if let Some(scenario) = &self.scenario {
             out.push_str(&format!("scenario: {scenario}\n"));
+        }
+        if let Some(acceptance) = self.acceptance {
+            out.push_str(&format!("acceptance: {}\n", acceptance.as_str()));
         }
         out.push_str("---\n\n");
         out.push_str(&self.body);
@@ -244,6 +251,7 @@ const TICKET: &str = "ticket";
 const MODULE: &str = "module";
 const TYPE: &str = "type";
 const SCENARIO: &str = "scenario";
+const ACCEPTANCE: &str = "acceptance";
 
 /// The front matter's `key: value` pairs, each with its line number, and the
 /// body.
@@ -296,6 +304,23 @@ impl Raw {
             Some((_, value, _)) => Some(value.clone()),
             None => None,
         }
+    }
+
+    /// `acceptance`, which is optional (§4.2): absent is unknown.
+    fn acceptance(&self, found: &mut Diagnostics) -> Option<Acceptance> {
+        let (_, value, line) = self.get(ACCEPTANCE)?;
+        let parsed = Acceptance::parse(value);
+        if parsed.is_none() {
+            found.at(
+                *line,
+                format!(
+                    "`acceptance` must be `required` or `skipped`, exactly; found `{value}`. \
+                     Copy it from the `acceptance:` line of `invar plan check`, or remove the \
+                     line: absent means unknown"
+                ),
+            );
+        }
+        parsed
     }
 }
 
@@ -418,6 +443,7 @@ pub fn parse(text: &str) -> Result<Entry, Diagnostics> {
         "one of `confirmed`, `correction`, `failed`, `note`",
     );
     let scenario = raw.scenario(&mut found);
+    let acceptance = raw.acceptance(&mut found);
 
     match (id, date, ticket, module, kind) {
         (Some(id), Some(date), Some(ticket), Some(module), Some(kind)) if found.is_empty() => {
@@ -428,6 +454,7 @@ pub fn parse(text: &str) -> Result<Entry, Diagnostics> {
                 module,
                 kind: Type::parse(&kind).expect("checked above"),
                 scenario,
+                acceptance,
                 body: raw.body,
             })
         }
@@ -453,6 +480,9 @@ pub struct Draft {
     pub kind: Type,
     /// The `.feature` scenario; absent in light mode.
     pub scenario: Option<String>,
+    /// As the agent copied it from `plan check`; checked against the Plan when
+    /// the draft is recorded (§8.1, D-15).
+    pub acceptance: Option<Acceptance>,
     /// Free text, without trailing newline.
     pub body: String,
 }
@@ -495,6 +525,7 @@ pub fn parse_draft(text: &str) -> Result<Draft, Diagnostics> {
         ),
     };
     let scenario = raw.scenario(&mut found);
+    let acceptance = raw.acceptance(&mut found);
 
     match (ticket, module, kind) {
         (Some(ticket), Some(module), Some(kind)) if found.is_empty() => Ok(Draft {
@@ -502,6 +533,7 @@ pub fn parse_draft(text: &str) -> Result<Draft, Diagnostics> {
             module,
             kind: Type::parse(&kind).expect("checked above"),
             scenario,
+            acceptance,
             body: raw.body,
         }),
         _ => Err(found),

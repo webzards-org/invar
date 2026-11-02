@@ -49,6 +49,7 @@ fn add_entry(root: &ProjectRoot, module: &str, second: u32, body: &str) -> Strin
         module: module.to_owned(),
         kind: Type::Note,
         scenario: None,
+        acceptance: None,
         body: body.to_owned(),
     };
     let name = FileName {

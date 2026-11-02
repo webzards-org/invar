@@ -1,7 +1,7 @@
 //! The decision log, `.invar/decisions/` (§7): writing one entry, and reading
 //! them all.
 //!
-//! Implements `contracts/formats/decision-entry.md` v1.3.0; the draft of
+//! Implements `contracts/formats/decision-entry.md` v1.4.0; the draft of
 //! §8.1 is checked and recorded in [`draft`].
 //!
 //! **Insert-only** (§6). An entry is created with an exclusive create, so an
@@ -18,6 +18,11 @@
 //! **`failed` resets the cycle** (§7, §4c). The ticket's Plan returns to
 //! `draft` with its approval values cleared, and its body untouched. The Plan
 //! is written first and restored if the entry cannot be (D-8).
+//!
+//! **`acceptance` is the Plan's** (§4.2, D-15). What an entry says about
+//! acceptance tests is checked against the ticket's Plan, read before any
+//! reset, and a draft without it gets the Plan's value. Absent stays absent
+//! when nothing can say: unknown, never `skipped` (D-14).
 
 use std::collections::HashSet;
 use std::fmt;
@@ -29,7 +34,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::diagnostics::Diagnostics;
 use crate::format::decision::{self, Entry, FileName, Type};
-use crate::format::plan::{Mode, Plan, Status};
+use crate::format::plan::{Acceptance, Mode, Plan, Status};
 use crate::format::values::{is_module, is_ticket};
 use crate::fs::ProjectRoot;
 use crate::fs::plans::{self, LookupError};
@@ -48,6 +53,9 @@ pub struct Request {
     /// Required when the ticket has no Plan; must agree with the Plan's
     /// `Module` when it has one.
     pub module: Option<String>,
+    /// `--acceptance`: must agree with the Plan when it has decided. `None`
+    /// is recorded as no key — nothing is invented for it (§8).
+    pub acceptance: Option<Acceptance>,
     /// As given; normalized before writing.
     pub body: String,
 }
@@ -59,6 +67,9 @@ pub struct Recorded {
     pub entry: Entry,
     /// The Plan returned to `draft`, for a `failed` entry.
     pub reset: Option<PathBuf>,
+    /// The entry's `acceptance` was the Plan's, because the draft had none
+    /// (§8.1): said in the output, since the developer did not read it.
+    pub acceptance_from_plan: bool,
 }
 
 /// Write one entry for `request`, at `now` (git's clock, D-2).
@@ -72,6 +83,7 @@ pub fn record(
         ticket,
         kind,
         module,
+        acceptance,
         body,
     } = request;
     if !is_ticket(&ticket) {
@@ -130,6 +142,21 @@ pub fn record(
         .as_ref()
         .map_or_else(|| ticket.to_lowercase(), |(dir, _, _)| dir.slug.clone());
 
+    // The developer's word, unless the Plan has decided otherwise. Without a
+    // Plan, or with one still in draft, there is nothing to hold it against.
+    if let (Some(given), Some((_, spec, text))) = (acceptance, &plan)
+        && let Some(from_plan) = plan_acceptance(text, mode)
+        && from_plan != given
+    {
+        return Err(RecordError::AcceptanceMismatch {
+            ticket,
+            spec: spec.clone(),
+            from_plan,
+            given,
+            from: "`--acceptance`",
+        });
+    }
+
     write(
         root,
         Resolved {
@@ -138,12 +165,27 @@ pub fn record(
             slug,
             kind,
             scenario: None,
+            acceptance,
             body,
             plan: plan.map(|(_, spec, text)| (spec, text)),
         },
         now,
         mode,
     )
+    .map(|recorded| Recorded {
+        acceptance_from_plan: false,
+        ..recorded
+    })
+}
+
+/// What the Plan's text says about acceptance tests (§4.2), read as it is now
+/// — before a `failed` entry resets it, which clears the value (§7). Nothing
+/// for a draft, and nothing for a Plan that cannot be parsed: neither has a
+/// decision to hold an entry to.
+fn plan_acceptance(text: &str, mode: Mode) -> Option<Acceptance> {
+    Plan::parse(text, mode)
+        .ok()
+        .and_then(|plan| plan.header().decided_acceptance())
 }
 
 /// Record a validated draft (decision-entry.md §8.1) as it stands: its
@@ -151,6 +193,11 @@ pub fn record(
 /// read them, and a draft may say `global` for a ticket whose Plan names a
 /// module. The draft sits next to its Plan, which supplies the slug, and which
 /// a `failed` entry returns to `draft`.
+///
+/// Its `acceptance` is checked against the Plan, as the Plan is before any
+/// reset (§8.1, D-15): the same value is recorded, another is refused, and a
+/// draft without one gets the Plan's. A value the Plan cannot confirm, because
+/// it has decided nothing, is refused too.
 ///
 /// Does not touch the draft file; [`draft::approve`] removes it.
 pub fn record_draft(
@@ -169,6 +216,29 @@ pub fn record_draft(
         path: spec.clone(),
         source,
     })?;
+
+    let from_plan = plan_acceptance(&text, mode);
+    let acceptance = match (draft.acceptance, from_plan) {
+        (Some(given), Some(from_plan)) if given != from_plan => {
+            return Err(RecordError::AcceptanceMismatch {
+                ticket: draft.ticket,
+                spec,
+                from_plan,
+                given,
+                from: "the draft",
+            });
+        }
+        (Some(given), None) => {
+            return Err(RecordError::AcceptanceUnchecked {
+                ticket: draft.ticket,
+                spec,
+                given,
+            });
+        }
+        (given, from_plan) => given.or(from_plan),
+    };
+    let acceptance_from_plan = draft.acceptance.is_none() && acceptance.is_some();
+
     write(
         root,
         Resolved {
@@ -177,12 +247,17 @@ pub fn record_draft(
             slug: dir.slug,
             kind: draft.kind,
             scenario: draft.scenario,
+            acceptance,
             body,
             plan: Some((spec, text)),
         },
         now,
         mode,
     )
+    .map(|recorded| Recorded {
+        acceptance_from_plan,
+        ..recorded
+    })
 }
 
 /// An entry with everything settled but its `id`, `date` and file name.
@@ -192,6 +267,7 @@ struct Resolved {
     slug: String,
     kind: Type,
     scenario: Option<String>,
+    acceptance: Option<Acceptance>,
     /// Normalized, not empty.
     body: String,
     /// The ticket's Plan, `spec.md` and its text, when it has one.
@@ -212,6 +288,7 @@ fn write(
         slug,
         kind,
         scenario,
+        acceptance,
         body,
         plan,
     } = resolved;
@@ -244,6 +321,7 @@ fn write(
                 module: module.clone(),
                 kind,
                 scenario,
+                acceptance,
                 body,
             };
             let name = FileName {
@@ -256,7 +334,12 @@ fn write(
         });
 
     match written {
-        Ok((path, entry)) => Ok(Recorded { path, entry, reset }),
+        Ok((path, entry)) => Ok(Recorded {
+            path,
+            entry,
+            reset,
+            acceptance_from_plan: false,
+        }),
         Err(err) => {
             // D-8: no reset Plan without its entry.
             if let (Some(spec), Some((_, original))) = (&reset, &plan)
@@ -500,6 +583,22 @@ pub enum RecordError {
         from_plan: String,
         given: String,
     },
+    /// `acceptance` disagrees with what the Plan decided (D-15).
+    AcceptanceMismatch {
+        ticket: String,
+        spec: PathBuf,
+        from_plan: Acceptance,
+        given: Acceptance,
+        /// Who gave the value: "the draft", or "`--acceptance`".
+        from: &'static str,
+    },
+    /// A draft's `acceptance`, and a Plan that has decided nothing to check it
+    /// against.
+    AcceptanceUnchecked {
+        ticket: String,
+        spec: PathBuf,
+        given: Acceptance,
+    },
     /// `failed` without a Plan to reset.
     NoPlanToReset {
         ticket: String,
@@ -570,6 +669,37 @@ impl fmt::Display for RecordError {
                 "`--module {given}` disagrees with the Plan for {ticket}, which says \
                  `Module: {from_plan}` ({}); leave `--module` out to use the Plan's, or \
                  correct the one that is wrong",
+                spec.display()
+            ),
+            Self::AcceptanceMismatch {
+                ticket,
+                spec,
+                from_plan,
+                given,
+                from,
+            } => {
+                let from_plan = from_plan.as_str();
+                write!(
+                    f,
+                    "{from} says `acceptance: {given}`, and the Plan for {ticket} ({}) was \
+                     approved with `acceptance: {from_plan}`; the entry records the Plan's \
+                     decision, so nothing was written. Copy the value from `invar plan check \
+                     {ticket}`, or leave it out to record the Plan's",
+                    spec.display(),
+                    given = given.as_str(),
+                )
+            }
+            Self::AcceptanceUnchecked {
+                ticket,
+                spec,
+                given,
+            } => write!(
+                f,
+                "the draft says `acceptance: {}`, and the Plan for {ticket} ({}) records no \
+                 acceptance decision — it is a draft, or cannot be read — so the value cannot \
+                 be checked and nothing was written. Remove the line: without one, the entry \
+                 says unknown",
+                given.as_str(),
                 spec.display()
             ),
             Self::NoPlanToReset { ticket, plans_dir } => write!(

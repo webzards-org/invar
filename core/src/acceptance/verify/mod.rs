@@ -72,11 +72,7 @@ pub fn for_ticket(
     let Some(acceptance) = &config.acceptance else {
         // No directory to look in (D-21). Not said for a ticket that never wanted tests.
         if approved.acceptance == Acceptance::Required {
-            report.warnings.push(format!(
-                "{}: the Plan says `Acceptance: required`, and invar.yaml has no `acceptance:` \
-                 section, so there is nothing to verify",
-                approved.ticket
-            ));
+            report.warnings.push(no_section_warning(&approved.ticket));
         }
         return report;
     };
@@ -99,6 +95,15 @@ pub fn for_ticket(
         closing(&files, approved, &acceptance.dir, &mut report);
     }
     report
+}
+
+/// What is said of a ticket that wants tests where `invar.yaml` has nowhere to
+/// keep them (D-21). The PR description repeats it (AT-15).
+pub fn no_section_warning(ticket: &str) -> String {
+    format!(
+        "{ticket}: the Plan says `Acceptance: required`, and invar.yaml has no `acceptance:` \
+         section, so there is nothing to verify"
+    )
 }
 
 /// §10.3.
