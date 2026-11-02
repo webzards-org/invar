@@ -4,6 +4,8 @@ Project documentation.
 
 - [`INSTALL.md`](INSTALL.md) — installing the plugin in a project, the optional
   terminal CLI, troubleshooting, and publishing a release.
+- [`USAGE.md`](USAGE.md) — the cycle, step by step: every command the developer
+  runs, and what each agent does.
 - [`DESIGN.md`](DESIGN.md) — the design document (currently revision v3.1). All
   section references in this repository (§4d, §13a, …) point into it.
 - [`TASKS-M1.md`](TASKS-M1.md) — the M1 milestone broken into issues, with the
