@@ -1,7 +1,7 @@
 # Contract: Decision entry
 
-**Version:** 1.3.1 — a `failed` entry clears `Acceptance` too; see §7 and the
-version history
+**Version:** 1.4.0 — the `acceptance` key: how the ticket was closed; see §4.2 and
+the version history
 **Status:** stable
 **Implements:** §7 (Decision log), §4c (a `failed` entry resets the cycle),
 §12 (the entry survives the Plan); light mode L-1, L-4 (`docs/TASKS-M1.md`)
@@ -88,6 +88,7 @@ The free-text body.
 | `module` | yes | `^[A-Za-z][A-Za-z0-9_]*$`, or `global`. Equal to `<module>` in the filename, letter for letter |
 | `type` | yes | `confirmed`, `correction`, `failed` or `note` (§5) |
 | `scenario` | **no** | The `.feature` scenario the entry is about, when `scenarios: true`. **Absent in light mode** (L-1) |
+| `acceptance` | **no** | `required` or `skipped`, lowercase, exactly: what the ticket's approved Plan decided about acceptance tests (§4.2). **Absent means unknown** |
 
 Each key appears at most once. A key not listed here is permitted and ignored,
 so a newer writer cannot break an older reader.
@@ -95,6 +96,28 @@ so a newer writer cannot break an older reader.
 **Consistency:** `module` equals the filename's `<module>`, and `date`,
 converted to UTC, equals the filename's timestamp. The tool always writes them
 that way; a reader that checks an entry reports a mismatch.
+
+### 4.2 `acceptance`
+
+Since 1.4.0. It records whether the ticket's cycle was approved with acceptance
+tests (`required`) or without them (`skipped`), the `Acceptance` decision of the
+Plan (plan-header.md §5). The Plan is deleted in the PR (§12), so after merge this
+key is where that decision survives, in a form that can be counted (D-13).
+
+- **Absent means unknown, not `skipped`** (D-14). An entry written before 1.4.0
+  has no key, and neither has one recorded by `invar decision record` without
+  `--acceptance`. Nothing can be said about those tickets; a count that read them
+  as `skipped` would report skipping that never happened.
+- **The value is the Plan's** (D-15). The agent copies it into the draft from the
+  `acceptance:` line of `invar plan check` (§8.1), and `invar decision approve`
+  checks it against the Plan before recording: the entry says what the approval
+  said, not what anyone remembered of it.
+- What the Plan says is read from its header: for `Status: approved`, the
+  `Acceptance` value, and `skipped` when it has none — a Plan approved before
+  plan-header.md 1.7.0, when no test-writer existed, which is what `plan check`
+  prints (plan-header.md §5.1). A Plan with `Status: draft` has decided nothing,
+  and says nothing.
+- Any other value is a problem, reported like any other malformed key.
 
 ## 5. Types
 
@@ -132,6 +155,9 @@ without a Plan is recorded as a `note`.
 The two writes happen Plan first, entry second. If the entry cannot be
 written, the Plan is restored to the exact bytes it had (D-8).
 
+The entry's `acceptance` (§4.2) is what the Plan said **before** the reset: the
+reset clears `Acceptance`, and the entry records the approval it disproves.
+
 ## 8. Who writes, and when
 
 **An entry is written because a person decided it is worth keeping** (D-6),
@@ -141,7 +167,10 @@ and **the person writes it** (D-12):
   is at that moment, and deletes the draft. It is the developer's, run through
   `/invar:log-approve`.
 - `invar decision record` writes an entry the developer types themselves: a
-  `correction`, or a `note`.
+  `correction`, or a `note`. Its `--acceptance required|skipped` gives the
+  `acceptance` key; without it the key is absent, and the command invents no
+  value (§4.2). A value that disagrees with the ticket's approved Plan is refused,
+  naming both.
 - **The agent writes no entry**, not even when asked: it drafts one (§8.1),
   and `plan guard` denies it both commands.
 - **No hook ever writes an entry**, and no other command writes one as a side
@@ -168,6 +197,7 @@ matter, `---`, a non-empty body — with these fields:
 | `module` | yes | As in §4.1 |
 | `type` | yes | `confirmed`, `failed` or `note` (D-11) |
 | `scenario` | **no** | As in §4.1 |
+| `acceptance` | **no** | As in §4.1, and equal to what the Plan says (§4.2); checked when the draft is recorded |
 | `id`, `date` | **must be absent** | Assigned when the draft is recorded (D-10) |
 
 A key not listed is permitted and ignored, as for an entry.
@@ -175,6 +205,10 @@ A key not listed is permitted and ignored, as for an entry.
 **The type follows the cycle:** `confirmed` for a cycle that finished,
 `failed` after the coder answered `BLOCKED` or the approved Plan turned out to
 be impossible, `note` otherwise.
+
+**`acceptance`** is copied from the `acceptance:` line that
+`invar plan check <TICKET>` prints, never from the conversation (D-15). When
+`plan check` refuses, there is no line to copy, and the key is left out.
 
 **The body** says what was decided and why, in a few sentences. It is not a
 summary of the diff: the diff is in git, and the planner reads the log for the
@@ -186,9 +220,22 @@ asks or accepts the protocol's offer. It is checked with
 
 **Recording it:** `invar decision approve <ticket>`, run by the developer
 (`/invar:log-approve`). It reads the draft as it is then — with any edits the
-developer made while reading it — and validates it; writes the entry with a new
+developer made while reading it — and validates it; checks its `acceptance`
+against the Plan (below); writes the entry with a new
 `id` (D-4) and `date` (D-2), its `module` and `scenario` taken from the draft
-and its slug from the Plan directory (§2); and deletes the draft. A `failed`
+and its slug from the Plan directory (§2); and deletes the draft.
+
+The `acceptance` check, against the Plan as it is before any reset (§7):
+
+| The draft | The Plan says (§4.2) | `decision approve` |
+|---|---|---|
+| a value | the same value | records it |
+| a value | the other value | **refuses**, naming both |
+| a value | nothing (`Status: draft`, or a Plan it cannot read) | **refuses**: the value cannot be checked |
+| no key | a value | records the Plan's value, and says so in its output |
+| no key | nothing | records no key: unknown |
+| another value | — | **refuses**, as for any malformed key |
+ A `failed`
 draft resets the cycle as any `failed` entry does (§7, D-8). It refuses, and
 writes nothing, when there is no draft or the draft is not valid. A draft that
 cannot be deleted after its entry is written is reported; approving it again
@@ -298,6 +345,30 @@ own command records exactly that file. `decision record` stays for the entries
 only the developer can write (D-11). `invar done` writes no entry: it deletes
 the Plan, and refuses while an unapproved draft is beside it.
 
+**D-13 — The acceptance decision is a header key.** How often a team closes a
+ticket without acceptance tests is the pilot's key measure, and after merge the
+Plan that recorded the decision is gone (§12). The PR description says it too,
+but in prose, for a reader. In the front matter it is one `key: value` line that
+a script counts with `grep` across `.invar/decisions/`, and that no change to the
+body's wording can break.
+
+**D-14 — An absent `acceptance` means unknown.** Every entry before 1.4.0 lacks
+the key, and so does one the developer records with `decision record` without
+saying. Reading absence as `skipped` would turn the whole history before this
+version, and every hand-written entry, into tickets closed without tests: the
+measure would rise for no reason but the upgrade. A count reports three numbers
+— `required`, `skipped`, unknown — and only the first two are evidence.
+
+**D-15 — The Plan is the source; the draft is checked against it.** The agent
+writes the draft, and an agent can misremember, or copy what the conversation
+said instead of what the developer approved. The approved Plan's header holds
+the decision, covered by its checksum (plan-header.md §5.3), so the draft copies
+it from `plan check`, and `decision approve` compares the two and refuses a
+disagreement rather than choose. A draft without the key is filled in from the
+Plan: it can only be the Plan's value, and leaving it out would turn a known
+answer into an unknown one. A `failed` entry reads the Plan before its reset,
+which is what clears the value (§7).
+
 ## 11. Open questions
 
 **OQ-1 — Relations between entries.** `supersedes: d-…` and similar fields
@@ -403,7 +474,113 @@ Fixed the cancel button.
 not a draft type (D-11); and the draft names `SHOP-300` in the Plan directory of
 `SHOP-214`.
 
+### 12.6 Valid — a `confirmed` entry with acceptance tests
+
+File: `.invar/decisions/2026-10-07-091503-orders-cancel-unpaid-order.md`
+
+```markdown
+---
+id: d-3e9a51c0
+date: 2026-10-07T11:15:03+02:00
+ticket: SHOP-214
+module: orders
+type: confirmed
+acceptance: required
+---
+
+Cancelling releases reserved stock inside the cancel transaction, through
+`StockLedger`. The acceptance tests were locked red before the code existed.
+```
+
+**Why it is valid:** `required` is one of the two values, and it is what the
+Plan of SHOP-214 recorded when the draft was approved (§8.1).
+
+### 12.7 Valid — a `confirmed` entry without acceptance tests
+
+File: `.invar/decisions/2026-10-08-140210-Billing-invoice-footer.md`
+
+```markdown
+---
+id: d-81c7f2d4
+date: 2026-10-08T14:02:10Z
+ticket: SHOP-230
+module: Billing
+type: confirmed
+acceptance: skipped
+---
+
+The invoice footer shows the team's VAT number. A copy change in one template;
+the developer approved the Plan without acceptance tests.
+```
+
+**Why it is valid:** `skipped` is the other value. Without the line, the entry
+would still be valid, and would say nothing about acceptance (D-14).
+
+### 12.8 Invalid — an unknown `acceptance` value
+
+File: `.invar/decisions/2026-10-08-140210-Billing-invoice-footer.md`
+
+```markdown
+---
+id: d-81c7f2d4
+date: 2026-10-08T14:02:10Z
+ticket: SHOP-230
+module: Billing
+type: confirmed
+acceptance: none
+---
+
+The invoice footer shows the team's VAT number.
+```
+
+**Why:** `acceptance` is `required` or `skipped`, or absent (§4.1); `none` is
+neither. Leaving the key out says "unknown", which is not what `none` means
+either.
+
+### 12.9 Refused on approval — a draft that disagrees with its Plan
+
+File: `.invar/plans/SHOP-214-cancel-unpaid-order/decision.md`, next to a
+`spec.md` whose header says `Status: approved` and `Acceptance: required`
+
+```markdown
+---
+ticket: SHOP-214
+module: orders
+type: confirmed
+acceptance: skipped
+---
+
+Cancelling releases reserved stock inside the cancel transaction.
+```
+
+**Why:** the draft is valid on its own, and `invar decision validate` accepts
+it. `invar decision approve` refuses it and writes nothing: the draft says
+`skipped`, the Plan says `required`, and the entry records the Plan's decision
+(D-15). The fix is to copy the value from `invar plan check SHOP-214`, or to
+remove the line and let the Plan's value be recorded.
+
 ## 13. Version history
+
+**1.4.0 — the `acceptance` key (AT-15).**
+
+- §4.1 and §4.2: the optional key `acceptance: required | skipped`, what the
+  Plan decided about acceptance tests. Absent means unknown. D-13 and D-14.
+- §8.1: a draft copies it from `invar plan check`; `invar decision approve`
+  checks it against the Plan, fills it in when the draft has none, and refuses a
+  disagreement. D-15.
+- §7: a `failed` entry records the value from before the reset.
+- §8: `invar decision record --acceptance`.
+- Examples 12.6 to 12.9.
+
+**Why:** the Plan is deleted in the PR, and how often a ticket is closed without
+acceptance tests is the pilot's measure (D-13).
+
+**Compatibility:** every entry and draft written by a 1.3.1 tool stays valid,
+and reads as before: none has the key, and absent means unknown, so no earlier
+entry is counted either way. An older reader ignores the key, as it ignores any
+key it does not know (§4.1). Only a file someone edited by hand to hold an
+`acceptance` key with another value than `required` or `skipped` — which no
+tool ever wrote — is now reported.
 
 **1.3.1 — a `failed` entry clears `Acceptance` (AT-3).**
 
