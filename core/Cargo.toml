@@ -29,7 +29,7 @@ sha2 = "0.10"
 # trip drops both. `format/plan` reads it line by line instead and writes it
 # back byte for byte.
 serde = { version = "1", features = ["derive"] }
-serde-saphyr = { version = "1.3", default-features = false, features = ["deserialize"] }
+serde-saphyr = { version = "2.0", default-features = false, features = ["deserialize"] }
 
 # `plan guard` reads the JSON a `PreToolUse` hook passes on stdin (M1-10).
 # Read only, into an untyped `Value`: the payload belongs to Claude Code and
