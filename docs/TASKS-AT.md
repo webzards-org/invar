@@ -124,8 +124,11 @@ Each one is closed by the task named. A recommendation is not a decision.
   `BLOCKED` and the developer decides (`acceptance-lock.md` D-12).
 - **OQ-2 — Are factories and shared helpers ever locked?** Closed by AT-11 and
   AT-14. Decided in AT-11: the test-writer does not change factories or seeders, so they
-  are not locked; helpers it needs live under `acceptance.dir`. What the review reports
-  of coder changes to factories is AT-14's.
+  are not locked; helpers it needs live under `acceptance.dir`. Decided in AT-14: the
+  reviewer reports, under **Shared test code changed by the coder**, each factory,
+  seeder or helper outside `acceptance.dir` that a locked test uses and the branch
+  changes, and whether the change could make that test pass without the behavior. A
+  judgement on the diff: the core does not know what a factory is.
 - **OQ-3 — The exact form of the `Acceptance` field inside the approval digest.**
   Closed by AT-3.
   *Recommendation (not a decision):* `Approved-checksum` covers the body plus the
@@ -775,8 +778,11 @@ a person's decision, exactly as approval is, so a weakening is never automatic.
 
 ### Description
 
-- `invar review-input` adds: the `Acceptance` value, and for each criterion the
-  locked tests that cover it (file and test name).
+- `invar review-input` adds `=== Acceptance tests ===`: the `Acceptance` value, and
+  for each criterion the locked files that name it (AT-15's `gather`), the criteria
+  none names, and the files the developer unlocked with their rounds. **File, not
+  test name:** names are known only by running the tests, and `review-input` runs
+  nothing; the reviewer reads the tests in each file.
 - `agents/reviewer.md`, per criterion: does each locked test actually assert what
   the criterion says? (`asserts`, `weaker`, `unrelated`, with `file:line`.)
 - New heading: **Shared test code changed by the coder** — factories, seeders or
@@ -787,8 +793,10 @@ a person's decision, exactly as approval is, so a weakening is never automatic.
   1.6.0, AT-2): `review-input` already shows it after the criteria. A change to
   a locked test that the Plan declares there is not reported as outside Scope;
   a change to another ticket's locked test that it does **not** declare is.
-- Seeded branch in `eval/review-seeds.sh`: a locked test whose assertion is weaker
-  than its criterion.
+- Seeded branches in `eval/review-seeds.sh`: `seed-weak-test`, a locked test whose
+  assertion is weaker than its criterion, and `seed-factory`, a factory change that
+  makes a locked test pass without the behavior. Both locked by the real
+  `invar acceptance lock` (`plugin/NOTES.md` §16).
 
 ### Purpose
 

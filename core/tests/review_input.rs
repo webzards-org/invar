@@ -429,3 +429,97 @@ fn a_section_that_says_none_prints_as_a_plan_without_it() {
     let none = Repo::new(&approved_with_tests_to_change("_none_\n"));
     assert_eq!(stdout_of(&none.review_input().success()), without);
 }
+
+// --- the locked acceptance tests (AT-14) ------------------------------------------
+
+const ACCEPTANCE_CONFIG: &str = "acceptance:\n  dir: tests/Acceptance\n  \
+    run: [\"sh\", \"runner.sh\", \"{report}\", \"{files}\"]\n";
+
+/// Example 9.1 approved with `--acceptance` (example 9.10): `required`, and current.
+fn required_plan() -> String {
+    contract_example("9.10") + draft_plan().split_once("\n---\n").unwrap().1
+}
+
+impl Repo {
+    /// `text` under a lock line for `ticket`, with the digest `invar hash --lock`
+    /// prints for it.
+    fn write_locked(&self, relative: &str, ticket: &str, text: &str) {
+        let pending = format!("<?php\n// invar-lock: {ticket}\n{text}");
+        self.write(relative, &pending);
+        let output = Command::cargo_bin("invar")
+            .unwrap()
+            .args(["hash", "--lock"])
+            .arg(self.root().join(relative))
+            .output()
+            .unwrap();
+        let digest = String::from_utf8(output.stdout).unwrap();
+        self.write(
+            relative,
+            &pending.replace(
+                &format!("invar-lock: {ticket}"),
+                &format!("invar-lock: {ticket} {}", digest.trim()),
+            ),
+        );
+    }
+
+    /// A `required` Plan, two files locked for it that name AC1 to AC3 between them,
+    /// one of them unlocked once by the developer, and nothing committed: the
+    /// snapshot holds no hash this machine's git could change.
+    fn with_locked_tests() -> Self {
+        let repo = Self::new(&required_plan());
+        repo.write("invar.yaml", ACCEPTANCE_CONFIG);
+        repo.write_locked(
+            "tests/Acceptance/Shop214CancelTest.php",
+            "SHOP-214",
+            "it('AC1: cancels and releases the stock', fn () => ...);\n\
+             it('AC2 a paid order is refused', fn () => ...);\n",
+        );
+        repo.write_locked(
+            "tests/Acceptance/Shop214OtherTeamTest.php",
+            "SHOP-214",
+            "it('ac_3: another team gets 404', fn () => ...);\n",
+        );
+        repo.write(
+            ".invar/plans/SHOP-214-cancel-unpaid-order/unlocked",
+            "round: 1\nclosed 1 tests/Acceptance/Shop214OtherTeamTest.php\n",
+        );
+        repo
+    }
+}
+
+#[test]
+fn required_prints_exactly_the_stored_input() {
+    let repo = Repo::with_locked_tests();
+    let out = stdout_of(&repo.review_input().success());
+    assert_snapshot("review-input-shop-214-required.txt", &out);
+}
+
+#[test]
+fn skipped_prints_exactly_the_stored_input() {
+    // Example 9.2 says `Acceptance: skipped`.
+    let repo = Repo::new(&approved_plan());
+    repo.write("invar.yaml", ACCEPTANCE_CONFIG);
+    let out = stdout_of(&repo.review_input().success());
+    assert_snapshot("review-input-shop-214-skipped.txt", &out);
+}
+
+#[test]
+fn the_locked_tests_are_shown_the_same_way_every_time() {
+    let repo = Repo::with_locked_tests();
+    let a = stdout_of(&repo.review_input().success());
+    let b = stdout_of(&repo.review_input().success());
+    assert_eq!(a, b);
+}
+
+#[test]
+fn with_locked_tests_the_decision_log_still_never_reaches_the_reviewer() {
+    let repo = Repo::with_locked_tests();
+    repo.write(
+        ".invar/decisions/2026-10-06-163712-orders-earlier.md",
+        "---\nid: d-1234abcd\ndate: 2026-10-06T18:37:12+02:00\nticket: SHOP-214\nmodule: orders\n\
+         type: note\nacceptance: required\n---\n\nLOG-ENTRY-TEXT AC4 tests/Acceptance/x.php\n",
+    );
+    let out = stdout_of(&repo.review_input().success());
+    assert!(!out.contains("LOG-ENTRY-TEXT"), "{out}");
+    assert!(out.contains("- AC4: named by no locked file"), "{out}");
+}

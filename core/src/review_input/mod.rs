@@ -15,11 +15,18 @@
 //!    Not the pasted ticket, the questions or the rejected alternatives: they
 //!    explain how the Plan came about, and a reviewer reading them starts to
 //!    weigh the planner's reasons instead of the result;
-//! 2. the **binding context**, `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`, as
+//! 2. the **acceptance tests**, right after them: the Plan's `Acceptance`, and
+//!    for `required` the files locked for the ticket that name each criterion,
+//!    the criteria none names, and what the developer unlocked — read by
+//!    [`pr_body::acceptance::gather`], the same reading the PR description
+//!    shows. File paths, not test names: names are known only by running the
+//!    tests, and nothing here runs anything. The reviewer reads the tests in
+//!    each file and judges whether they assert their criterion (AT-14);
+//! 3. the **binding context**, `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`, as
 //!    `context show --binding` prints it — the invariants a change can break,
 //!    all of them: the reviewer checks every one, including those the Plan
 //!    does not name (M1-26);
-//! 3. the **diff** of the branch against the base branch (`git::branch_diff`).
+//! 4. the **diff** of the branch against the base branch (`git::branch_diff`).
 //!    Above [`DIFF_BUDGET`] characters the patch is left out and the changed
 //!    files are listed with their line counts instead; the reviewer reads what
 //!    it needs from the repository itself.
@@ -30,10 +37,12 @@
 
 use std::fmt::Write as _;
 
+use crate::acceptance::verify::no_section_warning;
 use crate::context::Binding;
 use crate::format::plan::{ACCEPTANCE_TESTS_TO_CHANGE, Plan};
 use crate::fs::ProjectRoot;
 use crate::git::{self, GitError};
+use crate::pr_body::acceptance::Tests;
 use crate::pr_body::strip_blank_edges;
 
 #[cfg(test)]
@@ -125,7 +134,7 @@ pub fn parse_numstat(text: &str) -> Vec<FileStat> {
 ///
 /// The caller decides that the Plan may be reviewed against — approved, and
 /// unchanged since (`plan check`) — exactly as for `pr-body`.
-pub fn render(plan: &Plan, binding: &Binding, base: &str, diff: &Diff) -> String {
+pub fn render(plan: &Plan, binding: &Binding, base: &str, diff: &Diff, tests: &Tests) -> String {
     let header = plan.header();
     let mut out = String::new();
 
@@ -143,8 +152,11 @@ pub fn render(plan: &Plan, binding: &Binding, base: &str, diff: &Diff) -> String
 
     for heading in SECTIONS {
         write_section(&mut out, plan, heading);
-        if heading == "Acceptance criteria" && plan.acceptance_tests_to_change().is_some() {
-            write_section(&mut out, plan, ACCEPTANCE_TESTS_TO_CHANGE);
+        if heading == "Acceptance criteria" {
+            if plan.acceptance_tests_to_change().is_some() {
+                write_section(&mut out, plan, ACCEPTANCE_TESTS_TO_CHANGE);
+            }
+            write_acceptance(&mut out, plan, tests);
         }
     }
 
@@ -206,6 +218,90 @@ pub fn render(plan: &Plan, binding: &Binding, base: &str, diff: &Diff) -> String
         }
     }
     out
+}
+
+/// `=== Acceptance tests ===`: what the reviewer judges the locked tests by.
+fn write_acceptance(out: &mut String, plan: &Plan, tests: &Tests) {
+    let ticket = &plan.header().ticket;
+    let _ = writeln!(out);
+    let _ = writeln!(out, "=== Acceptance tests ===");
+    let _ = writeln!(out);
+    let locked = match tests {
+        Tests::Skipped | Tests::NotRecorded => {
+            let _ = writeln!(out, "Acceptance: skipped");
+            let _ = writeln!(out);
+            let _ = writeln!(
+                out,
+                "The ticket was approved without acceptance tests, so no test is locked for \
+                 it. Judge the coder's own tests, if any, as before, and list the criteria no \
+                 test covers, as information, not as a defect."
+            );
+            return;
+        }
+        Tests::RequiredWithoutConfig => {
+            let _ = writeln!(out, "Acceptance: required");
+            let _ = writeln!(out);
+            let _ = writeln!(
+                out,
+                "{}: no locked tests can be shown.",
+                no_section_warning(ticket)
+            );
+            return;
+        }
+        Tests::Required(locked) => locked,
+    };
+
+    let _ = writeln!(out, "Acceptance: required");
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "Per criterion, the files locked for {ticket} under `{}` whose text names it. Test \
+         names are not listed, since only a run knows them: read the tests in each file, and \
+         judge whether each asserts its criterion — `asserts`, `weaker` or `unrelated`.",
+        locked.dir
+    );
+    let _ = writeln!(out);
+    for criterion in plan.criteria() {
+        let files: Vec<&str> = locked
+            .files
+            .iter()
+            .filter(|file| file.criteria.contains(&criterion.id))
+            .map(|file| file.path.as_str())
+            .collect();
+        if files.is_empty() {
+            let _ = writeln!(out, "- {}: named by no locked file", criterion.id);
+        } else {
+            let _ = writeln!(out, "- {}: {}", criterion.id, files.join(", "));
+        }
+    }
+
+    let silent: Vec<&str> = locked
+        .files
+        .iter()
+        .filter(|file| file.criteria.is_empty())
+        .map(|file| file.path.as_str())
+        .collect();
+    if !silent.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "Locked files that name no criterion:");
+        for path in silent {
+            let _ = writeln!(out, "- {path}");
+        }
+    }
+
+    if !locked.unlocked.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(
+            out,
+            "Unlocked by the developer during the cycle, after the coder objected to them: \
+             read these with extra care, since a criterion is likeliest to have been softened \
+             here."
+        );
+        let _ = writeln!(out);
+        for line in &locked.unlocked {
+            let _ = writeln!(out, "- {line}");
+        }
+    }
 }
 
 fn write_section(out: &mut String, plan: &Plan, heading: &str) {

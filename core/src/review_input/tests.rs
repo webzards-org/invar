@@ -6,6 +6,10 @@ use crate::context::{Binding, File, State};
 use crate::format::plan::{Mode, Plan};
 
 use super::{Diff, FileStat, choose, parse_numstat, render};
+use crate::pr_body::acceptance::{Locked, LockedFile, Tests};
+
+/// The fixture has no `Acceptance` value.
+const NONE: Tests = Tests::NotRecorded;
 
 const PLAN: &str = "\
 ---
@@ -81,6 +85,7 @@ fn the_four_sections_then_the_binding_context_then_the_diff() {
         &business("Every query is scoped to the team."),
         "main",
         &Diff::Full(PATCH.to_owned()),
+        &NONE,
     );
 
     assert!(
@@ -111,7 +116,7 @@ fn the_four_sections_then_the_binding_context_then_the_diff() {
 
 #[test]
 fn what_explains_the_plan_rather_than_states_it_is_left_out() {
-    let out = render(&plan(PLAN), &no_binding(), "main", &Diff::Empty);
+    let out = render(&plan(PLAN), &no_binding(), "main", &Diff::Empty, &NONE);
 
     for absent in [
         "TICKET-TEXT-NOT-SHOWN",
@@ -130,33 +135,34 @@ fn what_explains_the_plan_rather_than_states_it_is_left_out() {
 fn the_same_arguments_give_the_same_bytes() {
     let diff = Diff::Full(PATCH.to_owned());
     let binding = business("Rule.");
-    let a = render(&plan(PLAN), &binding, "main", &diff);
-    let b = render(&plan(PLAN), &binding, "main", &diff);
+    let a = render(&plan(PLAN), &binding, "main", &diff, &NONE);
+    let b = render(&plan(PLAN), &binding, "main", &diff, &NONE);
     assert_eq!(a, b);
 }
 
 #[test]
 fn a_plan_checked_out_with_other_line_endings_gives_the_same_bytes() {
     let diff = Diff::Full(PATCH.to_owned());
-    let lf = render(&plan(PLAN), &no_binding(), "main", &diff);
+    let lf = render(&plan(PLAN), &no_binding(), "main", &diff, &NONE);
     let crlf = render(
         &plan(&PLAN.replace('\n', "\r\n")),
         &no_binding(),
         "main",
         &diff,
+        &NONE,
     );
     assert_eq!(lf, crlf);
 }
 
 #[test]
 fn without_binding_context_there_is_no_binding_block() {
-    let out = render(&plan(PLAN), &no_binding(), "main", &Diff::Empty);
+    let out = render(&plan(PLAN), &no_binding(), "main", &Diff::Empty, &NONE);
     assert!(!out.contains("binding context ==="), "{out}");
 }
 
 #[test]
 fn an_empty_diff_says_there_is_nothing_to_review() {
-    let out = render(&plan(PLAN), &no_binding(), "develop", &Diff::Empty);
+    let out = render(&plan(PLAN), &no_binding(), "develop", &Diff::Empty, &NONE);
     assert!(out.contains("=== diff against develop ==="), "{out}");
     assert!(out.contains("Nothing is committed on this branch"), "{out}");
     assert!(out.ends_with("=== end of diff ===\n"), "{out}");
@@ -169,6 +175,7 @@ fn a_patch_without_a_final_newline_still_closes_on_its_own_line() {
         &no_binding(),
         "main",
         &Diff::Full("+new".to_owned()),
+        &NONE,
     );
     assert!(out.ends_with("+new\n\n=== end of diff ===\n"), "{out}");
 }
@@ -226,7 +233,7 @@ fn over_the_budget_the_files_are_listed_and_the_patch_is_not() {
             },
         ],
     };
-    let out = render(&plan(PLAN), &no_binding(), "main", &diff);
+    let out = render(&plan(PLAN), &no_binding(), "main", &diff, &NONE);
 
     assert!(
         out.contains("the diff is 50123 characters, over the budget of 40000"),
@@ -281,13 +288,13 @@ fn with_tests_to_change(content: &str) -> String {
 #[test]
 fn the_tests_to_change_come_right_after_the_criteria() {
     let text = with_tests_to_change("- tests/A.php — delete — no longer applies\n");
-    let out = render(&plan(&text), &no_binding(), "main", &Diff::Empty);
+    let out = render(&plan(&text), &no_binding(), "main", &Diff::Empty, &NONE);
     assert!(
         out.contains(
             "is 404.\n\n\
              === Plan: Acceptance tests to change ===\n\n\
              - tests/A.php — delete — no longer applies\n\n\
-             === Plan: Implementation context ===\n"
+             === Acceptance tests ===\n"
         ),
         "{out}"
     );
@@ -295,12 +302,101 @@ fn the_tests_to_change_come_right_after_the_criteria() {
 
 #[test]
 fn nothing_is_written_when_the_section_is_absent_or_says_none() {
-    let without = render(&plan(PLAN), &no_binding(), "main", &Diff::Empty);
+    let without = render(&plan(PLAN), &no_binding(), "main", &Diff::Empty, &NONE);
     assert!(!without.contains("Acceptance tests to change"), "{without}");
 
     let none = with_tests_to_change("_none_\n");
     assert_eq!(
-        render(&plan(&none), &no_binding(), "main", &Diff::Empty),
+        render(&plan(&none), &no_binding(), "main", &Diff::Empty, &NONE),
         without
     );
+}
+
+// --- the locked acceptance tests (AT-14) --------------------------------------------
+
+/// The lines of `=== Acceptance tests ===`, up to the next heading.
+fn acceptance_section(out: &str) -> &str {
+    let after = out.split_once("=== Acceptance tests ===\n\n").unwrap().1;
+    after.split_once("\n\n=== ").unwrap().0
+}
+
+#[test]
+fn the_acceptance_tests_come_after_the_criteria_and_before_the_context() {
+    let out = render(&plan(PLAN), &no_binding(), "main", &Diff::Empty, &NONE);
+    assert!(
+        in_order(
+            &out,
+            &[
+                "=== Plan: Acceptance criteria ===",
+                "=== Acceptance tests ===",
+                "=== Plan: Implementation context ===",
+            ]
+        ),
+        "{out}"
+    );
+}
+
+#[test]
+fn skipped_says_the_coders_own_tests_are_judged_as_before() {
+    for tests in [Tests::Skipped, Tests::NotRecorded] {
+        let out = render(&plan(PLAN), &no_binding(), "main", &Diff::Empty, &tests);
+        let section = acceptance_section(&out);
+        assert!(section.starts_with("Acceptance: skipped\n\n"), "{section}");
+        assert!(section.contains("Judge the coder's own tests, if any, as before"));
+        assert!(section.contains("as information, not as a defect"));
+    }
+}
+
+#[test]
+fn required_lists_per_criterion_the_files_that_name_it() {
+    let tests = Tests::Required(Locked {
+        dir: "tests/Acceptance".to_owned(),
+        files: vec![
+            LockedFile {
+                path: "tests/Acceptance/A.php".to_owned(),
+                criteria: vec!["AC1".to_owned()],
+            },
+            LockedFile {
+                path: "tests/Acceptance/Helpers.php".to_owned(),
+                criteria: Vec::new(),
+            },
+        ],
+        unlocked: vec!["unlocked by the developer: tests/Acceptance/A.php (round 1)".to_owned()],
+    });
+    let out = render(&plan(PLAN), &no_binding(), "main", &Diff::Empty, &tests);
+    let section = acceptance_section(&out);
+    assert!(section.starts_with("Acceptance: required\n\n"), "{section}");
+    assert!(section.contains("read the tests in each file"), "{section}");
+    assert!(
+        section.contains("`asserts`, `weaker` or `unrelated`"),
+        "{section}"
+    );
+    assert!(
+        section.contains("- AC1: tests/Acceptance/A.php\n- AC2: named by no locked file\n"),
+        "{section}"
+    );
+    assert!(
+        section.contains("Locked files that name no criterion:\n- tests/Acceptance/Helpers.php"),
+        "{section}"
+    );
+    assert!(section.contains("read these with extra care"), "{section}");
+    assert!(
+        section.ends_with("- unlocked by the developer: tests/Acceptance/A.php (round 1)"),
+        "{section}"
+    );
+}
+
+#[test]
+fn required_without_a_config_section_shows_no_files() {
+    let out = render(
+        &plan(PLAN),
+        &no_binding(),
+        "main",
+        &Diff::Empty,
+        &Tests::RequiredWithoutConfig,
+    );
+    let section = acceptance_section(&out);
+    assert!(section.starts_with("Acceptance: required\n\n"), "{section}");
+    assert!(section.contains("no `acceptance:` section"), "{section}");
+    assert!(!section.contains("- AC1"), "{section}");
 }

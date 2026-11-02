@@ -1182,6 +1182,16 @@ fn the_reviewers_output_has_the_fixed_shape() {
         "AC2: not met —",
         "AC3: unclear —",
         "Why:",
+        // AT-14: the locked tests, then the code they depend on, then what
+        // `skipped` leaves uncovered.
+        "## Locked acceptance tests",
+        "AC1: asserts —",
+        "AC2: weaker —",
+        "AC3: unrelated —",
+        "AC4: no locked test",
+        "Unlocked: <file> (round <R>)",
+        "## Shared test code changed by the coder",
+        "## Criteria no test covers",
         "## Invariants the Plan names that the change appears to break",
         // M1-26: a planner miss, reported apart because its fix is in Phase 1.
         "## Invariants the Plan does not name that the change appears to break",
@@ -1206,6 +1216,58 @@ fn the_reviewers_output_has_the_fixed_shape() {
     ] {
         assert!(flat.contains(rule), "the reviewer prompt lost: {rule:?}");
     }
+}
+
+#[test]
+fn the_reviewer_judges_each_locked_test_against_its_criterion() {
+    // AT-14: run and red are proved by `acceptance lock`; meaning is judged here.
+    let (meta, body) = frontmatter("agents/reviewer.md");
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(flat.contains("### 4. Check each locked test against its criterion"));
+    assert!(flat.contains("Only when `=== Acceptance tests ===` says `Acceptance: required`"));
+    // The three verdicts, each with what it means.
+    for verdict in [
+        "**`asserts`** — the test fails if the criterion does not hold",
+        "**`weaker`** — it asserts less than the criterion says",
+        "**`unrelated`** — it does not test this criterion",
+    ] {
+        assert!(flat.contains(verdict), "no {verdict:?}");
+    }
+    assert!(flat.contains(
+        "Give the `file:line` of the assertion for every `weaker` and every `unrelated`"
+    ));
+    assert!(flat.contains("Every `weaker` and every `unrelated` has its `file:line`"));
+    // Files, not test names: the input has no names to give.
+    assert!(flat.contains("read the tests in each file"));
+    // Unlocked files, with extra care.
+    assert!(flat.contains("**Read unlocked files with extra care.**"));
+    assert!(flat.contains("say whether it still asserts its criterion"));
+    // Shared test code is a judgement on the diff.
+    assert!(flat.contains("### 5. Look for shared test code the coder changed"));
+    assert!(flat.contains("Factories, seeders and test helpers outside `acceptance.dir`"));
+    assert!(flat.contains("could make that test pass without the behavior it checks"));
+    // `skipped`: information, not a defect.
+    assert!(flat.contains("criteria **no test covers** — as information, not as a defect"));
+    assert!(
+        meta["description"].contains("whether each locked acceptance test asserts its criterion")
+    );
+}
+
+#[test]
+fn the_reviewer_treats_declared_test_changes_as_inside_scope() {
+    let (_, body) = frontmatter("agents/reviewer.md");
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(flat.contains("its `## Acceptance tests to change`, when it declares any"));
+    assert!(flat.contains(
+        "A change to a locked test that the Plan declares there — its `change` or `delete` — \
+         is approved, and is **not** reported as outside Scope"
+    ));
+    assert!(flat.contains(
+        "A change to another ticket's locked test that the Plan does **not** declare is \
+         reported here, under Changes outside Scope"
+    ));
 }
 
 #[test]
