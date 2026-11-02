@@ -41,7 +41,7 @@ run the acceptance tests.
 
 ## Status
 
-**0.1.0, the first release.** It has been beta-tested on one project. The
+**0.1.1, the first public release.** It has been beta-tested on one project. The
 Plan gate, the context files, the decision log and the locked acceptance tests
 are complete. See [`CHANGELOG.md`](CHANGELOG.md).
 

@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-11-02
+
+The first public release. No change to how Invar behaves: what is new is how
+it is published, licensed and verified. Dependencies updated: `sha2` 0.11,
+`serde-saphyr` 2.0, `serde_json` 1.0.154, and the CI actions.
 
 ### Changed
 
