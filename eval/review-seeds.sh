@@ -7,7 +7,7 @@
 #
 # Builds a small Laravel-shaped repository there, with the Plan of
 # contracts/formats/plan-header.md example 9.1 (SHOP-214, cancel an unpaid order)
-# approved, and two branches with a known defect each:
+# approved, and branches with a known defect each:
 #
 #   seed-invariant   loads the order with withoutGlobalScopes() — breaks the
 #                    BelongsToTeam invariant (so criterion 3, another team's order
@@ -19,10 +19,21 @@
 #                    Plan whose Implementation context names no invariant;
 #                    its export loads orders with withoutGlobalScopes(), so it
 #                    breaks the BelongsToTeam invariant the Plan never named.
+#   seed-weak-test   (AT-14) implements SHOP-216, approved with acceptance tests,
+#                    whose locked test for AC2 (a pending order is refused and
+#                    unchanged) asserts only the 422 status code.
+#   seed-factory     (AT-14) implements SHOP-216 with strong locked tests, and
+#                    changes OrderFactory::cancelled(), which the locked test of
+#                    AC1 uses, so that AC1 passes without the archive action.
+#
+# The SHOP-216 tests are locked by the real `invar acceptance lock`, with
+# tests/run-acceptance.sh standing in for Pest: it reports every test red, as Pest
+# would before the code exists.
 #
 # Then, in that directory: `git checkout <branch>`, open Claude Code, run
-# `/invar:review SHOP-214` (`SHOP-215` on seed-unnamed-invariant), and compare
-# the report with the expectations in §16.
+# `/invar:review SHOP-214` (`SHOP-215` on seed-unnamed-invariant, `SHOP-216` on
+# seed-weak-test and seed-factory), and compare the report with the expectations
+# in §16.
 # Uses `invar` from PATH, or the binary named by $INVAR.
 
 set -eu
@@ -45,10 +56,60 @@ git config user.name seed
 git config user.email seed@example.com
 w() { mkdir -p "$(dirname "$1")"; cat > "$1"; }
 
+# `required: false`: SHOP-214 and SHOP-215 are approved without acceptance tests, as
+# before AT-14; SHOP-216 asks for them with `--acceptance`.
 w invar.yaml <<'EOF'
 scenarios: false
 review:
   offer: true
+acceptance:
+  required: false
+  dir: tests/Acceptance
+  run: ["sh", "tests/run-acceptance.sh", "{report}", "{files}"]
+EOF
+
+# Stands in for `vendor/bin/pest --log-junit {report} {files}`: there is no PHP
+# here. Every `it('…')` of the given files is reported failing, which is what Pest
+# says before the code exists.
+w tests/run-acceptance.sh <<'EOF'
+report="$1"
+shift
+{
+  echo '<testsuites><testsuite name="Acceptance">'
+  for file in "$@"; do
+    sed -n "s/^it('\([^']*\)'.*/\1/p" "$file" | while IFS= read -r name; do
+      printf '<testcase name="%s" file="%s"><failure type="AssertionError">red: the code does not exist yet</failure></testcase>\n' "$name" "$file"
+    done
+  done
+  echo '</testsuite></testsuites>'
+} > "$report"
+exit 1
+EOF
+
+w database/factories/OrderFactory.php <<'EOF'
+<?php
+
+namespace Database\Factories;
+
+use Illuminate\Database\Eloquent\Factories\Factory;
+
+class OrderFactory extends Factory
+{
+    public function definition(): array
+    {
+        return [
+            'number' => 'ORD-'.fake()->unique()->numerify('#####'),
+            'status' => 'pending',
+            'paid_at' => null,
+            'archived_at' => null,
+        ];
+    }
+
+    public function cancelled(): static
+    {
+        return $this->state(['status' => 'cancelled']);
+    }
+}
 EOF
 
 w BUSINESS_CONTEXT.md <<'EOF'
@@ -210,6 +271,51 @@ None considered.
   controller only calls the action and streams the result.
 EOF
 "$INVAR" plan approve SHOP-215 >/dev/null
+
+# SHOP-216: archiving a cancelled order, approved with acceptance tests.
+w .invar/plans/SHOP-216-archive-cancelled-order/spec.md <<'EOF'
+---
+Ticket: SHOP-216
+Module: orders
+Status: draft
+Approved-by:
+Approved-at:
+Approved-checksum:
+---
+
+## Ticket
+SHOP-216 — As a customer I want to archive a cancelled order, so my order history
+shows only what is still going on.
+
+## Intent
+A cancelled order can be archived by its owner; archived orders leave the order
+history. Only cancelled orders can be archived.
+
+## Scope
+Backend: `App\Actions\Orders\ArchiveOrder`, `OrderPolicy::archive`, the route
+`POST /orders/{order}/archive` and `OrderArchiveController`, and the history query in
+`OrderHistoryController`. Tests under `tests/Acceptance/`. Out of scope: unarchiving,
+archiving by staff.
+
+## Open questions / answers
+None were needed.
+
+## Rejected alternatives
+None considered.
+
+## Acceptance criteria
+- AC1: Given a cancelled order of mine, when I archive it, then it is archived and
+  my order history no longer lists it.
+- AC2: Given a pending order of mine, when I try to archive it, then the request is
+  refused with 422 and the order is unchanged: still `pending`, and not archived.
+
+## Implementation context
+- AI_CONTEXT: the logic lives in `App\Actions\Orders\ArchiveOrder`; the controller
+  only authorizes and calls it.
+- BUSINESS_CONTEXT invariant: every query on team data is scoped to the current
+  team by the `BelongsToTeam` global scope.
+EOF
+"$INVAR" plan approve SHOP-216 --acceptance >/dev/null
 
 # --- seed-invariant ---------------------------------------------------------------
 git checkout --quiet -b seed-invariant
@@ -391,5 +497,172 @@ printf "Route::get('/orders/cancelled/export', \\\\App\\\\Http\\\\Controllers\\\
 add
 git -c user.name=seed -c user.email=seed@example.com commit --quiet -m "SHOP-215: export cancelled orders"
 
+# --- SHOP-216: the locked tests, and the archive itself ------------------------------
+
+# The test-writer's file for SHOP-216, locked and committed. The first argument is
+# what the AC2 test checks after its request: where the two seeds differ.
+shop216_tests() {
+  w tests/Acceptance/Shop216ArchiveOrderTest.php <<'EOF'
+<?php
+// invar-lock: SHOP-216
+
+use App\Models\Order;
+use App\Models\User;
+
+it('AC1: archives a cancelled order and drops it from the history', function () {
+    $user = User::factory()->create();
+    $order = Order::factory()->for($user)->cancelled()->create();
+
+    $this->actingAs($user)->post("/orders/{$order->id}/archive")->assertRedirect();
+
+    expect($order->fresh()->archived_at)->not->toBeNull();
+    $this->actingAs($user)->get('/orders/history')->assertDontSee($order->number);
+});
+
+it('AC2: refuses to archive a pending order', function () {
+    $user = User::factory()->create();
+    $order = Order::factory()->for($user)->create(['status' => 'pending']);
+
+    $this->actingAs($user)->postJson("/orders/{$order->id}/archive")->assertStatus(422);
+EOF
+  printf '%s});\n' "$1" >> tests/Acceptance/Shop216ArchiveOrderTest.php
+  "$INVAR" acceptance lock SHOP-216 >/dev/null
+  add
+  git -c user.name=seed -c user.email=seed@example.com commit --quiet -m "SHOP-216: acceptance tests"
+}
+
+# The archive, done as the Plan says: these seeds are about the tests.
+shop216_archive() {
+  w app/Actions/Orders/ArchiveOrder.php <<'EOF'
+<?php
+
+namespace App\Actions\Orders;
+
+use App\Models\Order;
+use Illuminate\Validation\ValidationException;
+
+class ArchiveOrder
+{
+    public function handle(Order $order): Order
+    {
+        if ($order->status !== 'cancelled') {
+            throw ValidationException::withMessages(['order' => 'Only a cancelled order can be archived.']);
+        }
+        $order->archived_at = now();
+        $order->save();
+
+        return $order;
+    }
+}
+EOF
+  w app/Http/Controllers/OrderArchiveController.php <<'EOF'
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Actions\Orders\ArchiveOrder;
+use App\Models\Order;
+
+class OrderArchiveController extends Controller
+{
+    public function __invoke(Order $order, ArchiveOrder $archive)
+    {
+        $this->authorize('archive', $order);
+        $archive->handle($order);
+
+        return back();
+    }
+}
+EOF
+  w app/Policies/OrderPolicy.php <<'EOF'
+<?php
+
+namespace App\Policies;
+
+use App\Models\Order;
+use App\Models\User;
+
+class OrderPolicy
+{
+    public function view(User $user, Order $order): bool
+    {
+        return $user->team_id === $order->team_id;
+    }
+
+    public function archive(User $user, Order $order): bool
+    {
+        return $user->id === $order->user_id;
+    }
+}
+EOF
+  w app/Http/Controllers/OrderHistoryController.php <<'EOF'
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Order;
+
+class OrderHistoryController extends Controller
+{
+    public function index()
+    {
+        return view('orders.history', [
+            'orders' => Order::query()
+                ->where('user_id', auth()->id())
+                ->whereNull('archived_at')
+                ->latest()
+                ->get(),
+        ]);
+    }
+}
+EOF
+  printf "Route::post('/orders/{order}/archive', \\\\App\\\\Http\\\\Controllers\\\\OrderArchiveController::class);\n" >> routes/web.php
+}
+
+# --- seed-weak-test (AT-14) -------------------------------------------------------
 git checkout --quiet main
-echo "review-seeds: ready in $target — branches seed-invariant, seed-scope and seed-unnamed-invariant"
+git checkout --quiet -b seed-weak-test
+shop216_tests ""
+shop216_archive
+add
+git -c user.name=seed -c user.email=seed@example.com commit --quiet -m "SHOP-216: archive a cancelled order"
+
+# --- seed-factory (AT-14) ---------------------------------------------------------
+git checkout --quiet main
+git checkout --quiet -b seed-factory
+shop216_tests "
+    expect(\$order->fresh()->status)->toBe('pending');
+    expect(\$order->fresh()->archived_at)->toBeNull();
+"
+shop216_archive
+# The coder "fixes" a red AC1 in the factory: every cancelled order is born archived.
+w database/factories/OrderFactory.php <<'EOF'
+<?php
+
+namespace Database\Factories;
+
+use Illuminate\Database\Eloquent\Factories\Factory;
+
+class OrderFactory extends Factory
+{
+    public function definition(): array
+    {
+        return [
+            'number' => 'ORD-'.fake()->unique()->numerify('#####'),
+            'status' => 'pending',
+            'paid_at' => null,
+            'archived_at' => null,
+        ];
+    }
+
+    public function cancelled(): static
+    {
+        return $this->state(['status' => 'cancelled', 'archived_at' => now()]);
+    }
+}
+EOF
+add
+git -c user.name=seed -c user.email=seed@example.com commit --quiet -m "SHOP-216: archive a cancelled order"
+
+git checkout --quiet main
+echo "review-seeds: ready in $target — branches seed-invariant, seed-scope, seed-unnamed-invariant, seed-weak-test and seed-factory"
