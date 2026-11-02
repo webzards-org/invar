@@ -80,6 +80,7 @@ a draft is already there, replace it: the newest draft is the one.
 ticket: SHOP-214
 module: orders
 type: confirmed
+acceptance: required
 ---
 
 Cancelling releases reserved stock inside the cancel transaction, through
@@ -89,6 +90,9 @@ reserved nor sellable until it ran.
 
 - `ticket` is the Plan's ticket. `module` is the Plan's `Module`, or `global`
   when the decision is not about one module.
+- `acceptance` is the value of the `acceptance:` line that
+  `invar plan check <TICKET>` prints, never what the conversation said; when
+  `plan check` prints no such line, leave the key out.
 - **No `id` and no `date`**: they are assigned when the entry is recorded.
 - Never write into `.invar/decisions/`, and never edit `spec.md`.
 

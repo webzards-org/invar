@@ -1765,6 +1765,26 @@ fn log_writes_a_draft_next_to_the_plan_and_records_nothing() {
 }
 
 #[test]
+fn log_drafts_acceptance_from_plan_check_and_not_from_the_conversation() {
+    // decision-entry.md §8.1, D-15: the value is the Plan's, which
+    // `decision approve` checks the draft against.
+    let (_, body) = frontmatter("skills/log/SKILL.md");
+    let flat = body.replace('\n', " ");
+    let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(
+        flat.contains(
+            "`acceptance` is the value of the `acceptance:` line that \
+             `invar plan check <TICKET>` prints, never what the conversation said"
+        ),
+        "{flat}"
+    );
+    assert!(flat.contains("when `plan check` prints no such line, leave the key out"));
+    // The example shows the key, and `decision validate` accepts it (below).
+    assert!(body.contains("\ntype: confirmed\nacceptance: required\n---\n"));
+}
+
+#[test]
 fn log_never_points_at_the_decision_log() {
     let (_, body) = frontmatter("skills/log/SKILL.md");
     let mut mentions = 0;
