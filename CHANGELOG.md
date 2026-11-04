@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **The planner recommends splitting a ticket too complex for one cycle.**
+  Before it asks or writes anything, it analyses what the ticket changes:
+  behaviors, modules and layers, invariants, unknowns. A ticket that holds
+  several things that could each be built and reviewed on their own gets a new
+  answer, `SPLIT`, with the reason, and no Plan. If the developer asks, the
+  planner proposes the tasks, in dependency order, each with a title and a
+  ticket description to paste into a tracker; if the developer says to plan it
+  as one, it does. Invar never creates a ticket or gives one an id. The main
+  session relays the answer and leaves the decision to the developer. No CLI or
+  contract change. See `docs/USAGE.md`, "A ticket too large for one cycle" (#124).
+
 ## 0.1.1 — 2026-11-02
 
 The first public release. No change to how Invar behaves: what is new is how
