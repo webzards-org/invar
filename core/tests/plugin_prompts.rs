@@ -112,6 +112,7 @@ fn the_planners_description_tells_the_main_session_what_to_give_it_and_what_it_r
     assert!(description.contains("ticket id"), "{description}");
     assert!(description.contains("verbatim") || description.contains("exactly as written"));
     assert!(description.contains("QUESTIONS"), "{description}");
+    assert!(description.contains("SPLIT"), "{description}");
     // The main session is told, where it chooses the agent, that the log is not
     // its to read.
     assert!(
@@ -132,6 +133,7 @@ fn the_planners_prompt_has_each_part_the_pilot_depends_on() {
         "## Implementation context is a distillate",
         "## Acceptance criteria that would catch the incident",
         "### Example of a complete Plan",
+        "## A ticket too complex for one cycle",
         "## A Plan that came back",
         "## What you never do",
     ] {
@@ -141,8 +143,9 @@ fn the_planners_prompt_has_each_part_the_pilot_depends_on() {
         );
     }
     for phrase in [
-        // The two shapes of the answer, which the skill parses by eye.
+        // The three shapes of the answer, which the skill parses by eye.
         "QUESTIONS",
+        "SPLIT\nWhy:",
         "PLAN .invar/plans/",
         // Reading is narrow.
         "Never a full scan",
@@ -179,6 +182,57 @@ fn example_plan() -> String {
         .1;
     let fenced = after.split_once("```markdown\n").unwrap().1;
     fenced.split_once("\n```\n").unwrap().0.to_owned() + "\n"
+}
+
+#[test]
+fn the_planner_decides_whether_a_ticket_is_one_cycle_before_it_asks_or_writes() {
+    let (_, body) = frontmatter("agents/planner.md");
+    let flat = body.replace('\n', " ");
+
+    // The analysis comes after reading the code and before the questions and the
+    // Plan: questions about the parts belong to the smaller tickets.
+    let decide = body
+        .find("### 3. Decide whether the ticket is one cycle")
+        .expect("the planner prompt lost the step that decides it");
+    let read = body.find("### 2. Read the code, narrowly").unwrap();
+    let ask = body.find("### 4. Decide what you cannot know").unwrap();
+    let write = body.find("### 5. Write the Plan").unwrap();
+    assert!(read < decide && decide < ask && ask < write);
+    for part in [
+        "**behaviors**",
+        "**modules and layers**",
+        "**invariants**",
+        "**unknown**",
+    ] {
+        assert!(flat.contains(part), "the analysis lost {part}");
+    }
+    // Size alone is not the measure; several things in one ticket are.
+    assert!(flat.contains("**Size alone is not a reason.**"));
+}
+
+#[test]
+fn a_split_is_recommended_and_the_developer_decides() {
+    let (_, body) = frontmatter("agents/planner.md");
+    let flat = body.replace('\n', " ");
+
+    // No Plan on disk for a ticket that is not planned.
+    assert!(flat.contains("**Write no Plan file and create no directory.**"));
+    // The tasks only on request, each with a title and a description to paste.
+    assert!(flat.contains("**Propose the tasks only when the developer asks you to.**"));
+    assert!(
+        flat.contains(
+            "Tasks:\n1. <title>\n   <ticket description>"
+                .replace('\n', " ")
+                .as_str()
+        )
+    );
+    // The decision and the tracker are the developer's.
+    assert!(flat.contains("**Whether to follow it is the developer's decision**"));
+    assert!(flat.contains("**Never give a task a ticket id**"));
+    assert!(flat.contains("(`SHOP-214-1`)"));
+    assert!(flat.contains("**Create a ticket, or give one an id**"));
+    // And "plan it as one" ends the question for this ticket.
+    assert!(flat.contains("do not return `SPLIT` again for this ticket"));
 }
 
 #[test]
