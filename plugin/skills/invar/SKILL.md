@@ -57,11 +57,21 @@ its rules still bind.
    shows it namespaced). Give it the ticket id, the ticket text **exactly as
    written** — the Plan embeds it verbatim — and nothing else. Do not read the code
    for it, and do not summarize the ticket.
-3. The planner answers with one of two things.
+3. The planner answers with one of three things.
    - **`QUESTIONS`** — put every question to the developer, as they are, in one
      message. Do not answer them yourself and do not assume. Then call the planner
      again with the ticket, the developer's answers verbatim, and the same ticket
      id. Repeat until it returns a Plan.
+   - **`SPLIT`** — the planner recommends not implementing the ticket in one
+     cycle. Put its `Why:` to the developer as it is, and ask what they want: the
+     split proposed as tasks to paste into their tracker, or the ticket planned
+     as one. **The decision is theirs**; do not make it, and do not argue for
+     either. Call the planner again with the ticket and their answer verbatim —
+     *"propose the split"* or *"plan it as one"*. When it returns `Tasks:`, give
+     them to the developer as they are and stop: the developer creates the
+     tickets in their tracker and brings each one back as a ticket of its own.
+     **Never create a ticket, never give one an id, and never start the planner
+     on a proposed task yourself.**
    - **`PLAN <path>`** — go on.
 4. Tell the developer the Plan's path and the planner's summary, and ask them to
    read the Plan, **the acceptance criteria above all**: they are what the code
@@ -293,7 +303,9 @@ implementing it.
   test-writer's;
 - run `invar acceptance unlock`, or start the test-writer on a `BLOCKED-TEST` before
   `/invar:relock` has succeeded: that is the developer's;
-- answer the planner's questions for the developer;
+- answer the planner's questions for the developer, or decide a `SPLIT` for them;
+- create a ticket, give one an id, or plan a task from a `SPLIT` before the
+  developer brings it back as a ticket;
 - record a decision entry: never `invar decision approve`, never `invar decision record`
   — the developer records it, with `/invar:log-approve`;
 - switch an agent's model without saying so;

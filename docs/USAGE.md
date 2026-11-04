@@ -63,6 +63,28 @@ Questions come to you as they are. Answer them, and the planner revises. A
 question about a regional or per-tenant value (a currency, a deadline, a tax
 rule) is always asked, because the right answer is not in the code.
 
+**A ticket too large for one cycle.** Before it asks or writes anything, the
+planner works out what the ticket changes. If it holds several things that could
+each be built and reviewed on their own (a migration with a backfill, a feature
+on top of it, and a screen reworked, say), it writes no Plan and tells you why:
+
+```
+SPLIT
+Why: three independent changes: …
+```
+
+Smaller tickets are easier to approve, to implement without guessing, and to
+review. Whether to split is your decision, since how tickets are tracked differs
+from team to team. Answer one of two ways:
+
+- *"Propose the split."* The planner lists the tasks in the order they depend
+  on each other, each with a title and a ticket description you can paste into
+  your tracker. Create the tickets there, by hand or through your tracker's MCP,
+  and start each one as a ticket of its own. Invar never creates a ticket or
+  gives one an id.
+- *"Plan it as one."* The planner writes one Plan, and does not raise the split
+  again for this ticket.
+
 **Read the Plan, the acceptance criteria above all.** They are what the code
 will be held to:
 

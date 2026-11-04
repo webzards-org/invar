@@ -112,6 +112,7 @@ fn the_planners_description_tells_the_main_session_what_to_give_it_and_what_it_r
     assert!(description.contains("ticket id"), "{description}");
     assert!(description.contains("verbatim") || description.contains("exactly as written"));
     assert!(description.contains("QUESTIONS"), "{description}");
+    assert!(description.contains("SPLIT"), "{description}");
     // The main session is told, where it chooses the agent, that the log is not
     // its to read.
     assert!(
@@ -132,6 +133,7 @@ fn the_planners_prompt_has_each_part_the_pilot_depends_on() {
         "## Implementation context is a distillate",
         "## Acceptance criteria that would catch the incident",
         "### Example of a complete Plan",
+        "## A ticket too complex for one cycle",
         "## A Plan that came back",
         "## What you never do",
     ] {
@@ -141,8 +143,9 @@ fn the_planners_prompt_has_each_part_the_pilot_depends_on() {
         );
     }
     for phrase in [
-        // The two shapes of the answer, which the skill parses by eye.
+        // The three shapes of the answer, which the skill parses by eye.
         "QUESTIONS",
+        "SPLIT\nWhy:",
         "PLAN .invar/plans/",
         // Reading is narrow.
         "Never a full scan",
@@ -179,6 +182,57 @@ fn example_plan() -> String {
         .1;
     let fenced = after.split_once("```markdown\n").unwrap().1;
     fenced.split_once("\n```\n").unwrap().0.to_owned() + "\n"
+}
+
+#[test]
+fn the_planner_decides_whether_a_ticket_is_one_cycle_before_it_asks_or_writes() {
+    let (_, body) = frontmatter("agents/planner.md");
+    let flat = body.replace('\n', " ");
+
+    // The analysis comes after reading the code and before the questions and the
+    // Plan: questions about the parts belong to the smaller tickets.
+    let decide = body
+        .find("### 3. Decide whether the ticket is one cycle")
+        .expect("the planner prompt lost the step that decides it");
+    let read = body.find("### 2. Read the code, narrowly").unwrap();
+    let ask = body.find("### 4. Decide what you cannot know").unwrap();
+    let write = body.find("### 5. Write the Plan").unwrap();
+    assert!(read < decide && decide < ask && ask < write);
+    for part in [
+        "**behaviors**",
+        "**modules and layers**",
+        "**invariants**",
+        "**unknown**",
+    ] {
+        assert!(flat.contains(part), "the analysis lost {part}");
+    }
+    // Size alone is not the measure; several things in one ticket are.
+    assert!(flat.contains("**Size alone is not a reason.**"));
+}
+
+#[test]
+fn a_split_is_recommended_and_the_developer_decides() {
+    let (_, body) = frontmatter("agents/planner.md");
+    let flat = body.replace('\n', " ");
+
+    // No Plan on disk for a ticket that is not planned.
+    assert!(flat.contains("**Write no Plan file and create no directory.**"));
+    // The tasks only on request, each with a title and a description to paste.
+    assert!(flat.contains("**Propose the tasks only when the developer asks you to.**"));
+    assert!(
+        flat.contains(
+            "Tasks:\n1. <title>\n   <ticket description>"
+                .replace('\n', " ")
+                .as_str()
+        )
+    );
+    // The decision and the tracker are the developer's.
+    assert!(flat.contains("**Whether to follow it is the developer's decision**"));
+    assert!(flat.contains("**Never give a task a ticket id**"));
+    assert!(flat.contains("(`SHOP-214-1`)"));
+    assert!(flat.contains("**Create a ticket, or give one an id**"));
+    // And "plan it as one" ends the question for this ticket.
+    assert!(flat.contains("do not return `SPLIT` again for this ticket"));
 }
 
 #[test]
@@ -299,6 +353,53 @@ fn the_skill_has_every_part_of_the_cycle() {
         "## Never",
     ] {
         assert!(body.contains(heading), "the skill lost `{heading}`");
+    }
+}
+
+#[test]
+fn the_skill_relays_a_split_and_leaves_the_decision_and_the_tracker_to_the_developer() {
+    let flat = one_line(&skill().1);
+
+    // Every shape the planner returns is one the skill handles.
+    let (_, planner) = frontmatter("agents/planner.md");
+    assert!(planner.contains("Exactly one of three things"));
+    assert!(flat.contains("The planner answers with one of three things."));
+    for shape in ["**`QUESTIONS`**", "**`SPLIT`**", "**`PLAN <path>`**"] {
+        assert!(flat.contains(shape), "the skill does not handle {shape}");
+    }
+    // Relayed as it is; the choice is asked, never made.
+    assert!(flat.contains("Put its `Why:` to the developer as it is"));
+    assert!(flat.contains("**The decision is theirs**"));
+    assert!(flat.contains("*\"propose the split\"* or *\"plan it as one\"*"));
+    // The tracker is the developer's: no ticket, no id, no cycle for a task.
+    assert!(flat.contains(
+        "**Never create a ticket, never give one an id, and never start the planner \
+         on a proposed task yourself.**"
+    ));
+    assert!(flat.contains("or decide a `SPLIT` for them"));
+}
+
+#[test]
+fn no_prompt_tells_an_agent_to_create_a_ticket_or_number_one() {
+    // A split never reaches the tracker through an agent, and no prompt invents an
+    // id: what a prompt says about tickets it says as a prohibition.
+    let mut texts = vec![skill().1];
+    texts.extend(agents().iter().map(|a| frontmatter(a).1));
+    for text in texts {
+        let flat = one_line(&text);
+        assert!(!flat.contains("SHOP-214-1:"), "a prompt numbers a ticket");
+        for line in flat.split(". ") {
+            let lower = line.to_lowercase();
+            if lower.contains("create a ticket") || lower.contains("create the ticket") {
+                assert!(
+                    lower.contains("never")
+                        || lower.contains("the developer creates")
+                        || lower.contains("**create a ticket, or give one an id**")
+                        || lower.contains("creates the tickets"),
+                    "a prompt tells an agent to create a ticket: {line}"
+                );
+            }
+        }
     }
 }
 
