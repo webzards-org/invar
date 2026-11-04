@@ -357,6 +357,53 @@ fn the_skill_has_every_part_of_the_cycle() {
 }
 
 #[test]
+fn the_skill_relays_a_split_and_leaves_the_decision_and_the_tracker_to_the_developer() {
+    let flat = one_line(&skill().1);
+
+    // Every shape the planner returns is one the skill handles.
+    let (_, planner) = frontmatter("agents/planner.md");
+    assert!(planner.contains("Exactly one of three things"));
+    assert!(flat.contains("The planner answers with one of three things."));
+    for shape in ["**`QUESTIONS`**", "**`SPLIT`**", "**`PLAN <path>`**"] {
+        assert!(flat.contains(shape), "the skill does not handle {shape}");
+    }
+    // Relayed as it is; the choice is asked, never made.
+    assert!(flat.contains("Put its `Why:` to the developer as it is"));
+    assert!(flat.contains("**The decision is theirs**"));
+    assert!(flat.contains("*\"propose the split\"* or *\"plan it as one\"*"));
+    // The tracker is the developer's: no ticket, no id, no cycle for a task.
+    assert!(flat.contains(
+        "**Never create a ticket, never give one an id, and never start the planner \
+         on a proposed task yourself.**"
+    ));
+    assert!(flat.contains("or decide a `SPLIT` for them"));
+}
+
+#[test]
+fn no_prompt_tells_an_agent_to_create_a_ticket_or_number_one() {
+    // A split never reaches the tracker through an agent, and no prompt invents an
+    // id: what a prompt says about tickets it says as a prohibition.
+    let mut texts = vec![skill().1];
+    texts.extend(agents().iter().map(|a| frontmatter(a).1));
+    for text in texts {
+        let flat = one_line(&text);
+        assert!(!flat.contains("SHOP-214-1:"), "a prompt numbers a ticket");
+        for line in flat.split(". ") {
+            let lower = line.to_lowercase();
+            if lower.contains("create a ticket") || lower.contains("create the ticket") {
+                assert!(
+                    lower.contains("never")
+                        || lower.contains("the developer creates")
+                        || lower.contains("**create a ticket, or give one an id**")
+                        || lower.contains("creates the tickets"),
+                    "a prompt tells an agent to create a ticket: {line}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn the_skill_tells_the_agent_to_skip_the_cycle_for_trivial_work_and_to_say_so() {
     let (_, body) = skill();
 
