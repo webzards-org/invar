@@ -1,6 +1,9 @@
 # Contributing
 
-Section references (§4d, §13a, …) point into [`docs/DESIGN.md`](docs/DESIGN.md).
+Section references (§4d, §13a, …) point into the previous design document,
+v3.1, kept in history at
+[`docs/DESIGN.md` at c29122d](https://github.com/webzards-org/invar/blob/c29122d/docs/DESIGN.md).
+[`docs/DESIGN.md`](docs/DESIGN.md) explains how the system works today.
 
 ## Issues first
 
@@ -101,7 +104,8 @@ docs(contracts): specify the .feature header/body boundary
 - Every commit is signed off (`git commit -s`)
 - Acceptance criteria of the linked issue are all ticked
 - Anything that changed a documented behavior is reflected in
-  `docs/DESIGN.md`, in the same PR
+  `docs/USAGE.md` (and `docs/DESIGN.md` where it changes how the system
+  works), in the same PR
 
 ## CI
 

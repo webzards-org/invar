@@ -45,10 +45,13 @@ the structure enforce it, or does it only ask the agent to behave?
 2. `plugin/NOTES.md` records what was verified against Claude Code, and why
    the plugin is built the way it is. Read the relevant section before
    changing anything under `plugin/`.
-3. `docs/DESIGN.md` (v3.1) gives the reasoning. **Parts of it describe what is
-   not built** (FastAPI, `.feature` files, `invar generate`, language
-   adapters, lint); where it disagrees with the code or a contract, the code
-   and the contract win.
+3. `docs/DESIGN.md` explains how the system works and why, as built today.
+   Section references in code and contracts (§4d, §13a, …) point into the
+   previous revision, v3.1, at
+   https://github.com/webzards-org/invar/blob/c29122d/docs/DESIGN.md. Parts of
+   v3.1 describe what is not built (FastAPI, `.feature` files,
+   `invar generate`, language adapters, lint); where it disagrees with the
+   code or a contract, the code and the contract win.
 
 Older comments and contracts cite decision ids such as `L-3` or `A-2` from
 task files that are no longer in the repository. Treat the contract or code
