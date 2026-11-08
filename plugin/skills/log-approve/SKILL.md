@@ -1,7 +1,7 @@
 ---
 name: log-approve
 description: The developer's approval of a draft decision entry, from inside Claude Code. Records .invar/plans/<TICKET>-<slug>/decision.md in the decision log as it is now and removes the draft. Only the developer can run it.
-argument-hint: [ticket]
+argument-hint: "[ticket]"
 disable-model-invocation: true
 allowed-tools: Bash(invar decision approve *)
 ---

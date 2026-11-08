@@ -34,8 +34,9 @@ project" at the start of each session; it is harmless.
 
 ### Hooks
 
-Each hook runs one command of the plugin's own `invar` binary, through the
-launcher `bin/invar`, with a 10-second timeout:
+Each hook runs one command of the plugin's own `invar` binary: `sh` runs the
+launcher `bin/invar`, which runs the binary for your platform, with a 10-second
+timeout:
 
 | Event | When | Command |
 |---|---|---|
@@ -133,9 +134,8 @@ it with the arguments unchanged. The source is on the `main` branch of
 [webzards-org/invar](https://github.com/webzards-org/invar), in `core/`. The
 binaries are built by `.github/workflows/release.yml` on GitHub's runners, from
 the tagged commit, with no build cache, and each carries a signed build
-provenance attestation. Check an installed binary with
-`gh attestation verify <file> --repo webzards-org/invar`; see
-[Verifying a binary](https://github.com/webzards-org/invar/blob/main/docs/INSTALL.md#verifying-a-binary).
+provenance attestation. How to check an installed binary against it is in
+[docs/INSTALL.md, "Verifying a binary"](https://github.com/webzards-org/invar/blob/main/docs/INSTALL.md#verifying-a-binary).
 
 ## License
 

@@ -5,8 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/invar",
-            "args": ["context", "show", "--binding"],
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/invar", "context", "show", "--binding"],
             "timeout": 10
           }
         ]
@@ -18,8 +18,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/invar",
-            "args": ["plan", "validate", "--all-drafts", "--hook"],
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/invar", "plan", "validate", "--all-drafts", "--hook"],
             "timeout": 10
           }
         ]
@@ -31,8 +31,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/invar",
-            "args": ["context", "show", "--conventions", "--hook"],
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/invar", "context", "show", "--conventions", "--hook"],
             "timeout": 10
           }
         ]
@@ -42,8 +42,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/invar",
-            "args": ["context", "show", "--conventions", "--hook"],
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/invar", "context", "show", "--conventions", "--hook"],
             "timeout": 10
           }
         ]
@@ -55,8 +55,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/invar",
-            "args": ["plan", "guard"],
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/invar", "plan", "guard"],
             "timeout": 10
           }
         ]

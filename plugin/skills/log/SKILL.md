@@ -1,7 +1,7 @@
 ---
 name: log
 description: Drafts the decision entry for a ticket at the end of an invar cycle, for the developer to read before it is recorded. Writes .invar/plans/<TICKET>-<slug>/decision.md and checks it; records nothing. Only the developer can run it.
-argument-hint: [ticket]
+argument-hint: "[ticket]"
 disable-model-invocation: true
 ---
 

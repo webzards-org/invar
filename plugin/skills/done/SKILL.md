@@ -1,7 +1,7 @@
 ---
 name: done
 description: The developer's close of an invar cycle, from inside Claude Code. Runs invar done, which checks the approved Plan once more, deletes it and stages the deletion, or commits it when asked. Only the developer can run it.
-argument-hint: [ticket] [--commit <message> | --no-commit]
+argument-hint: "[ticket] [--commit <message> | --no-commit]"
 disable-model-invocation: true
 allowed-tools: Bash(invar done *)
 ---

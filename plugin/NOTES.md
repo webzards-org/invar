@@ -704,7 +704,7 @@ record what the spike established and stay as they are.
 ### The hooks
 
 Each is one invocation of `${CLAUDE_PLUGIN_ROOT}/bin/invar` in exec form (§7),
-with a timeout, and none runs `plan approve` or `done`. There is no lint hook
+run by `sh` since 0.1.2 (below), with a timeout, and none runs `plan approve` or `done`. There is no lint hook
 and no test hook (L-3). Three since M1-17; the fourth, `SubagentStart`, since
 M1-24 (§17).
 
@@ -718,6 +718,37 @@ M1-24 (§17).
 `core/tests/plugin.rs` checks all of this by reading `hooks.json`, and runs each
 hook's command line against the real binary, so a plugin written for another
 version of `invar` fails in CI.
+
+### `sh` in `command`, the launcher first in `args` — since 0.1.2
+
+Until 0.1.2 a hook's `command` was the launcher itself,
+`${CLAUDE_PLUGIN_ROOT}/bin/invar`, run by its executable bit and its `#!/bin/sh`
+line. The plugin directory's Validate report raised that as a policy hold: a hook
+whose program is a file of the plugin, started directly, does not say what runs it.
+Every hook now names the interpreter and passes the launcher as its first
+argument:
+
+```json
+{
+  "type": "command",
+  "command": "sh",
+  "args": ["${CLAUDE_PLUGIN_ROOT}/bin/invar", "plan", "guard"],
+  "timeout": 10
+}
+```
+
+Nothing else changes. It is still exec form (each `args` element one argument, no
+shell parsing of the line, so a space in the plugin path cannot break it), still
+one CLI call per hook, and still the launcher, which runs the same: under `sh`,
+`$0` is the launcher's path, so it finds `invar-<os>-<arch>` beside it, and its
+`exec` hands back the binary's exit code unchanged, so a `PreToolUse` deny is still
+exit 2 and a missing binary still 127. The hooks no longer depend on the
+launcher's executable bit; the agent's bare `invar` on `PATH` still does, so
+`release.yml` keeps the `chmod`. `core/tests/plugin.rs` checks the shape (`sh`,
+then the launcher, then the `invar` arguments) and runs the launcher through `sh`.
+
+Not yet run in a Claude Code session: `claude plugin validate --strict` accepts
+it, and the launcher test runs it as the hook would.
 
 ### `SubagentStop` needs `--hook`, and the reason is in §7
 

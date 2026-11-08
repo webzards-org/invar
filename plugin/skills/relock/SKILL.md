@@ -1,7 +1,7 @@
 ---
 name: relock
 description: The developer's decision that a locked acceptance test is wrong, from inside Claude Code. Runs invar acceptance unlock on the named files, and starts the test-writer to fix them when they are unlocked. Only the developer can run it.
-argument-hint: <ticket> <file>...
+argument-hint: "<ticket> <file>..."
 disable-model-invocation: true
 allowed-tools: Bash(invar acceptance unlock *)
 ---

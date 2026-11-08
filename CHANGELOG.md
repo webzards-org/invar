@@ -27,6 +27,23 @@
   `description` now names the locked tests, the decision log and the
   developer-only commands (#129).
 
+### Changed
+
+- **Hooks name their interpreter.** Each hook now runs `sh` with the launcher
+  `${CLAUDE_PLUGIN_ROOT}/bin/invar` as its first argument, instead of running
+  the launcher directly, as the plugin directory's review asks. Each hook is
+  still one `invar` call with the same arguments, exit codes pass through
+  unchanged, and the hooks no longer depend on the launcher's executable bit
+  (#133).
+
+### Fixed
+
+- **The `argument-hint` of the six slash commands is quoted.** Unquoted,
+  `[ticket] [--acceptance | --no-acceptance] [--no-start]` and
+  `[ticket] [--commit <message> | --no-commit]` were not valid YAML, and
+  `[ticket]` alone read as a list, not as text. CI now reads the front matter
+  of every agent and skill with a real YAML parser (#133).
+
 ## 0.1.1 — 2026-11-02
 
 The first public release. No change to how Invar behaves: what is new is how
