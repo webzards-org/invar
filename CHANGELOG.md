@@ -14,6 +14,18 @@
   as one, it does. Invar never creates a ticket or gives one an id. The main
   session relays the answer and leaves the decision to the developer. No CLI or
   contract change. See `docs/USAGE.md`, "A ticket too large for one cycle" (#124).
+- **The plugin on `dist` has a README for its users**, `invar/README.md`, for
+  Anthropic's plugin directory, which shows it as the listing's description. It
+  says what Invar is, how to install it, and plainly what the plugin runs and
+  changes in a project: each hook and the command it runs, the agents and
+  skills, every file `invar init` and the cycle write (including the Read deny
+  rule for `.invar/decisions/` in `.claude/settings.json`), the git commands,
+  the project's own test command, and that the CLI makes no network requests,
+  calls no model and sends no telemetry; and how the binaries are built and
+  verified. Its source is `plugin/README.dist.md`, which the release copies;
+  `plugin/README.md` stays the contributor README. The manifest's
+  `description` now names the locked tests, the decision log and the
+  developer-only commands (#129).
 
 ## 0.1.1 — 2026-11-02
 

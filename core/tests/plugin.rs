@@ -259,6 +259,40 @@ fn the_marketplace_lists_the_plugin_where_the_release_puts_it() {
     assert_eq!(plugins[0]["source"], "./invar");
 }
 
+#[test]
+fn the_user_readme_is_long_enough_for_the_directory_and_the_release_ships_it() {
+    // Anthropic's plugin directory requires a README of at least 40 words in the
+    // plugin folder, words in code blocks not counted, and shows it as the
+    // listing's description. `plugin/README.md` is for contributors; the release
+    // copies `README.dist.md` into `invar/` as `README.md`.
+    let text = fs::read_to_string(plugin_dir().join("README.dist.md")).unwrap();
+    let mut in_code = false;
+    let mut words = 0;
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+            continue;
+        }
+        if !in_code {
+            words += line.split_whitespace().count();
+        }
+    }
+    assert!(!in_code, "README.dist.md has an unclosed code block");
+    assert!(
+        words >= 40,
+        "README.dist.md has {words} words outside code blocks"
+    );
+
+    let release = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/release.yml"),
+    )
+    .unwrap();
+    assert!(
+        release.contains("cp plugin/README.dist.md dist/invar/README.md"),
+        "release.yml does not copy README.dist.md into the plugin folder on dist"
+    );
+}
+
 /// Every file under `plugin/`, relative to it, in sorted order.
 fn plugin_files() -> Vec<PathBuf> {
     fn walk(dir: &Path, root: &Path, into: &mut Vec<PathBuf>) {

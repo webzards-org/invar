@@ -97,8 +97,10 @@ jobs:
           path: artifacts
 
       # The marketplace is `dist` itself: `.claude-plugin/marketplace.json` at
-      # its root, the plugin in `invar/`. Only what runs is copied, and the
-      # licenses that cover it — no notes, no README, no spike.
+      # its root, the plugin in `invar/`. Only what runs is copied, the
+      # licenses that cover it, and the user-facing README: `README.dist.md`
+      # becomes `invar/README.md`, which the plugin directory shows as the
+      # listing's description. No notes and no contributor README.
       - name: Assemble the marketplace
         run: |
           set -eu
@@ -106,6 +108,7 @@ jobs:
           cp plugin/marketplace.json dist/.claude-plugin/marketplace.json
           cp LICENSE-MIT LICENSE-APACHE dist/
           cp LICENSE-MIT LICENSE-APACHE dist/invar/
+          cp plugin/README.dist.md dist/invar/README.md
           for part in .claude-plugin hooks agents skills bin; do
             if [ -e "plugin/$part" ]; then
               cp -R "plugin/$part" dist/invar/
