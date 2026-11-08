@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+## 0.1.3 — 2026-11-08
+
+Answers the plugin directory's review. No change to what the CLI decides.
+
+### Changed
+
+- **Hooks name their interpreter.** Each hook now runs `sh` with the launcher
+  `${CLAUDE_PLUGIN_ROOT}/bin/invar` as its first argument, instead of running
+  the launcher directly, as the plugin directory's review asks. Each hook is
+  still one `invar` call with the same arguments, exit codes pass through
+  unchanged, and the hooks no longer depend on the launcher's executable bit
+  (#133).
+
+### Fixed
+
+- **The `argument-hint` of the six slash commands is quoted.** Unquoted,
+  `[ticket] [--acceptance | --no-acceptance] [--no-start]` and
+  `[ticket] [--commit <message> | --no-commit]` were not valid YAML, and
+  `[ticket]` alone read as a list, not as text. CI now reads the front matter
+  of every agent and skill with a real YAML parser (#133).
+
+## 0.1.2 — 2026-11-08
+
+Tagged and published on `dist` without a version bump: its `plugin.json` and
+`invar --version` say 0.1.1, so `claude plugin update` did not offer it. 0.1.3
+carries the same changes with the right version. The release workflow builds the
+macOS binaries on `macos-15`, since GitHub retired the macOS 14 runners (#131).
+
 ### Added
 
 - **The planner recommends splitting a ticket too complex for one cycle.**

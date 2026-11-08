@@ -4,8 +4,8 @@
 //! back, and everything that decides anything is in the CLI. That is a property
 //! these tests can check by reading `plugin/`, not an intention:
 //!
-//! - **four hooks, each one CLI call** in exec form — no script, no pipe, no
-//!   `&&`;
+//! - **five hooks, each one CLI call** in exec form, `sh` running the launcher —
+//!   no other script, no pipe, no `&&`;
 //! - **no hook ever runs what is the developer's** — `plan approve`, `done`;
 //! - **no logic in the plugin** beyond the launcher that picks a binary;
 //! - **the hooks and the CLI agree**: every hook's command line is run here
@@ -42,7 +42,11 @@ fn read_json(relative: &str) -> Value {
 struct Hook {
     event: String,
     matcher: Option<String>,
+    /// The program Claude Code starts: the interpreter.
     command: String,
+    /// The script it runs: the first element of `args`.
+    script: String,
+    /// The `invar` command line: the rest of `args`.
     args: Vec<String>,
     timeout: u64,
 }
@@ -57,18 +61,20 @@ fn hooks() -> Vec<Hook> {
             let matcher = group.get("matcher").map(|m| m.as_str().unwrap().to_owned());
             for hook in group["hooks"].as_array().expect("a group holds its hooks") {
                 assert_eq!(hook["type"], "command", "{event}: only command hooks");
+                let mut args: Vec<String> = hook["args"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("{event}: a hook without `args` is not exec form"))
+                    .iter()
+                    .map(|arg| arg.as_str().unwrap().to_owned())
+                    .collect();
+                assert!(!args.is_empty(), "{event}: `args` is empty");
+                let script = args.remove(0);
                 found.push(Hook {
                     event: event.clone(),
                     matcher: matcher.clone(),
                     command: hook["command"].as_str().unwrap().to_owned(),
-                    args: hook["args"]
-                        .as_array()
-                        .unwrap_or_else(|| {
-                            panic!("{event}: a hook without `args` is not exec form")
-                        })
-                        .iter()
-                        .map(|arg| arg.as_str().unwrap().to_owned())
-                        .collect(),
+                    script,
+                    args,
                     timeout: hook["timeout"]
                         .as_u64()
                         .unwrap_or_else(|| panic!("{event}: a hook without a timeout")),
@@ -116,9 +122,17 @@ fn there_are_exactly_five_hooks_on_exactly_these_events() {
 #[test]
 fn each_hook_is_one_invocation_of_the_launcher_in_exec_form() {
     for hook in hooks() {
+        // The interpreter in `command`, the launcher first in `args`: the
+        // plugin directory asks for a hook's program to be named, not a script
+        // of the plugin's run by its executable bit (plugin/NOTES.md §13).
         assert_eq!(
-            hook.command, "${CLAUDE_PLUGIN_ROOT}/bin/invar",
-            "{}: a hook runs the launcher by its plugin path",
+            hook.command, "sh",
+            "{}: a hook names its interpreter",
+            hook.event
+        );
+        assert_eq!(
+            hook.script, "${CLAUDE_PLUGIN_ROOT}/bin/invar",
+            "{}: a hook runs the launcher by its plugin path, as the first argument",
             hook.event
         );
         assert!(!hook.args.is_empty(), "{}: no subcommand", hook.event);
@@ -590,6 +604,27 @@ mod launcher {
             // The exit code is the binary's own, not the launcher's.
             .code(7)
             .stdout("plan\nguard\n--flag\ntwo words\nthe hook input");
+    }
+
+    #[test]
+    fn run_by_sh_as_the_hooks_run_it_it_behaves_the_same() {
+        // The hooks start `sh` with the launcher as its first argument. `$0` is
+        // then the launcher's path, so it finds the binary beside it, and the
+        // binary's exit code still comes back unchanged: 2 must stay 2 for a
+        // `PreToolUse` deny. The launcher need not even be executable.
+        let (_dir, bin) = installed();
+        fake_binary(&bin, 0o755);
+        fs::set_permissions(bin.join("invar"), fs::Permissions::from_mode(0o644)).unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+
+        Command::new("sh")
+            .arg(bin.join("invar"))
+            .args(["plan", "guard", "two words"])
+            .current_dir(elsewhere.path())
+            .write_stdin("the hook input")
+            .assert()
+            .code(7)
+            .stdout("plan\nguard\ntwo words\nthe hook input");
     }
 
     #[test]

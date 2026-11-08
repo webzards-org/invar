@@ -1,7 +1,7 @@
 ---
 name: approve
 description: The developer's approval of a Plan, from inside Claude Code. Runs invar plan approve, shows the Acceptance criteria and the result, and starts Phase 2 at once when the approval is recorded, unless --no-start is given. Only the developer can run it.
-argument-hint: [ticket] [--acceptance | --no-acceptance] [--no-start]
+argument-hint: "[ticket] [--acceptance | --no-acceptance] [--no-start]"
 disable-model-invocation: true
 allowed-tools: Bash(invar plan approve *)
 ---

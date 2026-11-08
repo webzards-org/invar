@@ -33,8 +33,37 @@ fn read(relative: &str) -> String {
     fs::read_to_string(&path).unwrap_or_else(|err| panic!("cannot read {}: {err}", path.display()))
 }
 
-/// The flat `key: value` frontmatter of an agent or a skill, and what follows.
+/// One value of a frontmatter: the only two kinds an agent or a skill uses.
+#[derive(Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum Field {
+    Flag(bool),
+    Text(String),
+}
+
+/// The frontmatter of an agent or a skill, read with a real YAML parser, and what
+/// follows. Every value must be a string or a boolean: a value YAML reads as a list
+/// or a map (an unquoted `[ticket]`, a `: ` inside a description) panics here, because
+/// Claude Code would read it the same way. Booleans are returned as `true`/`false`.
 fn frontmatter(relative: &str) -> (BTreeMap<String, String>, String) {
+    let (head, body) = frontmatter_text(relative);
+    let fields: BTreeMap<String, Field> = serde_saphyr::from_str(&head)
+        .unwrap_or_else(|err| panic!("{relative}: the frontmatter is not flat YAML: {err}"));
+    let meta = fields
+        .into_iter()
+        .map(|(key, value)| {
+            let value = match value {
+                Field::Flag(flag) => flag.to_string(),
+                Field::Text(text) => text,
+            };
+            (key, value)
+        })
+        .collect();
+    (meta, body)
+}
+
+/// The frontmatter of an agent or a skill as written, and what follows.
+fn frontmatter_text(relative: &str) -> (String, String) {
     let text = read(relative);
     let rest = text
         .strip_prefix("---\n")
@@ -42,16 +71,24 @@ fn frontmatter(relative: &str) -> (BTreeMap<String, String>, String) {
     let (head, body) = rest
         .split_once("\n---\n")
         .unwrap_or_else(|| panic!("{relative}: the frontmatter is never closed"));
-    let meta = head
-        .lines()
-        .map(|line| {
-            let (key, value) = line
-                .split_once(": ")
-                .unwrap_or_else(|| panic!("{relative}: `{line}` is not `key: value`"));
-            (key.to_owned(), value.to_owned())
-        })
-        .collect();
-    (meta, body.to_owned())
+    (head.to_owned(), body.to_owned())
+}
+
+/// Every agent and skill in the plugin, relative to it.
+fn prompt_files() -> Vec<String> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(plugin_dir().join("agents")).unwrap() {
+        let name = entry.unwrap().file_name().into_string().unwrap();
+        if name.ends_with(".md") {
+            files.push(format!("agents/{name}"));
+        }
+    }
+    for entry in fs::read_dir(plugin_dir().join("skills")).unwrap() {
+        let name = entry.unwrap().file_name().into_string().unwrap();
+        files.push(format!("skills/{name}/SKILL.md"));
+    }
+    files.sort();
+    files
 }
 
 // --- the planner ---------------------------------------------------------------------
@@ -74,16 +111,40 @@ fn the_planner_is_the_agent_the_stop_hook_selects() {
 }
 
 #[test]
-fn the_frontmatter_stays_valid_yaml_without_quoting() {
-    // A flat reader like this one is what an unquoted value can be read by; a
-    // `: ` or a ` #` inside a value would make a real YAML parser read it
-    // differently.
-    for file in ["agents/planner.md", "skills/invar/SKILL.md"] {
+fn every_frontmatter_parses_as_yaml_and_quotes_what_yaml_would_misread() {
+    // The plugin directory parses the frontmatter of every agent and skill with a
+    // real YAML parser. `frontmatter` does the same, and refuses any value that is
+    // not a string or a boolean, such as an unquoted `[ticket]`, which YAML reads as
+    // a list. A description with `#` or `: ` in it is written in double quotes: one
+    // parser reads ` #` as a comment, another `: ` as a nested key.
+    let files = prompt_files();
+    assert!(files.len() >= 11, "{files:?}");
+    for file in &files {
         let (meta, _) = frontmatter(file);
-        for (key, value) in &meta {
-            assert!(!value.contains(": "), "{file}: `{key}` contains `: `");
-            assert!(!value.contains(" #"), "{file}: `{key}` contains ` #`");
-            assert!(!value.is_empty(), "{file}: `{key}` is empty");
+        for key in ["name", "description"] {
+            assert!(
+                meta.get(key).is_some_and(|value| !value.is_empty()),
+                "{file}: no `{key}`"
+            );
+        }
+        let (head, _) = frontmatter_text(file);
+        for line in head.lines() {
+            let Some((key, raw)) = line.split_once(": ") else {
+                continue;
+            };
+            let value = &meta[key];
+            if key == "description" && (value.contains('#') || value.contains(": ")) {
+                assert!(
+                    raw.starts_with('"') && raw.ends_with('"'),
+                    "{file}: the description contains `#` or `: ` and is not in double quotes"
+                );
+            }
+            if key == "argument-hint" {
+                assert!(
+                    raw.starts_with('"') && raw.ends_with('"'),
+                    "{file}: `argument-hint` is not in double quotes: `[...]` is a YAML list"
+                );
+            }
         }
     }
 }

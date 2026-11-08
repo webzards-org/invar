@@ -1,7 +1,7 @@
 ---
 name: review
 description: The advisory check before a pull request. Runs the reviewer agent on the approved Plan of a ticket and shows its report. Only the developer can run it.
-argument-hint: [ticket]
+argument-hint: "[ticket]"
 disable-model-invocation: true
 ---
 
