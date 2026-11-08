@@ -719,6 +719,28 @@ M1-24 (§17).
 hook's command line against the real binary, so a plugin written for another
 version of `invar` fails in CI.
 
+### The listing icon — the one non-text file in the plugin
+
+`.claude-plugin/icon.png` is the icon the plugin directory shows for the listing.
+The directory reads it from the plugin folder, which is `invar/.claude-plugin/icon.png`
+on `dist`. `release.yml` copies `plugin/.claude-plugin/` there, so the file lives in
+`plugin/`. A copy at the repository root never reaches `dist`. The directory needs a
+square PNG, 512 to 2048 px per side, under 2 MB.
+
+**It takes the icon once.** The icon is read the first time the plugin is saved or
+submitted in the developer portal. Adding or changing it later does not change the
+listing. So the icon has to be on `dist` before the first save, and replacing the file
+afterwards changes nothing in the directory.
+
+**Why an image is allowed in a plugin with no logic.** Everything else in `plugin/` is
+data (`.json`), prose (`.md`) or the launcher, and `core/tests/plugin.rs` fails on
+anything else, so that no logic and no unreviewed binary gets in (§13b). The icon is an
+image, not code. The test allows **exactly the path** `.claude-plugin/icon.png`, not
+`*.png` or images in general, so nothing else can get in beside it.
+`the_listing_icon_meets_the_directory_rules` checks the size limit, the PNG signature,
+IHDR as the first chunk and a square of 512 to 2048 px. It reads only the header, so
+no image library is needed.
+
 ### `sh` in `command`, the launcher first in `args` — since 0.1.3
 
 Until 0.1.3 a hook's `command` was the launcher itself,

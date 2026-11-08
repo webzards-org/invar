@@ -338,12 +338,66 @@ fn the_plugin_holds_no_script_but_the_launcher() {
         let is_data_or_prose = matches!(extension, "json" | "md");
         let is_launcher = shown == "bin/invar";
         let is_built_binary = shown.starts_with("bin/invar-");
+        // The plugin directory's listing icon: an image, not logic. Exactly this
+        // one path is allowed, not images in general, so that no other binary
+        // can slip into the plugin behind it (plugin/NOTES.md §13).
+        let is_listing_icon = shown == LISTING_ICON;
         assert!(
-            is_data_or_prose || is_launcher || is_built_binary,
+            is_data_or_prose || is_launcher || is_built_binary || is_listing_icon,
             "plugin/{shown} is neither data, prose nor the launcher: logic does not belong in \
              the plugin (§13b)"
         );
     }
+}
+
+/// Where the plugin directory takes the listing icon from, relative to the plugin.
+const LISTING_ICON: &str = ".claude-plugin/icon.png";
+
+#[test]
+fn the_listing_icon_meets_the_directory_rules() {
+    // The directory takes the icon once, the first time the plugin is saved or
+    // submitted in the developer portal: a square PNG, 512 to 2048 px per side,
+    // under 2 MB. Only the header is read, so no image library is needed.
+    let path = plugin_dir().join(LISTING_ICON);
+    let bytes = fs::read(&path).unwrap_or_else(|err| {
+        panic!(
+            "cannot read the listing icon plugin/{LISTING_ICON}: {err}. The directory takes it \
+             from there; release.yml copies plugin/.claude-plugin/ to dist"
+        )
+    });
+
+    const LIMIT: usize = 2 * 1024 * 1024;
+    assert!(
+        bytes.len() < LIMIT,
+        "the listing icon is {} bytes; the directory accepts under {LIMIT}",
+        bytes.len()
+    );
+    const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+    assert!(
+        bytes.starts_with(SIGNATURE),
+        "the listing icon is not a PNG: it does not start with the PNG signature"
+    );
+    // The signature, then the first chunk: a 4-byte length, its type, and for IHDR
+    // the width and the height, each a big-endian u32.
+    assert!(
+        bytes.len() >= 24,
+        "the listing icon is too short to hold a PNG header"
+    );
+    assert_eq!(
+        &bytes[12..16],
+        b"IHDR",
+        "the listing icon's first chunk is not IHDR: not a valid PNG"
+    );
+    let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+    let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+    assert_eq!(
+        width, height,
+        "the listing icon is {width}x{height}; the directory needs a square image"
+    );
+    assert!(
+        (512..=2048).contains(&width),
+        "the listing icon is {width}x{height}; the directory needs 512 to 2048 px per side"
+    );
 }
 
 #[test]

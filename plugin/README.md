@@ -16,6 +16,7 @@ together.
 ```
 plugin/
 ├── .claude-plugin/plugin.json   the manifest
+├── .claude-plugin/icon.png      the plugin directory's listing icon (NOTES §13)
 ├── hooks/hooks.json             the hooks, each one `invar` call
 ├── agents/planner.md            Phase 1: a ticket becomes a draft Plan
 ├── skills/invar/SKILL.md        the cycle, as the main session lives it
@@ -61,7 +62,9 @@ development, build the core and copy it beside the launcher (NOTES section 13).
   script appears or if the launcher grows.
 - **No gate.** `plan approve` and `done` are never hooked, and a test says so. A
   hook that approves a Plan has abolished the gate.
-- **No binaries in git.** They are built by CI and published on `dist`.
+- **No binaries in git.** They are built by CI and published on `dist`. The one
+  file that is neither text nor the launcher is the listing icon,
+  `.claude-plugin/icon.png`, and a test allows that path only.
 - **No `CLAUDE.md` at the plugin root.** Claude Code does not load one; plugins
   contribute context through skills, agents and hooks. What must always be in
   context is pushed by the `SessionStart` hook instead (§5c).
