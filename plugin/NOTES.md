@@ -704,7 +704,7 @@ record what the spike established and stay as they are.
 ### The hooks
 
 Each is one invocation of `${CLAUDE_PLUGIN_ROOT}/bin/invar` in exec form (§7),
-run by `sh` since 0.1.2 (below), with a timeout, and none runs `plan approve` or `done`. There is no lint hook
+run by `sh` since 0.1.3 (below), with a timeout, and none runs `plan approve` or `done`. There is no lint hook
 and no test hook (L-3). Three since M1-17; the fourth, `SubagentStart`, since
 M1-24 (§17).
 
@@ -719,9 +719,9 @@ M1-24 (§17).
 hook's command line against the real binary, so a plugin written for another
 version of `invar` fails in CI.
 
-### `sh` in `command`, the launcher first in `args` — since 0.1.2
+### `sh` in `command`, the launcher first in `args` — since 0.1.3
 
-Until 0.1.2 a hook's `command` was the launcher itself,
+Until 0.1.3 a hook's `command` was the launcher itself,
 `${CLAUDE_PLUGIN_ROOT}/bin/invar`, run by its executable bit and its `#!/bin/sh`
 line. The plugin directory's Validate report raised that as a policy hold: a hook
 whose program is a file of the plugin, started directly, does not say what runs it.
