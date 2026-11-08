@@ -42,11 +42,14 @@ jobs:
             name: invar-linux-x86_64
           # Both macOS binaries are built on the Apple-silicon runner: the
           # Intel one is a cross-compile, which needs nothing more than the
-          # target installed.
-          - os: macos-14
+          # target installed. `macos-15`, not `macos-14`: GitHub retired the
+          # macOS 14 image on 2026-11-02. The runner's macOS does not raise the
+          # oldest macOS the binaries run on: that is Rust's deployment target
+          # for each target, not the build machine's version.
+          - os: macos-15
             target: aarch64-apple-darwin
             name: invar-darwin-arm64
-          - os: macos-14
+          - os: macos-15
             target: x86_64-apple-darwin
             name: invar-darwin-x86_64
 
