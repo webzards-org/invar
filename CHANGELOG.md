@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- **The plugin has a listing icon on `dist`.** `.claude-plugin/icon.png` is
+  moved from the repository root into `plugin/`, unchanged, so the release
+  copies it to `invar/.claude-plugin/icon.png`, where the plugin directory reads
+  it. A test checks that it is a square PNG of 512 to 2048 px under 2 MiB, and
+  `plugin/` accepts that one path and no other image or binary (#135).
+
 ## 0.1.3 — 2026-11-08
 
 Answers the plugin directory's review. No change to what the CLI decides.
