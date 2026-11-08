@@ -16,7 +16,7 @@ together.
 ```
 plugin/
 ├── .claude-plugin/plugin.json   the manifest
-├── hooks/hooks.json             three hooks, each one `invar` call
+├── hooks/hooks.json             the hooks, each one `invar` call
 ├── agents/planner.md            Phase 1: a ticket becomes a draft Plan
 ├── skills/invar/SKILL.md        the cycle, as the main session lives it
 ├── skills/approve/SKILL.md      /invar:approve — the developer's gate
@@ -28,7 +28,8 @@ plugin/
 ├── bin/invar                    the launcher: picks invar-<os>-<arch> and runs it
 ├── marketplace.json             what the `dist` branch lists (release.yml)
 ├── NOTES.md
-└── README.md
+├── README.dist.md               the user's README: `invar/README.md` on `dist`
+└── README.md                    this file, for contributors
 ```
 
 `bin/invar-<os>-<arch>` is not here: CI builds the binaries and publishes the
@@ -45,6 +46,11 @@ development, build the core and copy it beside the launcher (NOTES section 13).
   Both are prompts, and whether they work is only found out by running them on
   real tickets: NOTES section 14 is the protocol for that and the log of what
   changed.
+- `README.dist.md` — the README users see: the release copies it to
+  `invar/README.md` on `dist`, and the plugin directory shows it as the
+  listing's description. It says what the plugin runs and changes in a
+  project, so a change to a hook, an agent, a skill, `invar init` or the git
+  commands the CLI runs updates it in the same PR.
 
 ## Must not
 
