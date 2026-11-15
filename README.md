@@ -82,6 +82,11 @@ never creates tickets: how your team tracks work stays your choice. Smaller
 cycles mean less for an agent to guess, and Plans and diffs small enough to
 review properly.
 
+![The planner reads a ticket, finds it too large for one cycle and proposes a split; the developer approves, and the new tickets are created in the tracker.](docs/media/split.gif)
+
+*A real run: the planner splits a ticket in two, and the main session creates
+the tickets in GitHub once the developer agrees.*
+
 Not every ticket needs the cycle. Typos, copy changes and dependency bumps
 skip it, and the main session tells you so in one line.
 
