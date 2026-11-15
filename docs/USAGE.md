@@ -85,6 +85,8 @@ from team to team. Answer one of two ways:
 - *"Plan it as one."* The planner writes one Plan, and does not raise the split
   again for this ticket.
 
+![A real run: the planner answers SPLIT with its reasons, proposes two tickets on request, and the main session creates them in GitHub and closes the original once the developer agrees.](media/split.gif)
+
 **Read the Plan, the acceptance criteria above all.** They are what the code
 will be held to:
 
