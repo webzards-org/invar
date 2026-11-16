@@ -17,6 +17,8 @@ the developer can run it", because each records a decision that is yours.
 | `/invar:log <TICKET>`, then `/invar:log-approve <TICKET>` | Optional, if the cycle is worth a decision entry |
 | `/invar:done <TICKET>` | The PR review is over |
 
+![A full cycle on a real ticket: questions, the approved Plan, the coder, and a review of every acceptance criterion and business rule.](media/full-cycle.gif)
+
 ---
 
 ## Before the first ticket

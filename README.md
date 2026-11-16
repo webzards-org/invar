@@ -19,6 +19,12 @@ claude plugin install invar@invar --scope project
 
 Then ask Claude Code to run `invar init`. Full setup: [`docs/INSTALL.md`](docs/INSTALL.md).
 
+![A full cycle on a real ticket: the planner asks its questions, the developer approves the Plan, the coder implements it, and the reviewer checks every acceptance criterion and business rule.](docs/media/full-cycle.gif)
+
+*A full cycle on a real ticket, from the planner's questions to the review, in
+under two minutes. Watch the end: the reviewer flags a business rule the Plan
+never named.*
+
 ---
 
 ## The problem
