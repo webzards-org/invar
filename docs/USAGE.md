@@ -236,7 +236,8 @@ refuse an undeclared change to another ticket's locked test. In 0.1.0, a
 `delete` works: the test-writer removes the file and covers the behavior under
 the new ticket's criteria. A `change` makes the test-writer answer `BLOCKED`,
 naming the file. Plan such a change as a `delete` plus new criteria
-(`docs/TASKS-AT.md`, OQ-4).
+([OQ-4](https://github.com/webzards-org/invar/blob/f0c9f903303b5d814cf4f4ea9c85ef70071a34b7/docs/TASKS-AT.md#L137)
+in the task file as it was before its removal).
 
 ## Using Invar with other skill sets
 

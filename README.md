@@ -8,6 +8,10 @@ Invar is a Claude Code plugin that turns AI-assisted coding into a disciplined
 cycle: a person agrees what "done" means, a checksum freezes it, and the agent
 that writes the code cannot move the target it is measured against.
 
+> **Beta.** The on-disk formats are stable; prompts and commands may still
+> change. [What that means](#status) ·
+> [Tell us how it went](https://github.com/webzards-org/invar/issues/new?template=2-beta-feedback.yml)
+
 > The name comes from the nickel–iron alloy that barely changes shape under
 > heat or load, made for measuring instruments. The measuring rod does not
 > stretch to fit the measurement.
@@ -230,9 +234,9 @@ form.
 
 **What is stable.** The on-disk formats: the Plan header, `invar.yaml`,
 decision entries and the lock line. Each is specified in `contracts/` with its
-own version and history, and a change to one follows one rule: an absent key
-means the previous behavior. A Plan approved or a test locked under an earlier
-format version still checks.
+own version and history. Changes follow one rule: an absent key means the
+previous behavior, so a Plan or a lock written by an earlier version keeps its
+meaning.
 
 **What may still change.** Everything around the formats: the agents' prompts
 and the questions they ask, slash commands and their flags, CLI commands and
