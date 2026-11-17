@@ -189,6 +189,7 @@ fn the_context_files_hold_the_marker_and_headings_and_never_any_content() {
         (
             "BUSINESS_CONTEXT.md",
             [
+                "Terms",
                 "Invariants (always true, no exceptions)",
                 "Regional / parameterized facts",
             ]

@@ -133,8 +133,10 @@ never depends on an agent remembering to load it.
 
 ### `BUSINESS_CONTEXT.md`: what must never break
 
-Two sections:
+Three sections:
 
+- **Terms**: the business's own words, one line each, such as _available
+  balance_. The invariants use them, and the planner uses them in the Plan.
 - **Invariants**: rules no ticket may break, such as _every tenant-scoped
   query is filtered by account_.
 - **Regional / parameterized facts**: values that differ per country, tenant

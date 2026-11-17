@@ -18,6 +18,12 @@
   kinds of skills complement it, which overlap with the cycle and should give
   way to Invar's agents inside one, and which contradict its approval steps
   (#146).
+- **`BUSINESS_CONTEXT.md` has a `## Terms` heading.** `invar init` scaffolds
+  it before the invariants, empty, for the business's own words, one line
+  each. The planner uses those terms, with their meanings, in every Plan. A
+  file with only headings is still treated as absent. An existing
+  `BUSINESS_CONTEXT.md` is left as it is: add the heading by hand if you want
+  it (#142).
 
 ## 0.1.3 — 2026-11-08
 

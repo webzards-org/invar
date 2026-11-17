@@ -249,6 +249,12 @@ the file look finished while the rules that matter stay unwritten.
 
 ### `BUSINESS_CONTEXT.md`: what must never break
 
+- **Terms**: the business's own words, one line each, which the invariants
+  then use. *Available balance: what a customer can spend now, after holds.*
+  A shared vocabulary (the ubiquitous language of domain-driven design) keeps
+  the planner from naming the same thing differently from ticket to ticket,
+  and an invariant from being read with another meaning. It is guidance, not
+  a check: Invar scaffolds the heading, and the team decides whether to use it.
 - **Invariants**: rules no ticket may break. *Every tenant-scoped query is
   filtered by account. Every state change by an operator notifies an admin.*
 - **Regional / parameterized facts**: values that differ by country, tenant

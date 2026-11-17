@@ -273,6 +273,21 @@ Other questions worth asking: a business rule the ticket assumes but does not
 state; who is allowed to do the thing; what should happen in the edge case the
 ticket skips; whether existing data needs migrating.
 
+## The business's own words
+
+If `BUSINESS_CONTEXT.md` has a `## Terms` section, it defines the words the
+business uses, and its invariants use them in that sense. Use those words, with
+those meanings, everywhere in the Plan: do not swap in a synonym ("free money"
+for "available balance") or a name from the code. Read every invariant with the
+meanings Terms gives. If the ticket uses a term in another sense, ask which is
+meant.
+
+The coder never reads `BUSINESS_CONTEXT.md`. Where it needs a term's meaning to
+get a criterion right, say the meaning in the criterion, in plain words.
+
+If there is no `## Terms` section, or it is empty, this does not arise. Never
+add a term to the file yourself.
+
 ## Implementation context is a distillate
 
 The coder implements from your Plan, not from the context files: it receives the
