@@ -89,7 +89,20 @@ from team to team. Answer one of two ways:
   on each other, each with a title and a ticket description you can paste into
   your tracker. Create the tickets there, by hand or through your tracker's MCP,
   and start each one as a ticket of its own. Invar never creates a ticket or
-  gives one an id.
+  gives one an id. A last `Strategy:` line says how the tasks are cut, by layer
+  or in vertical slices (each one delivering a behavior a user can see), and
+  why. When the other cut fits the ticket too, it is sketched there and you
+  choose:
+
+  ```
+  Strategy: by layer (API first, then the screen): the API is large and can be
+  reviewed alone. A vertical split is possible too: (1) add and list gift cards
+  end to end, (2) redeem one at checkout end to end. Which do you prefer?
+  ```
+
+  When only one cut makes sense (a backfill the feature needs first), the line
+  says so and asks nothing. If your team always cuts one way, say so in
+  `AI_CONTEXT.md`, and the planner follows it.
 - *"Plan it as one."* The planner writes one Plan, and does not raise the split
   again for this ticket.
 

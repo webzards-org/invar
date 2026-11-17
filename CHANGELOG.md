@@ -30,6 +30,12 @@
   the file states it, with `file:line`. Only conventions the file states; style
   it does not state stays out. The reviewer also reads the invariants with the
   meanings `## Terms` gives. Still advisory: nothing blocks `done` (#144).
+- **A proposed split says how it is cut.** After the tasks, the planner adds a
+  `Strategy:` line: by layer, or vertical slices that each deliver a behavior a
+  user can see, and why. When both fit the ticket, it sketches the other in two
+  or three lines and asks which you prefer; when only one does, it says so and
+  asks nothing. A split preference stated in `AI_CONTEXT.md` is followed
+  without offering the other (#143).
 
 ## 0.1.3 — 2026-11-08
 

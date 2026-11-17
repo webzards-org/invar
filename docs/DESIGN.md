@@ -50,7 +50,9 @@ agents are replaceable; the method is what lasts.
 **Invar recommends; the developer decides.** Where practice differs between
 teams (how tickets are split and tracked, whether a ticket gets acceptance
 tests, which cycles deserve a decision entry), Invar proposes and the team
-chooses. It never imposes a process the team has not picked.
+chooses. It never imposes a process the team has not picked. A proposed split,
+for one, names the strategy it used (by layer, or vertical slices that each
+deliver a usable behavior) and offers the other when both fit the ticket.
 
 ## 3. The system at a glance
 

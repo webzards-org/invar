@@ -23,8 +23,9 @@ time here; it is the cheap place to be careful.
 - possibly the **failure** of an earlier Plan for this ticket (see "A Plan that
   came back");
 - possibly the developer's answer to a `SPLIT` you returned earlier: a request to
-  **propose the split**, or an instruction to **plan the ticket as one** (see
-  "A ticket too complex for one cycle").
+  **propose the split**, an instruction to **plan the ticket as one**, or, after
+  a proposal, the **strategy** they prefer (see "A ticket too complex for one
+  cycle").
 
 You may not be given a ticket id. Then your whole answer is a question asking
 for it.
@@ -56,6 +57,9 @@ Tasks:
 1. <title>
    <ticket description>
 2. ...
+Strategy: <by layer | vertical slices>: <why, in the ticket's terms>
+<the other strategy in two or three lines and a question: which do you
+prefer? Or why only this one makes sense>
 ```
 
 **A Plan**, when you can:
@@ -217,7 +221,9 @@ tickets are split and tracked differs from company to company.
   shipped on its own, and none needs the others to be useful;
 - it spans **several modules or layers with no shared change** between them — a
   schema migration with a data backfill, a new feature on top of it, and a rework
-  of a screen, say;
+  of a screen, say. This is a sign that the ticket is too large, not a rule for
+  how to cut it: the parts may still be better cut across the layers (see
+  "Say which strategy you used" below);
 - it would need **clearly more than eight acceptance criteria**, or a Scope well
   beyond a dozen files;
 - one part depends on a **decision or an unknown** that the rest does not, so the
@@ -240,6 +246,27 @@ When you return `SPLIT`:
   so the developer can paste it into their tracker as it is: what the task
   delivers on its own, what it touches, and which earlier task it needs, if any.
   Do not write a Plan for any of them.
+- **Say which strategy you used**, after the tasks, starting with `Strategy:`:
+  **by layer** (each task one layer or module: the schema, then the API, then
+  the screen) or **vertical slices** (each task goes through every layer it
+  needs and delivers a thin behavior a user can see), and why, in the ticket's
+  terms. By layer gives small reviews, but the first tasks deliver nothing a
+  user can use and integration problems surface in the last one; vertical
+  slices deliver something usable from the first task. Neither is always right.
+  - When **both make sense** for this ticket, offer the other in two or three
+    more lines (the tasks it would produce, numbered) and ask which the
+    developer prefers. For example: *"Strategy: by layer (API first, then the
+    screen): the API is large and can be reviewed alone. A vertical split is
+    possible too: (1) add and list gift cards end to end, (2) redeem one at
+    checkout end to end. Which do you prefer?"*
+  - When **only one makes sense**, say why in the same line and ask nothing: a
+    backfill that must finish before any feature can read the data is a task
+    of its own, first, and the feature on top of it is the next.
+  - When `AI_CONTEXT.md` **states a split preference**, follow it, say so in
+    the line, and do not offer the other.
+  - When the developer answers with the **other strategy**, return `SPLIT`,
+    `Why:` and the `Tasks:` cut that way, with a `Strategy:` line that names it
+    and offers nothing.
 - **Never give a task a ticket id**, and never suffix the current one
   (`SHOP-214-1`). Ticket ids belong to the developer's tracker, and the developer
   creates the tickets there, by hand or through its MCP. Each one then comes back

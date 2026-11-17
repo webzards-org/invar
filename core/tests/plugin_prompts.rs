@@ -297,6 +297,36 @@ fn a_split_is_recommended_and_the_developer_decides() {
 }
 
 #[test]
+fn a_proposed_split_names_its_strategy_and_offers_the_other_only_when_it_fits() {
+    let (_, body) = frontmatter("agents/planner.md");
+    let flat = one_line(&body);
+
+    // The strategy line follows the tasks, and only in a proposal.
+    let tasks = flat.find("Tasks: 1. <title>").unwrap();
+    let strategy = flat
+        .find("Strategy: <by layer | vertical slices>: <why, in the ticket's terms>")
+        .expect("the answer shape lost the strategy line");
+    assert!(tasks < strategy);
+    assert!(flat.contains("**Say which strategy you used**"));
+    assert!(flat.contains("**by layer**") && flat.contains("**vertical slices**"));
+    assert!(flat.contains("Neither is always right."));
+    // The other is offered and asked about only when both make sense.
+    assert!(flat.contains("When **both make sense** for this ticket, offer the other"));
+    assert!(
+        flat.contains("When **only one makes sense**, say why in the same line and ask nothing")
+    );
+    // A team's stated preference wins, and nothing is offered.
+    assert!(flat.contains(
+        "When `AI_CONTEXT.md` **states a split preference**, follow it, say so in the line, \
+         and do not offer the other."
+    ));
+    // A layered ticket is a sign of size, not a rule for how to cut it.
+    assert!(
+        flat.contains("This is a sign that the ticket is too large, not a rule for how to cut it")
+    );
+}
+
+#[test]
 fn the_planner_asks_for_numbered_criteria_and_knows_the_tests_to_change_section() {
     let (_, body) = frontmatter("agents/planner.md");
 
@@ -438,6 +468,9 @@ fn the_skill_relays_a_split_and_leaves_the_decision_and_the_tracker_to_the_devel
          on a proposed task yourself.**"
     ));
     assert!(flat.contains("or decide a `SPLIT` for them"));
+    // The strategy line and the alternative reach the developer as they are.
+    assert!(flat.contains("give them and its `Strategy:` line to the developer as they are"));
+    assert!(flat.contains("the choice is theirs too"));
 }
 
 #[test]
