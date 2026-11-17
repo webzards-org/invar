@@ -1073,6 +1073,51 @@ In the reviewer (#144, from the review of #142), step 7 reads the invariants
 with the meanings `## Terms` gives and never reports a term as an invariant.
 Not exercised yet: no seed has a `## Terms` section.
 
+### Change: the split names its strategy (#143)
+
+When the developer asks for the split, `planner.md` now ends `Tasks:` with a
+`Strategy:` line: by layer or vertical slices, and why, in the ticket's terms.
+When both fit, the line sketches the other cut in two or three lines and asks
+which the developer prefers; when only one fits, it says why and asks nothing;
+a split preference stated in `AI_CONTEXT.md` is followed and nothing is
+offered. The sign "several modules or layers with no shared change" now says it
+measures size and is not a rule for how to cut. The skill relays the line as it
+is, and calls the planner again only if the developer picks the other cut.
+`SPLIT`, `Why:` and `Tasks:` are unchanged.
+
+Reason: both recorded demo runs proposed a split by layer (an API ticket, then
+a screen ticket). That gives small reviews, but the first ticket delivers
+nothing a user can see and integration problems surface in the last one. Which
+cut is better depends on the ticket and on the team, so the planner names the
+one it used and the developer chooses.
+
+**Exercised**, 2026-11-17, `claude -p --plugin-dir plugin` on a small Flask
+shop in a scratch directory (models, `app/api/checkout.py`, two templates, no
+split preference in `AI_CONTEXT.md`). The main session was told the developer
+had already answered "propose the split".
+
+- *SHOP-214, gift cards: buy (API and screen), list with balance on the
+  account page, redeem at checkout.* Both cuts fit. Three tasks as vertical
+  slices (buy, see, spend), with redemption kept alone as the change to order
+  money. The `Strategy:` line sketched the layered cut (model and migration,
+  every API change, every screen), said nothing is usable until its third task,
+  and asked "Which do you prefer?".
+- *SHOP-215, prices from float euros to integer cents with a batched backfill
+  of ~2M rows, then percentage discount codes.* Only one fits. Two tasks, by
+  layer: "Only this order makes sense. Discounts computed in cents cannot be
+  built or tested until every price … is stored in cents and the backfill has
+  finished." No question asked.
+
+Seen in passing: the `Strategy:` line came out as one paragraph of four or
+five sentences, not one line, and the second run added a closing sentence
+after it ("Create the two tickets in your tracker and send me the first one").
+Neither breaks what the skill relays. If the line keeps growing, the lever is a
+word limit in the prompt.
+
+**Not exercised yet:** a split preference in `AI_CONTEXT.md`; the developer
+answering with the other cut, and the second proposal; the full round through
+the skill (`SPLIT` first, then "propose the split").
+
 ### Not exercised
 
 - [ ] A plugin agent is invoked by name (`planner`, or `invar:planner`) from the

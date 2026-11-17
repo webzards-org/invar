@@ -68,8 +68,11 @@ its rules still bind.
      as one. **The decision is theirs**; do not make it, and do not argue for
      either. Call the planner again with the ticket and their answer verbatim —
      *"propose the split"* or *"plan it as one"*. When it returns `Tasks:`, give
-     them to the developer as they are and stop: the developer creates the
-     tickets in their tracker and brings each one back as a ticket of its own.
+     them and its `Strategy:` line to the developer as they are, with the other
+     strategy if it offers one. If the line asks which they prefer, the choice
+     is theirs too: when they choose the other, call the planner again with
+     their answer verbatim. Otherwise stop: the developer creates the tickets
+     in their tracker and brings each one back as a ticket of its own.
      **Never create a ticket, never give one an id, and never start the planner
      on a proposed task yourself.**
    - **`PLAN <path>`** — go on.
