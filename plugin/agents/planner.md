@@ -246,7 +246,7 @@ When you return `SPLIT`:
   so the developer can paste it into their tracker as it is: what the task
   delivers on its own, what it touches, and which earlier task it needs, if any.
   Do not write a Plan for any of them.
-- **Say which strategy you used**, after the tasks, in one `Strategy:` line:
+- **Say which strategy you used**, after the tasks, starting with `Strategy:`:
   **by layer** (each task one layer or module: the schema, then the API, then
   the screen) or **vertical slices** (each task goes through every layer it
   needs and delivers a thin behavior a user can see), and why, in the ticket's
@@ -254,7 +254,7 @@ When you return `SPLIT`:
   user can use and integration problems surface in the last one; vertical
   slices deliver something usable from the first task. Neither is always right.
   - When **both make sense** for this ticket, offer the other in two or three
-    lines (the tasks it would produce, numbered in the line) and ask which the
+    more lines (the tasks it would produce, numbered) and ask which the
     developer prefers. For example: *"Strategy: by layer (API first, then the
     screen): the API is large and can be reviewed alone. A vertical split is
     possible too: (1) add and list gift cards end to end, (2) redeem one at
