@@ -9,6 +9,15 @@
   copies it to `invar/.claude-plugin/icon.png`, where the plugin directory reads
   it. A test checks that it is a square PNG of 512 to 2048 px under 2 MiB, and
   `plugin/` accepts that one path and no other image or binary (#135).
+- **The README says what the beta means.** Its Status section now says what
+  is stable (the versioned formats in `contracts/`), what may still change
+  (prompts, commands, flags, output), and the known limitations: Claude Code
+  only, Linux x86_64 and macOS, a working test setup for locked tests, and the
+  binding limit on the two context files (#146).
+- **`docs/USAGE.md` answers whether Invar works with other skill sets**: which
+  kinds of skills complement it, which overlap with the cycle and should give
+  way to Invar's agents inside one, and which contradict its approval steps
+  (#146).
 
 ## 0.1.3 — 2026-11-08
 

@@ -238,6 +238,30 @@ the new ticket's criteria. A `change` makes the test-writer answer `BLOCKED`,
 naming the file. Plan such a change as a `delete` plus new criteria
 (`docs/TASKS-AT.md`, OQ-4).
 
+## Using Invar with other skill sets
+
+Many teams already give Claude Code a skill set or plugin that teaches it a way
+of working. Invar can run alongside one, but some combinations conflict. As a
+rule of thumb:
+
+- **Complements Invar.** Skills for domain language and glossaries, for
+  exploring a design before there is a ticket, and for writing documentation.
+  They work on things the cycle does not cover, and a clearer domain or design
+  makes a better Plan.
+- **Overlaps with the cycle.** Skills that write tests, implement or review
+  code. Inside an Invar cycle, let Invar's test-writer, coder and reviewer do
+  that work, so there is one process and its checks hold: two TDD loops or two
+  reviews on the same ticket give you two verdicts and no clear gate. Outside a
+  cycle, for work the main session skips the cycle for, use whatever you like.
+- **Contradicts it.** Any instruction to proceed without asking you, or to
+  treat the code as the specification. Invar's approval steps are the point:
+  the Plan you approve is the specification, and only you approve it, relock a
+  test or close a cycle. If a skill set says otherwise, remove that
+  instruction or don't use the two on the same project.
+
+The difference in one line: a skill set teaches an agent good practice; Invar
+enforces it with checks on disk and in CI.
+
 ## Commands you may run in a terminal
 
 You never need them inside Claude Code. They are useful in a shell or in CI
