@@ -24,6 +24,12 @@
   file with only headings is still treated as absent. An existing
   `BUSINESS_CONTEXT.md` is left as it is: add the heading by hand if you want
   it (#142).
+- **The review reports broken conventions from `AI_CONTEXT.md`.** The
+  reviewer's report has a new section, "Conventions in AI_CONTEXT.md the change
+  appears to break", after the invariants: each finding quotes the convention as
+  the file states it, with `file:line`. Only conventions the file states; style
+  it does not state stays out. The reviewer also reads the invariants with the
+  meanings `## Terms` gives. Still advisory: nothing blocks `done` (#144).
 
 ## 0.1.3 — 2026-11-08
 

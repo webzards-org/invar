@@ -206,7 +206,9 @@ After `DONE`, the main session offers each step once:
    the test `asserts` its criterion or is `weaker` or `unrelated`, with
    `file:line`. It also reports changes to shared test code (factories,
    seeders) that a locked test depends on, invariants the change appears to
-   break, and changes outside Scope. It never blocks anything.
+   break, conventions stated in `AI_CONTEXT.md` it appears to break (each
+   quoted, with `file:line`), and changes outside Scope. It never blocks
+   anything.
 3. **The PR description**: `invar pr-body SHOP-214 --out .invar/out/SHOP-214-pr.md`
    renders the Plan, including whether the ticket has acceptance tests and
    which files are locked.

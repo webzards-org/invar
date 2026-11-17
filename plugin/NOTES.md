@@ -1069,6 +1069,10 @@ Existing files are not touched: `init` never rewrites a context file.
 term in `## Terms`, to see that it keeps the term and asks when the sense
 differs.
 
+In the reviewer (#144, from the review of #142), step 7 reads the invariants
+with the meanings `## Terms` gives and never reports a term as an invariant.
+Not exercised yet: no seed has a `## Terms` section.
+
 ### Not exercised
 
 - [ ] A plugin agent is invoked by name (`planner`, or `invar:planner`) from the
@@ -1495,7 +1499,7 @@ before `done` — which removes the Plan the review needs.
 builds a small Laravel-shaped repository with three approved Plans — example 9.1's
 `SHOP-214`, `SHOP-215`, whose Implementation context names no invariant, and
 `SHOP-216` (AT-14), approved with acceptance tests, which the real
-`invar acceptance lock` locks with a stand-in runner — and five branches. In it:
+`invar acceptance lock` locks with a stand-in runner — and six branches. In it:
 `git checkout <branch>`, start Claude Code, run `/invar:review <ticket>`.
 
 Since M1-26 the report has two invariant headings: **named** ("Invariants the Plan
@@ -1514,8 +1518,36 @@ With `Acceptance: skipped` (the first three), the report's **Locked acceptance t
 and **Shared test code** say there are no acceptance tests, and **Criteria no test
 covers** lists, as information, the criteria no test checks.
 
+| `seed-convention` (#144) | `SHOP-214` | criteria 1–4 `met` or `unclear`; both invariant sections `None found.`; under **Conventions in AI_CONTEXT.md**, the flash-message convention, quoted, at `app/Http/Controllers/OrderController.php:15`; nothing outside Scope |
+
+Since #144 the report has a conventions heading after the invariants. On every
+branch but `seed-convention` it should say `None found.` (checked on `seed-scope`): the seeds' `AI_CONTEXT.md`
+gained a `## Text` convention (flash messages from `lang/en/messages.php`), which no
+other branch writes a flash message to break.
+
 A report that adds style remarks, a summary or suggestions fails the shape, however
 correct its verdicts.
+
+### Change: conventions from `AI_CONTEXT.md` (#144)
+
+Step 8 of `reviewer.md` checks the diff against each convention the
+`AI_CONTEXT.md` block states, and the report gains "Conventions in AI_CONTEXT.md
+the change appears to break", between the invariants and Changes outside Scope.
+Reason: the reviewer already received the file, but its fixed shape had no place
+for it, so a change that met every criterion and broke a stated convention (logic
+in a controller, money as a float, a hard-coded message) went unreported unless it
+also broke an invariant. The coder is the agent that reads `AI_CONTEXT.md` most,
+so an independent check of it belongs here, as review against the team's own
+standards next to review against the specification.
+
+Placed after the invariants because both are judgements against the binding
+context, business rules first since they weigh more; Scope stays last because it
+is about the list of files, not about what the code does. Only conventions the
+file states, quoted in its words: anything else is the style the "Nothing else"
+rule keeps out. A convention a project linter enforces is still reported, with a
+line saying so when the review input shows the linter. Advisory, like the rest.
+
+Exercised on 2026-11-17 — see the iteration log.
 
 ### Iteration log
 
@@ -1523,6 +1555,7 @@ correct its verdicts.
 |---|---|---|---|
 | v1 | — | Not run | — |
 | AT-14 | `seed-weak-test`, `seed-factory` | Both as the table says. Run on 2026-11-02 by starting `invar:reviewer` with the ticket line only, from `claude -p` with `--plugin-dir plugin` (in `-p` mode `/invar:review` runs as a local command and never reaches the model). `seed-weak-test`: AC2 `weaker` at `Shop216ArchiveOrderTest.php:21`, "nothing reloads the order"; Shared test code `None found.` `seed-factory`: `OrderFactory.php` under Shared test code, "both assertions pass even if the archive endpoint does nothing"; also listed under Changes outside Scope, since Scope names no factory; AC1 `asserts` as written, with that caveat beside it | The first run's AC2 test posted a form, and the reviewer rightly called AC2 `unclear` — a stock Laravel app answers a failed validation on a form post with a 302, not 422. The seed now uses `postJson` |
+| #144 | `seed-convention`, `seed-scope` | Both as the table says. Run on 2026-11-17 as for AT-14 (`claude -p`, `--plugin-dir plugin`, `invar:reviewer` started with `SHOP-214` only; Claude Code 2.1.309). `seed-convention`: the flash-message convention quoted word for word at `OrderController.php:15`, noting that `messages.order_cancelled` already exists at `lang/en/messages.php:4`; both invariant sections and Changes outside Scope `None found.`; AC1 and AC3 `unclear` (`StockLedger` and `BelongsToTeam` are not in the seed), AC2 and AC4 `met`. `seed-scope`: unchanged from what the table expects — `InvoiceController.php` outside Scope — and the conventions section `None found.` | — |
 
 ### Not exercised
 
@@ -1536,6 +1569,8 @@ correct its verdicts.
 - [ ] The first three seeded branches, as in the table above
 - [x] `seed-weak-test` and `seed-factory`, as in the table above (AT-14; the reviewer
       started directly, not through `/invar:review` — see the iteration log)
+- [x] `seed-convention`, and `seed-scope` again with the conventions heading (#144;
+      started directly, as for AT-14)
 - [ ] With `review.offer: true`, the main session offers `/invar:review` once,
       before `done`, and does not start the reviewer itself
 

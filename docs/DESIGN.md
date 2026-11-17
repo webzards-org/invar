@@ -156,7 +156,7 @@ flowchart TD
     Coder -- DONE --> Commit[Commit]
 
     subgraph P4 [4 · Review and close]
-        Commit --> Review[reviewer · advisory<br/>criteria · locked tests · every invariant · Scope]
+        Commit --> Review[reviewer · advisory<br/>criteria · locked tests · every invariant · conventions · Scope]
         Review --> PRBody[⚙ invar pr-body<br/>Plan rendered as PR description]
         PRBody --> PR[Push · team reviews the PR]
         PR --> Entry{{"👤 /invar:log → /invar:log-approve<br/>optional decision entry"}}
@@ -227,7 +227,10 @@ interpreting the ones it does. Instead it follows the version the developer
 approved. The cost is stated plainly: an invariant the planner fails to carry
 into the Plan is invisible to the coder. That is why the reviewer checks the
 branch against **every** invariant and reports one the Plan missed under its
-own heading.
+own heading. The coder does read `AI_CONTEXT.md`, and the reviewer checks,
+independently, that the branch keeps the conventions the file states. A broken
+one is reported with its words quoted, under a heading of its own after the
+invariants. Style the file does not state stays out of the report.
 
 ## 6. Context: what no model knows from training
 

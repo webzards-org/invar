@@ -1357,6 +1357,8 @@ fn the_reviewers_output_has_the_fixed_shape() {
         "## Invariants the Plan names that the change appears to break",
         // M1-26: a planner miss, reported apart because its fix is in Phase 1.
         "## Invariants the Plan does not name that the change appears to break",
+        // #144: a stated project convention, after the business's invariants.
+        "## Conventions in AI_CONTEXT.md the change appears to break",
         "## Changes outside Scope",
     ];
     let positions: Vec<usize> = order
@@ -1448,6 +1450,22 @@ fn the_reviewer_checks_every_invariant_on_a_strong_model() {
     // change "touches", is gone.
     assert!(!flat.contains("each rule of `BUSINESS_CONTEXT.md` the change touches"));
     assert!(!flat.contains("## Invariants the change appears to break"));
+}
+
+#[test]
+fn the_reviewer_checks_the_conventions_ai_context_states() {
+    // #144: the coder follows AI_CONTEXT.md; the reviewer checks it did, against
+    // what the file states and nothing else, and the review stays advisory.
+    let (meta, body) = frontmatter("agents/reviewer.md");
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(flat.contains("### 8. Check the branch against the conventions"));
+    assert!(flat.contains("quote the convention in the words `AI_CONTEXT.md` uses"));
+    assert!(flat.contains("**Only conventions the file states.**"));
+    assert!(flat.contains("`None: AI_CONTEXT.md states no conventions.`"));
+    assert!(meta["description"].contains("every convention stated in AI_CONTEXT.md"));
+    // #142: a term in `## Terms` gives an invariant its meaning; it is not one.
+    assert!(flat.contains("never report a term itself as an invariant"));
 }
 
 #[test]
