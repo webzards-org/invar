@@ -25,6 +25,12 @@
 #   seed-factory     (AT-14) implements SHOP-216 with strong locked tests, and
 #                    changes OrderFactory::cancelled(), which the locked test of
 #                    AC1 uses, so that AC1 passes without the archive action.
+#   seed-convention  (#144) implements SHOP-214 as the Plan says, inside Scope and
+#                    with no invariant broken, but OrderController::cancel writes
+#                    its flash message itself instead of taking it from
+#                    lang/en/messages.php. The review reports that convention of
+#                    AI_CONTEXT.md, quoted, at OrderController.php, and nothing
+#                    under the invariants or outside Scope.
 #
 # The SHOP-216 tests are locked by the real `invar acceptance lock`, with
 # tests/run-acceptance.sh standing in for Pest: it reports every test red, as Pest
@@ -32,7 +38,7 @@
 #
 # Then, in that directory: `git checkout <branch>`, open Claude Code, run
 # `/invar:review SHOP-214` (`SHOP-215` on seed-unnamed-invariant, `SHOP-216` on
-# seed-weak-test and seed-factory), and compare the report with the expectations
+# seed-weak-test and seed-factory, `SHOP-214` on seed-convention), and compare the report with the expectations
 # in §16.
 # Uses `invar` from PATH, or the binary named by $INVAR.
 
@@ -131,6 +137,19 @@ w AI_CONTEXT.md <<'EOF'
 
 - Controllers stay thin: logic lives in `App\Actions`, authorization in policies.
 - Stock changes go through `StockLedger`, inside the action's transaction.
+
+## Text
+
+- Flash messages come from `lang/en/messages.php` through `__()`; a controller
+  never writes the text of a message itself.
+EOF
+
+w lang/en/messages.php <<'EOF'
+<?php
+
+return [
+    'order_cancelled' => 'Your order has been cancelled.',
+];
 EOF
 
 w app/Models/Order.php <<'EOF'
@@ -664,5 +683,79 @@ EOF
 add
 git -c user.name=seed -c user.email=seed@example.com commit --quiet -m "SHOP-216: archive a cancelled order"
 
+# --- seed-convention (#144) -------------------------------------------------------
+# SHOP-214 as seed-scope builds it, without the InvoiceController change, and with a
+# flash message the controller writes itself.
 git checkout --quiet main
-echo "review-seeds: ready in $target — branches seed-invariant, seed-scope, seed-unnamed-invariant, seed-weak-test and seed-factory"
+git checkout --quiet -b seed-convention
+w app/Actions/Orders/CancelOrder.php <<'EOF'
+<?php
+
+namespace App\Actions\Orders;
+
+use App\Models\Order;
+use App\Support\StockLedger;
+use Illuminate\Support\Facades\DB;
+
+class CancelOrder
+{
+    public function __construct(private StockLedger $stock) {}
+
+    public function handle(Order $order): Order
+    {
+        return DB::transaction(function () use ($order) {
+            $order->status = 'cancelled';
+            $order->save();
+            $this->stock->release($order);
+
+            return $order;
+        });
+    }
+}
+EOF
+w app/Policies/OrderPolicy.php <<'EOF'
+<?php
+
+namespace App\Policies;
+
+use App\Models\Order;
+use App\Models\User;
+
+class OrderPolicy
+{
+    public function view(User $user, Order $order): bool
+    {
+        return $user->team_id === $order->team_id;
+    }
+
+    public function cancel(User $user, Order $order): bool
+    {
+        return $user->id === $order->user_id && ! $order->isPaid();
+    }
+}
+EOF
+w app/Http/Controllers/OrderController.php <<'EOF'
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Actions\Orders\CancelOrder;
+use App\Models\Order;
+
+class OrderController extends Controller
+{
+    public function cancel(Order $order, CancelOrder $cancel)
+    {
+        $this->authorize('cancel', $order);
+        $cancel->handle($order);
+
+        return back()->with('status', 'Your order has been cancelled.');
+    }
+}
+EOF
+printf "Route::post('/orders/{order}/cancel', [\\\\App\\\\Http\\\\Controllers\\\\OrderController::class, 'cancel']);\n" >> routes/web.php
+add
+git -c user.name=seed -c user.email=seed@example.com commit --quiet -m "SHOP-214: cancel an order"
+
+git checkout --quiet main
+echo "review-seeds: ready in $target — branches seed-invariant, seed-scope, seed-unnamed-invariant, seed-weak-test, seed-factory and seed-convention"
