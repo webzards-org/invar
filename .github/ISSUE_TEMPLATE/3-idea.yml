@@ -1,0 +1,38 @@
+name: Idea
+description: A change to how Invar works, or something it should do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Invar is a method built on established practice, enforced by deterministic
+        checks. The questions below are the ones every change is weighed against.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What happens today, in a real cycle, that should not.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+    validations:
+      required: true
+
+  - type: textarea
+    id: practice
+    attributes:
+      label: Which practice it follows
+      description: |
+        Which established practice is behind it (test-first, separation of duties,
+        decision records, …), and would it be enforced by a check on disk, or would
+        it only ask the agent to behave?
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead
