@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/webzards-org/invar/security/advisories/new
+    about: Privately, never in a public issue. See SECURITY.md.
+  - name: Read how Invar is used
+    url: https://github.com/webzards-org/invar/blob/main/docs/USAGE.md
+    about: The cycle step by step, every command, and what each agent does.

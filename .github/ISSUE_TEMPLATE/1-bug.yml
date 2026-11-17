@@ -1,0 +1,80 @@
+name: Bug
+description: Invar did something wrong, refused something it should allow, or let through something it should refuse.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for trying the beta. Before pasting anything, remove your
+        business rules, client names and proprietary code: this issue is public.
+        A security problem goes to the Security tab, never here.
+
+  - type: dropdown
+    id: step
+    attributes:
+      label: Where in the cycle
+      options:
+        - Installation or `invar init`
+        - Context (AI_CONTEXT.md, BUSINESS_CONTEXT.md, the session-start hook)
+        - Planning (the planner, questions, SPLIT)
+        - Approval (`/invar:approve`, `plan check`)
+        - Acceptance tests (test-writer, `acceptance lock`, `/invar:relock`)
+        - Coding (the coder, DONE or BLOCKED)
+        - Review (`/invar:review`)
+        - Decision log (`/invar:log`, `/invar:log-approve`)
+        - Closing (`invar pr-body`, `/invar:done`)
+        - CI (`invar acceptance verify`)
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what Invar or the agent did, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The command's output or the agent's answer, trimmed to what matters.
+      render: shell
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The smallest steps that show it, if you have them.
+
+  - type: input
+    id: invar_version
+    attributes:
+      label: invar --version
+      placeholder: invar 0.1.3
+    validations:
+      required: true
+
+  - type: input
+    id: claude_version
+    attributes:
+      label: claude --version
+      placeholder: 2.1.309 (Claude Code)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Ubuntu 24.04 x86_64 / macOS 15 arm64
+    validations:
+      required: true
+
+  - type: input
+    id: stack
+    attributes:
+      label: Project stack and test runner
+      placeholder: Laravel 12 + Pest / FastAPI + pytest / Next.js + Vitest
