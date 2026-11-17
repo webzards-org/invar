@@ -30,10 +30,16 @@ content.
   naming, module boundaries, and **how tests are written** (framework, where
   they live, the database they use, what may be faked). The coder and the
   test-writer read it.
-- **`BUSINESS_CONTEXT.md`**: the rules the application must never break
-  (*Invariants*), and the values that differ per region, tenant or customer
-  (*Regional / parameterized facts*). The planner reads it, and turns what a
-  ticket touches into the Plan. The coder never reads it directly.
+- **`BUSINESS_CONTEXT.md`**: the words the business uses (*Terms*), the rules
+  the application must never break (*Invariants*), and the values that differ
+  per region, tenant or customer (*Regional / parameterized facts*). The
+  planner reads it, and turns what a ticket touches into the Plan. The coder
+  never reads it directly.
+
+Under *Terms*, write the business's own words, one line each, such as
+`- Available balance: what a customer can spend now, after holds.` Use them in
+the invariants, and the planner uses them in every Plan. Leave the heading
+empty if you don't need it.
 
 Keep both short. They are loaded into every session, and anything over the
 limit (`context.binding_limit`, 9000 characters by default) is refused.

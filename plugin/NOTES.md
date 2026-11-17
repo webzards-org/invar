@@ -1044,6 +1044,31 @@ filenames. A firm that names modules `Billing` hits this. Options: (a) drop
 Plans stay valid because unknown keys are preserved); (b) widen `is_module` to
 allow capitals. Not done yet.
 
+### Change: the business's own words (#142)
+
+`invar init` scaffolds a third heading in `BUSINESS_CONTEXT.md`, `## Terms`,
+before the invariants, and `planner.md` gained "The business's own words": use
+the terms with their meanings everywhere in the Plan, read the invariants with
+them, ask when the ticket uses a term in another sense, and never add one to the
+file. Reason: without a shared vocabulary the planner and the coder can name
+the same thing differently from ticket to ticket, and an invariant can be read
+with another meaning; in a pilot, a `## Terms` section added by hand was one of
+the most useful parts of the file.
+
+Because the coder never reads `BUSINESS_CONTEXT.md` (§17, M1-24), the prompt also
+says to spell out a term's meaning in a criterion when the coder needs it there.
+It does not add a `BUSINESS_CONTEXT term:` item to Implementation context: the
+section's sources are fixed by `plan-header.md` §6.3, and a term is not an
+invariant.
+
+Nothing in the core reads the heading. Content under it is loaded like any other
+content, and a file with only the headings is still empty (`context/mod.rs`).
+Existing files are not touched: `init` never rewrites a context file.
+
+**Not exercised yet:** a planner run on a ticket whose wording differs from a
+term in `## Terms`, to see that it keeps the term and asks when the sense
+differs.
+
 ### Not exercised
 
 - [ ] A plugin agent is invoked by name (`planner`, or `invar:planner`) from the

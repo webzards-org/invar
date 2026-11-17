@@ -117,10 +117,12 @@ pub fn ai_context() -> String {
 }
 
 /// `BUSINESS_CONTEXT.md`: business rules the application must obey (§5). The
-/// marker and the two headings of §5, nothing under them.
+/// marker and its headings, nothing under them: `Terms`, the business's own
+/// words that the invariants use (#142), then the two headings of §5.
 pub fn business_context() -> String {
     format!(
-        "{MARKER}\n# BUSINESS_CONTEXT.md\n\n## Invariants (always true, no exceptions)\n\n\
+        "{MARKER}\n# BUSINESS_CONTEXT.md\n\n## Terms\n\n\
+         ## Invariants (always true, no exceptions)\n\n\
          ## Regional / parameterized facts\n"
     )
 }

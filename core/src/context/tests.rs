@@ -145,6 +145,7 @@ fn only_blank_lines_headings_and_comments_after_the_marker_make_a_file_empty() {
         "",
         "\n\n   \n",
         "# BUSINESS_CONTEXT.md\n\n## Invariants\n\n## Regional / parameterized facts\n",
+        "# BUSINESS_CONTEXT.md\n\n## Terms\n\n## Invariants\n\n## Regional / parameterized facts\n",
         "<!-- TODO: fill in -->\n## Layers\n",
         "<!--\nmore than\none line\n-->\n# Heading\n",
         "#\n",
@@ -161,6 +162,7 @@ fn anything_else_after_the_marker_is_content() {
     for body in [
         "One sentence.\n",
         "## Invariants\n- Every query is scoped to the account.\n",
+        "## Terms\n- Available balance: what a customer can spend now.\n",
         "| Country | Provider |\n|---|---|\n",
         "#hashtag\n",
         "####### seven hashes is not a heading\n",
