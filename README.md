@@ -8,6 +8,10 @@ Invar is a Claude Code plugin that turns AI-assisted coding into a disciplined
 cycle: a person agrees what "done" means, a checksum freezes it, and the agent
 that writes the code cannot move the target it is measured against.
 
+> **Beta.** The on-disk formats are stable; prompts and commands may still
+> change. [What that means](#status) ·
+> [Tell us how it went](https://github.com/webzards-org/invar/issues/new?template=2-beta-feedback.yml)
+
 > The name comes from the nickel–iron alloy that barely changes shape under
 > heat or load, made for measuring instruments. The measuring rod does not
 > stretch to fit the measurement.
@@ -223,13 +227,42 @@ recorded one.
 
 ## Status
 
-Invar is at **0.1.x** and under active development as a side project.
+Invar is at **0.1.x**, in beta, and under active development as a side
+project. Tell us how it went on your project with the
+[Beta feedback](https://github.com/webzards-org/invar/issues/new?template=2-beta-feedback.yml)
+form.
 
-- Supported: Claude Code on Linux x86_64 and macOS (Apple silicon and Intel).
-- Not yet: Windows, Linux arm64, other agent runtimes.
-- Next on the roadmap: a recorded pilot on a real project, Gherkin-style
-  acceptance tests, and language adapters. Plans are tracked in
-  [GitHub issues](https://github.com/webzards-org/invar/issues).
+**What is stable.** The on-disk formats: the Plan header, `invar.yaml`,
+decision entries and the lock line. Each is specified in `contracts/` with its
+own version and history. Changes follow one rule: an absent key means the
+previous behavior, so a Plan or a lock written by an earlier version keeps its
+meaning.
+
+**What may still change.** Everything around the formats: the agents' prompts
+and the questions they ask, slash commands and their flags, CLI commands and
+the wording of their output. Every change is listed in
+[`CHANGELOG.md`](CHANGELOG.md).
+
+**Known limitations.**
+
+- Claude Code only. Other agent runtimes are not supported.
+- Linux x86_64 and macOS (Apple silicon and Intel). Not yet Windows or
+  Linux arm64.
+- Locked acceptance tests need a test setup that already works on its own:
+  the test-writer writes tests, it does not set up your test environment
+  ([`docs/INSTALL.md`](docs/INSTALL.md#acceptance-tests)). Without one, approve
+  tickets with `--no-acceptance`.
+- `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`, together and with the labels
+  Invar adds, must stay under the binding limit: 9,000 characters by default,
+  at most 10,000. Above it,
+  Invar refuses rather than let the context quietly stop reaching the agent.
+
+Already using another skill set? See
+[Using Invar with other skill sets](docs/USAGE.md#using-invar-with-other-skill-sets).
+
+Next on the roadmap: a recorded pilot on a real project, Gherkin-style
+acceptance tests, and language adapters. Plans are tracked in
+[GitHub issues](https://github.com/webzards-org/invar/issues).
 
 Every release binary has a build provenance attestation you can check with
 `gh attestation verify` ([how](docs/INSTALL.md#verifying-a-binary)).
