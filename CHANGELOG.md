@@ -2,13 +2,17 @@
 
 ## Unreleased
 
+## 0.2.0 — 2026-11-18
+
+The first beta release. Everything here is new; nothing changes how an
+existing project behaves.
+
 ### Added
 
-- **The plugin has a listing icon on `dist`.** `.claude-plugin/icon.png` is
-  moved from the repository root into `plugin/`, unchanged, so the release
-  copies it to `invar/.claude-plugin/icon.png`, where the plugin directory reads
-  it. A test checks that it is a square PNG of 512 to 2048 px under 2 MiB, and
-  `plugin/` accepts that one path and no other image or binary (#135).
+- **Issue forms for the beta**: Bug (where in the cycle it happened, with the
+  invar, Claude Code and OS versions), Beta feedback (what helped, what got in
+  the way, the one change that matters most) and Idea. Blank issues are off;
+  security problems go to the Security tab (#140).
 - **The README says what the beta means.** Its Status section now says what
   is stable (the versioned formats in `contracts/`), what may still change
   (prompts, commands, flags, output), and the known limitations: Claude Code
@@ -20,7 +24,8 @@
   (#146).
 - **`BUSINESS_CONTEXT.md` has a `## Terms` heading.** `invar init` scaffolds
   it before the invariants, empty, for the business's own words, one line
-  each. The planner uses those terms, with their meanings, in every Plan. A
+  each. The planner uses those terms, with their meanings, in every Plan, when
+  the section has content. A
   file with only headings is still treated as absent. An existing
   `BUSINESS_CONTEXT.md` is left as it is: add the heading by hand if you want
   it (#142).
@@ -36,6 +41,20 @@
   or three lines and asks which you prefer; when only one does, it says so and
   asks nothing. A split preference stated in `AI_CONTEXT.md` is followed
   without offering the other (#143).
+
+## 0.1.4 — 2026-11-08
+
+Tagged and published on `dist` without a version bump: its `plugin.json` and
+`invar --version` say 0.1.3, so `claude plugin update` did not offer it. 0.2.0
+carries the same change with the right version.
+
+### Added
+
+- **The plugin has a listing icon on `dist`.** `.claude-plugin/icon.png` is
+  moved from the repository root into `plugin/`, unchanged, so the release
+  copies it to `invar/.claude-plugin/icon.png`, where the plugin directory reads
+  it. A test checks that it is a square PNG of 512 to 2048 px under 2 MiB, and
+  `plugin/` accepts that one path and no other image or binary (#135).
 
 ## 0.1.3 — 2026-11-08
 
