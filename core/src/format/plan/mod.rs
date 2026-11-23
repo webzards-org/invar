@@ -289,13 +289,7 @@ impl Plan {
     /// the body is untouched.
     pub fn reset_to_draft(&mut self) {
         self.set(header::STATUS, Status::Draft.as_str());
-        for key in [
-            header::APPROVED_BY,
-            header::APPROVED_AT,
-            header::APPROVED_CHECKSUM,
-            header::LOCKFILE_CHECKSUM,
-            header::ACCEPTANCE,
-        ] {
+        for key in header::APPROVAL_KEYS {
             self.set(key, "");
         }
         self.header.status = Status::Draft;
@@ -350,6 +344,9 @@ pub struct Checked {
     /// The header's `Module`, when it has the shape of a module name — even
     /// if other fields are wrong.
     pub module: Option<String>,
+    /// The keys only `plan approve` fills that have a value, with it — even
+    /// if that value, or another field, is wrong.
+    pub approval_values: Vec<(&'static str, String)>,
 }
 
 struct Analysis {
@@ -369,6 +366,7 @@ fn analyze(text: &str, mode: Mode, unnumbered: Unnumbered) -> Analysis {
             ticket: None,
             status: None,
             module: None,
+            approval_values: Vec::new(),
         },
     };
 
@@ -481,6 +479,7 @@ fn analyze(text: &str, mode: Mode, unnumbered: Unnumbered) -> Analysis {
             ticket: parsed.ticket,
             status: parsed.status,
             module: parsed.module,
+            approval_values: parsed.approval_values,
         },
     }
 }

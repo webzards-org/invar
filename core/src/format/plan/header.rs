@@ -20,6 +20,16 @@ pub(super) const APPROVED_CHECKSUM: &str = "Approved-checksum";
 pub(super) const LOCKFILE_CHECKSUM: &str = "Lockfile-checksum";
 pub(super) const ACCEPTANCE: &str = "Acceptance";
 
+/// The keys only `plan approve` fills (§5, "Command only").
+/// `reset_to_draft` empties the same ones.
+pub(super) const APPROVAL_KEYS: [&str; 5] = [
+    APPROVED_BY,
+    APPROVED_AT,
+    APPROVED_CHECKSUM,
+    LOCKFILE_CHECKSUM,
+    ACCEPTANCE,
+];
+
 /// Keys that must be present, even with an empty value (§5, D-3).
 const REQUIRED_KEYS: [&str; 6] = [
     TICKET,
@@ -317,6 +327,10 @@ pub(super) struct Parsed {
     /// `Module`, whenever it has the shape of a module name, likewise — what
     /// `decision record` files an entry under (M1-11).
     pub(super) module: Option<String>,
+    /// The keys only `plan approve` fills, with their values, whenever a value
+    /// is there, well formed or not — so `plan guard` can tell a draft that
+    /// an edit fills one of them (#153).
+    pub(super) approval_values: Vec<(&'static str, String)>,
 }
 
 /// Parse the lines between the delimiters. `first_line` is the 1-based number
@@ -471,12 +485,21 @@ pub(super) fn parse(lines: &[Line], first_line: usize, found: &mut Diagnostics) 
         .map(|(value, _)| value)
         .filter(|value| is_module(value))
         .map(str::to_owned);
+    let approval_values = APPROVAL_KEYS
+        .into_iter()
+        .filter_map(|key| {
+            value_of(key)
+                .filter(|(value, _)| !value.is_empty())
+                .map(|(value, _)| (key, value.to_owned()))
+        })
+        .collect();
     Parsed {
         lines: parsed,
         header,
         ticket,
         status,
         module,
+        approval_values,
     }
 }
 

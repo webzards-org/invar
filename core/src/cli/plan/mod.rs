@@ -67,6 +67,12 @@ pub enum Command {
     /// pass silently (exit 0). Input it cannot make sense of passes too, with
     /// the problem reported: a broken guard must not halt a session.
     ///
+    /// A draft Plan, or a `spec.md` not written yet, is judged by the header
+    /// the call would leave: one that says `Status: approved`, or fills an
+    /// approval key (`Approved-by`, `Approved-at`, `Approved-checksum`,
+    /// `Lockfile-checksum`, `Acceptance`) with a value the file did not have,
+    /// is denied. Only `invar plan approve` writes them.
+    ///
     /// Under `acceptance.dir`, a locked test is denied the same way, and so is a
     /// call that would write a digest into a lock line, which only `invar
     /// acceptance lock` does. `invar acceptance verify` is the boundary there.
@@ -80,7 +86,9 @@ pub enum Command {
     /// `Write|Edit` never sees a file changed through `Bash` — a heredoc,
     /// `sed -i`, `git checkout`. `invar plan check` and `invar done` catch
     /// every such change through `Approved-checksum`. Passing the guard proves
-    /// nothing about a Plan; passing `plan check` does.
+    /// nothing about a Plan; passing `plan check` does. A shell write (`sed
+    /// -i`, a heredoc, `python3`) of approval values into a draft gets past
+    /// the guard too, as it does for a lock line (acceptance-lock.md D-20).
     Guard(guard::Args),
 }
 

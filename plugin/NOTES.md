@@ -502,7 +502,8 @@ needs and ignore the rest — which is what `invar plan guard` does.
 |---|---|---|---|
 | **Deny** — the path is an approved Plan's `spec.md` | `hookSpecificOutput` with `permissionDecision: "deny"` and the reason | the reason | **2** |
 | **Deny** — a locked acceptance test, or a digest written by hand (AT-10, below) | the same | the reason | **2** |
-| **Pass** — a draft Plan, any other file | nothing | nothing | 0 |
+| **Deny** — a call that writes approval values into a draft or a new Plan (#153, below) | the same | the reason | **2** |
+| **Pass** — any other edit of a draft Plan, any other file | nothing | nothing | 0 |
 | **Unsure** — input it cannot make sense of | `{"systemMessage": "invar plan guard: …; the tool call is allowed"}` | the same text | 0 |
 
 Deny uses both signals on purpose: either blocks on its own in Claude Code,
@@ -610,6 +611,42 @@ So is writing the digest through Bash, with one limit. After the edit above, `in
 holds. For another ticket's file, the branch rule still refuses it. For the current
 ticket's own new files nothing in the core does: review and the PR diff catch it
 (`acceptance-lock.md` D-20).
+
+### Approval values in a draft — added in #153
+
+Until #153 the guard judged a Plan only by its `Status` on disk before the call. A draft,
+or a `spec.md` not written yet, passed whatever the call wrote, so one `Edit` could set
+`Status: approved` and fill `Approved-by`, `Approved-at` and `Approved-checksum`, which
+an agent can compute with `invar hash` (§4d). `plan check` then passed. The command
+guard did not help: no command was run.
+
+Now a `Write` or `Edit` of `.invar/plans/<name>/spec.md` is also judged by the header of
+the file the call would leave, read with the Plan parser, the same way as for a lock
+line: `content` for a `Write`, the file with `old_string` replaced for an `Edit` (one
+function, `text_after`, serves both checks). It is denied when that header says
+`Status: approved`, or holds a value for `Approved-by`, `Approved-at`,
+`Approved-checksum`, `Lockfile-checksum` or `Acceptance` that the file did not already
+have: the keys plan-header.md §5 marks "Command only". A malformed value counts; a
+`Status: approved` in the body does not.
+
+"Did not already have", not "has": a draft holding an approval value is not an error
+(§5.1), so an edit elsewhere in it passes. A `Write` of a new Plan has no "before", so
+any value in it is denied. The deny reason tells the agent the Plan is only the
+developer's to approve, and to stop and wait for `/invar:approve`.
+
+The route for changing an approved Plan is unchanged by this, and is now what the guard
+and `docs/USAGE.md` both say: the developer records a `failed` entry, which resets the
+Plan to draft through the CLI (past the guard, which never sees it), the planner revises
+the draft, and the developer approves it with plain `/invar:approve`; `--reapprove` is
+not needed for a draft. Or the developer edits the approved Plan by hand and approves it
+with `--reapprove`. `tests/plan_guard.rs` runs the first route end to end.
+
+**The shell path remains open.** As for a lock line, a `Write|Edit` matcher does not see
+a `sed -i`, a heredoc or a `python3` that writes the same values, and the Bash scan looks
+for commands, not for what they write. This closes the edit-tool path only. Forging an
+approval through a shell stays possible, because nothing an agent cannot produce goes
+into it; that would take something like a signed commit or tag checked in CI, a separate
+question. `invar plan guard --help` states the limit.
 
 ### End to end, with the real binary
 

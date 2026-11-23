@@ -1187,6 +1187,34 @@ fn check_does_not_report_a_ticket_or_status_that_is_malformed() {
 }
 
 #[test]
+fn check_reads_the_approval_values_well_formed_or_not_and_only_from_the_header() {
+    // `plan guard` asks whether an edit fills one (#153): a malformed value is
+    // filled all the same, and the body is not the header.
+    assert!(
+        Plan::check(&valid(), Mode::Light)
+            .approval_values
+            .is_empty()
+    );
+    let text = valid()
+        .replace("Approved-by:", "Approved-by: rade")
+        .replace("Approved-at:", "Approved-at: tomorrow")
+        .replace(
+            "---\n\n## Ticket\n",
+            "Acceptance: skipped\n---\n\n## Ticket\nApproved-checksum: x\n",
+        );
+    let checked = Plan::check(&text, Mode::Light);
+    assert!(!checked.problems.is_empty());
+    assert_eq!(
+        checked.approval_values,
+        vec![
+            ("Approved-by", "rade".to_owned()),
+            ("Approved-at", "tomorrow".to_owned()),
+            ("Acceptance", "skipped".to_owned()),
+        ]
+    );
+}
+
+#[test]
 fn check_without_a_header_reports_only_that() {
     let checked = Plan::check("## Ticket\nno header\n", Mode::Light);
     assert_eq!(checked.problems.len(), 1);

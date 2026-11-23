@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 use tempfile::TempDir;
 
-use super::{Verdict, decide};
+use super::{Verdict, decide, text_after};
 
 const APPROVED: &str = "---\nTicket: SHOP-214\nModule: orders\nStatus: approved\n\
     Approved-by: rade\nApproved-at: 2026-10-05\n\
@@ -123,6 +123,69 @@ fn a_path_through_a_symlink_is_still_denied() {
     let link = root.join("plan-link");
     std::os::unix::fs::symlink(root.join(".invar/plans/SHOP-214-cancel"), &link).unwrap();
     assert!(matches!(on(&link.join("spec.md")), Verdict::Deny { .. }));
+}
+
+#[test]
+fn a_draft_given_its_approval_values_by_an_edit_is_denied_naming_them() {
+    let (_dir, _root, spec) = project(&draft());
+    let input = serde_json::to_vec(&json!({
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": spec,
+            "old_string": "Status: draft\nApproved-by:",
+            "new_string": "Status: approved\nApproved-by: rade",
+        },
+    }))
+    .unwrap();
+    match decide(&input, Path::new("/")) {
+        Verdict::Deny { reason } => {
+            assert!(
+                reason.starts_with(
+                    "this would write `Status: approved` and a value for `Approved-by` into \
+                     the header of .invar/plans/SHOP-214-cancel/spec.md"
+                ),
+                "{reason}"
+            );
+            // `Approved-at` and `Approved-checksum` were in the draft already.
+            assert!(!reason.contains("`Approved-at`"), "{reason}");
+            assert!(reason.contains("`/invar:approve SHOP-214`"), "{reason}");
+        }
+        other => panic!("expected Deny, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_plan_that_cannot_be_read_stays_unsure_whatever_the_call_writes() {
+    let (_dir, _root, spec) = project(&draft());
+    fs::write(&spec, b"---\nStatus: draft\xff\n---\n").unwrap();
+    let input = serde_json::to_vec(&json!({
+        "tool_name": "Write",
+        "tool_input": { "file_path": spec, "content": APPROVED },
+    }))
+    .unwrap();
+    assert_unsure(decide(&input, Path::new("/")), "not valid UTF-8");
+}
+
+#[test]
+fn the_text_after_a_call_is_its_content_or_the_file_with_the_edit_applied() {
+    let call = |input: serde_json::Value| json!({ "tool_input": input });
+    let before = Some("a a a");
+    assert_eq!(
+        text_after(&call(json!({ "content": "new" })), None).as_deref(),
+        Some("new")
+    );
+    let edit = json!({ "old_string": "a", "new_string": "b" });
+    assert_eq!(
+        text_after(&call(edit.clone()), before).as_deref(),
+        Some("b a a")
+    );
+    let all = json!({ "old_string": "a", "new_string": "b", "replace_all": true });
+    assert_eq!(text_after(&call(all), before).as_deref(), Some("b b b"));
+    // An edit of a file that is not there, an empty `old_string`, no edit at all.
+    assert_eq!(text_after(&call(edit), None), None);
+    let empty = json!({ "old_string": "", "new_string": "b" });
+    assert_eq!(text_after(&call(empty), before), None);
+    assert_eq!(text_after(&call(json!({})), before), None);
 }
 
 // --- pass -----------------------------------------------------------------------
