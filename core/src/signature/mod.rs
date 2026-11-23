@@ -13,6 +13,16 @@
 //! background after 120, and `/invar:approve` would never see the outcome. So a
 //! signing program still running at the deadline is killed, and nothing is
 //! written.
+//!
+//! **Everything it started is stopped too, where that is safe.** A signing
+//! program may start others — ssh-keygen an askpass dialog, a password manager's
+//! signer a helper — and they hold its output pipes open. Without a controlling
+//! terminal, which is how `/invar:approve` runs it, the program gets a process
+//! group of its own, and the deadline kills the whole group. With one, it stays
+//! in ours: a process group of its own would be a background job of that
+//! terminal, and the kernel stops a background job that reads its passphrase
+//! from `/dev/tty` (SIGTTIN), so it could never be answered. Either way the
+//! deadline returns at once, and never waits for the pipes to close.
 
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
@@ -108,20 +118,21 @@ impl Signer {
                 temp.path()
             }
         };
-        let child = Command::new(&self.program)
+        let mut command = Command::new(&self.program);
+        command
             .args(["-Y", "sign", "-n", NAMESPACE, "-f"])
             .arg(key)
             .current_dir(dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|source| SignError::CannotStart {
-                program: self.program.clone(),
-                source,
-            })?;
+            .stderr(Stdio::piped());
+        let group = isolate(&mut command, has_terminal());
+        let child = command.spawn().map_err(|source| SignError::CannotStart {
+            program: self.program.clone(),
+            source,
+        })?;
         let finished =
-            run_with_deadline(child, statement.as_bytes(), deadline).map_err(|source| {
+            run_with_deadline(child, group, statement.as_bytes(), deadline).map_err(|source| {
                 SignError::CannotStart {
                     program: self.program.clone(),
                     source,
@@ -179,10 +190,69 @@ struct Finished {
     stderr: Vec<u8>,
 }
 
+/// Whether the program runs in a process group of its own, which the deadline
+/// kills as a whole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Group {
+    Own,
+    Ours,
+}
+
+/// Whether this process has a controlling terminal: `/dev/tty` opens only then.
+#[cfg(unix)]
+fn has_terminal() -> bool {
+    File::open("/dev/tty").is_ok()
+}
+
+#[cfg(not(unix))]
+fn has_terminal() -> bool {
+    false
+}
+
+/// Give `command` a process group of its own, unless there is a terminal it may
+/// have to read a passphrase from (see the module comment).
+#[cfg(unix)]
+fn isolate(command: &mut Command, terminal: bool) -> Group {
+    use std::os::unix::process::CommandExt as _;
+    if terminal {
+        return Group::Ours;
+    }
+    command.process_group(0);
+    Group::Own
+}
+
+#[cfg(not(unix))]
+fn isolate(_: &mut Command, _: bool) -> Group {
+    Group::Ours
+}
+
+/// Kill `child`, and with [`Group::Own`] every process in its group, then reap
+/// it. The group is killed with the `kill` command: the core has no libc
+/// binding of its own.
+fn stop(child: &mut Child, group: Group) {
+    if group == Group::Own {
+        // `process_group(0)` made the child the leader: the group's id is its pid.
+        let _ = Command::new("kill")
+            .args(["-KILL", "--", &format!("-{}", child.id())])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// Feed `input` to `child`, and wait for it at most `deadline`: its status and
 /// output, or `None` when the deadline passed and it was killed.
+///
+/// A program that exits in time is read to the end, as before. Past the
+/// deadline it is stopped, and this returns at once: the threads reading its
+/// pipes are left to finish on their own, since something it started that
+/// [`stop`] could not reach may still hold them open.
 fn run_with_deadline(
     mut child: Child,
+    group: Group,
     input: &[u8],
     deadline: Duration,
 ) -> io::Result<Option<Finished>> {
@@ -218,20 +288,19 @@ fn run_with_deadline(
             break Some(status);
         }
         if started.elapsed() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            stop(&mut child, group);
             break None;
         }
         thread::sleep(Duration::from_millis(20));
     };
-    let (stdout, stderr) = (
-        stdout.join().unwrap_or_default(),
-        stderr.join().unwrap_or_default(),
-    );
-    Ok(status.map(|status| Finished {
+    let Some(status) = status else {
+        // Dropping the handles detaches the threads.
+        return Ok(None);
+    };
+    Ok(Some(Finished {
         status,
-        stdout,
-        stderr,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
     }))
 }
 

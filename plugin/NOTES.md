@@ -2204,6 +2204,24 @@ commit that fails after the approval is written is a refusal too. The approval
 stays on disk, but the line the skill keys on is not printed, so Phase 2 does not
 start on an approval whose commit failed.
 
+**The deadline, fixed in review (PR #162).** The first version killed only the
+signing program. A helper it started — reproduced with a `gpg.ssh.program`
+running `( sleep 150 ) &` then `sleep 200` — kept the output pipes open, and
+`plan approve --skill` printed the 90 s refusal only once the helper exited, at
+200 s. An askpass dialog started by ssh-keygen does the same. Now, without a
+controlling terminal, the program gets a process group of its own
+(`process_group(0)`), and the deadline kills the group with `kill -KILL --
+-<pgid>`, the `kill` command, since the core has no libc binding. Past the
+deadline nothing waits for the pipes.
+
+With a terminal the program stays in invar's process group, on purpose.
+Measured on 2026-11-23 in a pty (`script -qec`): a child in a process group of its
+own that reads `/dev/tty` is stopped at once (state `T`, SIGTTIN). In the
+caller's group it waits for input (`S`). So a process group of its own would have
+frozen every passphrase prompt in a terminal until the deadline. In that case only
+the program is killed, and the refusal still returns at once. `/invar:approve`
+runs without a terminal (A2), so it always gets the group.
+
 **Not built here:** `invar approval verify`, so nothing in the core checks a
 signature yet, and the docs say so. Also not built: the `pr-body` signer line.
 **Not exercised:** a signed `/invar:approve` in a real session with a security

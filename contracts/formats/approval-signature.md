@@ -108,7 +108,13 @@ An absent file means an unsigned approval: the behavior before this contract.
    No shell is involved. The developer's agent, passphrase prompt, askpass or
    security key works as it does for a signed commit.
 3. **Within 90 seconds.** A signing program still running after 90 seconds is
-   killed, and the approval is refused (D-4).
+   killed, and the approval is refused at once (D-4). What the program started
+   (an askpass dialog, a password manager's helper) is killed with it when
+   there is no controlling terminal, as under `/invar:approve`: the program runs
+   in a process group of its own, and the whole group is killed. With a
+   terminal, the program stays in the caller's process group, so that it can
+   still read a passphrase from it, and only the program is killed. Either way,
+   the refusal never waits for what the program started to exit.
 4. **Before anything is written.** The order of `plan-header.md` §5.3 is:
    validate, read approver and date, print the criteria, **sign**, write. A
    refusal at the signing step leaves the Plan and any earlier `approval.sig`
@@ -243,3 +249,10 @@ agent could sign too.
 ## 9. Version history
 
 **1.0.0** — initial version (#154).
+
+Not yet released, so changed in place during review (PR #162):
+
+- §5, step 3: the deadline also kills what the signing program started, when
+  there is no terminal, and the refusal never waits for it. Before, only the
+  program was killed, and a helper holding its output open kept `plan approve`
+  waiting until the helper exited, long past the 90 seconds.
