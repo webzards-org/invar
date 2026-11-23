@@ -1,6 +1,6 @@
 # Contract: Plan header and required sections
 
-**Version:** 1.7.1 — what a declared test path must be, and what an undeclared change does; see §10 for what changed and why
+**Version:** 1.8.0 — a signed approval, `approval.sig`, and the approval's commit; see §10 for what changed and why
 **Status:** stable
 **Implements:** §4a (Plan document structure), §4d (Checksums), §5c (Context
 delivery), §12 (Plan lifecycle); light mode L-1, L-2, L-5
@@ -47,7 +47,8 @@ not an integrity failure (§4d).
   `.feature` `Ticket` field.
 - `<slug>` matches `^[a-z0-9]+(-[a-z0-9]+)*$`, non-empty.
 - The file is always named `spec.md`. Other files may sit beside it; the core
-  reads only `spec.md`.
+  reads `spec.md`, and, since 1.8.0, `approval.sig`, the signature of a signed
+  approval (`approval-signature.md` §4). Absent, the approval is unsigned.
 - The directory name is the join key across the Plan, the branch and the
   decision entry, matched by plain substring (§4a, §12). `plan validate` fails
   loudly when the shape does not match.
@@ -116,7 +117,7 @@ once canonicalized (§4d), which ignores a BOM and trailing whitespace (D-19).
 | `Ticket` | yes | `^[A-Z][A-Z0-9]*-[0-9]+$`; must match the directory name | Agent |
 | `Module` | yes | `^[A-Za-z][A-Za-z0-9_]*$`, or `global`; case is kept as written (D-15) | Agent |
 | `Status` | yes | `draft` or `approved`, lowercase, exactly | `plan approve` sets `approved`; `decision record --type failed` sets `draft`; the agent writes `draft` on creation |
-| `Approved-by` | key present always; value only when `Status: approved` | Non-empty; a git `user.name` | **Command only** (`plan approve`) |
+| `Approved-by` | key present always; value only when `Status: approved` | Non-empty; a git `user.name`. Text: with a signed approval, the signature says who approved (`approval-signature.md` §6.4) | **Command only** (`plan approve`) |
 | `Approved-at` | key present always; value only when `Status: approved` | `YYYY-MM-DD` | **Command only** (`plan approve`) |
 | `Approved-checksum` | key present always; value only when `Status: approved` | `sha256:` + 64 lowercase hex, over the **body**, and over the `Acceptance` value when there is one (§5.3, D-19) | **Command only** (`plan approve`) |
 | `Lockfile-checksum` | **optional** since 1.1.0 — absent and empty both mean no observation (§5.2) | `sha256:` + 64 lowercase hex, or empty | **Command only** (`plan approve`, from the milestone that introduces package context; never in light mode) |
@@ -135,7 +136,9 @@ can write `Status: approved` itself. What makes the ordinary failure mode
 detectable is `Approved-checksum`: if the body or the `Acceptance` value changes
 after approval, the approval is stale, and `plan check` refuses — and with it `invar done`
 (M1-10, M1-12). With `scenarios: true`, `scenario confirm` refuses as well
-(§4a, honesty note).
+(§4a, honesty note). The checksum does not show who approved: anything that can
+run `invar` can compute it. A signed approval does, with `approval.signed` in
+`invar.yaml` (`approval-signature.md`, D-21).
 
 ### 5.1 Consistency rules
 
@@ -202,7 +205,7 @@ In order:
    - `Status: draft` — approve. Any values already in the approval keys are
      overwritten.
    - `Status: approved`, all three approval values present, and
-     `Approved-checksum` equal to the approval digest (step 5) of the Plan as it
+     `Approved-checksum` equal to the approval digest (step 6) of the Plan as it
      is — already approved; nothing is written, and the command succeeds. A flag
      that names another value than the one recorded changes nothing, and the
      command says so and names `--reapprove`. With `--reapprove`, and only with
@@ -249,7 +252,11 @@ In order:
    not cover, the line says so:
    ``Acceptance: skipped (default; the `required` in the header was not part of the approval)``,
    and the same after `from invar.yaml`.
-5. **Write.** `Status` becomes `approved`; `Approved-by`, `Approved-at`,
+5. **Sign**, only when `approval.signed` is on in `invar.yaml`: the statement
+   of `approval-signature.md` §3, built from `Ticket` and the `Approved-checksum`
+   about to be written, is signed with the developer's SSH signing key, within 90
+   seconds (`approval-signature.md` §5). A refusal here writes nothing.
+6. **Write.** `Status` becomes `approved`; `Approved-by`, `Approved-at`,
    `Approved-checksum` and `Acceptance` get their values. If the header has no
    `Acceptance` key, it is added right after `Approved-checksum`, with that line's
    line ending. Nothing else changes — not the other header lines, not their
@@ -257,12 +264,21 @@ In order:
    is left as it is (§5.2). The file is replaced atomically, and refused if it
    changed after the criteria were printed.
 
+   With a signature from step 5, `approval.sig` is written next to the Plan
+   first, replacing any earlier one, and put back as it was if the header then
+   cannot be written (`approval-signature.md` §5).
+
    `Approved-checksum` is the **approval digest**. When the header has an
    `Acceptance` value, that is the §4d digest of the line `Acceptance: <value>`, a
    newline (`\n`, whatever the file uses), then the canonical body (§4.3). When it
    has none, it is the §4d digest of the body alone, as before 1.7.0 (D-19). A new
    approval always has a value, so only a Plan approved before 1.7.0 has the
    second form.
+7. **Commit**, only when asked: `--commit <MESSAGE>`, or `approval.commit` in
+   `invar.yaml` (`invar-yaml.md` §3.7). One commit of `spec.md`, and of
+   `approval.sig` when there is one, and nothing else, under the project's own
+   hooks and signing; nothing is pushed. A commit that fails leaves the approval
+   written, and says so.
 
 `plan check` reads the field back: on success it prints, after its `ok:` line, one
 fixed line, `acceptance: required` or `acceptance: skipped`. A Plan with no value
@@ -738,6 +754,16 @@ So a value changed together with the body is not caught here: the digest cannot 
 from an honest edit, and the line printed with the criteria is the only signal. A label
 never claims what the digest did not show.
 
+**D-21 — Who approved is a signature, not a header field** (1.8.0, #154).
+`Approved-by` is `git config user.name`, which anyone on the machine can set, and
+`Approved-checksum` is computed by a binary the agent can run as well. Neither
+says that a person approved. A signature by the developer's key, over the ticket
+and the checksum, can. It sits in its own file, `approval.sig`, because an armored
+signature is several lines and the header is one line per key, and because the
+header's fields must stay readable by every reader that knows nothing of
+signatures. Optional and opt-in (`invar-yaml.md` D-13): an absent file means what
+an approval meant before.
+
 ## 8. Open questions
 
 **OQ-1 — Re-approving an already approved Plan.** *Resolved in 1.3.0 by
@@ -1078,6 +1104,23 @@ Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece8
 `acceptance: skipped` (§5.1, D-19). Adding `Acceptance: required` by hand stales it.
 
 ## 10. Version history
+
+**1.8.0 — a signed approval (#154).**
+
+- §2: `approval.sig` may sit beside `spec.md`, and the core reads it.
+- §5: `Approved-by` is text; with a signed approval, the signature says who
+  approved. New D-21.
+- §5.3: new step 5, signing when `approval.signed` is on, before anything is
+  written; step 6 writes `approval.sig` with the header; new step 7, the commit
+  when asked. The format of the signature, its statement and its verification are
+  in the new `approval-signature.md` 1.0.0.
+
+**Why:** the approval is the one decision every later check relies on, and on
+disk nothing showed that a person made it (#154).
+
+**Compatibility:** no key, value or section changes, so every Plan that was valid
+stays valid and means what it meant. Without `approval.signed`, `plan approve`
+writes what it wrote before.
 
 **1.7.1 — what a declared test path must be (AT-9).** §6.5 says what `plan check` and `done`
 check of a path, and what an undeclared change does. `plan validate` checks what it did, so no
