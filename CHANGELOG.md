@@ -19,6 +19,21 @@
   and its signature when there is one. `approval.commit: true` does it every
   time, as `Approve plan <TICKET>`; `--no-commit` skips it once. Your hooks
   and commit signing apply, and nothing is pushed (#154).
+- **Locked acceptance tests have to pass, not only stay unchanged.**
+  `invar acceptance verify --results junit.xml` reads the JUnit report of your
+  own test run, for CI: every locked file must have a test case in it, and every
+  one must have passed. It fails, naming file, test and criterion, on a locked
+  file your suite did not run, on `failure`, `error` and `skipped`, and on a test
+  that passed only on a retry. `--report-root /var/www/html` maps the paths of a
+  runner in a container, such as PHPUnit under Laravel Sail. `invar done
+  --results` makes the same check for the ticket before it deletes anything.
+  Without `--results`, nothing changes. Invar still never runs your suite (#156).
+- **`invar acceptance run <TICKET>`** runs the ticket's locked tests, and only
+  them, and says per criterion whether they pass, ending with `acceptance:
+  green <TICKET>` or `acceptance: red <TICKET>`. The coder runs it before it
+  answers `DONE`, and the main session after: on red it shows what failed,
+  offers the coder again, and offers no commit, review or `/invar:done` (#156).
+  Contracts `acceptance-lock.md` 1.4.0 and `test-results.md` 1.2.0.
 
 ### Changed
 

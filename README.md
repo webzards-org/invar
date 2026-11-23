@@ -213,7 +213,8 @@ recorded one.
   into your existing `.gitignore`, `.gitattributes` and
   `.claude/settings.json` without overwriting anything.
 - **Works in CI with no agent.** `invar acceptance verify` checks every locked
-  test on each push.
+  test on each push, and with `--results junit.xml`, that each one passed in
+  your own test run.
 
 ## Principles
 

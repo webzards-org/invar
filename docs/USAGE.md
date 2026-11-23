@@ -213,7 +213,24 @@ The **coder** agent gets only the ticket id. It reads the approved Plan and
 `AI_CONTEXT.md`, implements inside the Plan's Scope, makes the locked tests
 pass, and runs your project's own checks. It answers in one of three ways:
 
-- **`DONE`** with a short summary. Go to step 5.
+- **`DONE`** with a short summary. With acceptance tests, the coder has run
+  `invar acceptance run SHOP-214` first, and the main session runs it again
+  before anything else. It runs the ticket's locked tests, and only them, and
+  says per criterion whether they pass:
+
+  ```
+  AC1: passed
+  AC2: not passed
+    tests/Acceptance/CancelOrderTest.php: `it AC2 refuses a paid order` (AC2): failure: Failed asserting that 200 is identical to 403.
+  acceptance: red SHOP-214
+  ```
+
+  On `acceptance: green SHOP-214`, go to step 5. On `red`, you see what did not
+  pass, and the main session offers to start the coder again with it; it offers
+  no commit, review or `/invar:done` until the tests are green. A skipped test
+  is not green, and neither is one that passed only on a retry. This run is
+  feedback in your session; the check you can rely on is your CI's (see
+  [Verify the locks in CI](INSTALL.md#optional-verify-the-locks-in-ci)).
 - **`BLOCKED <reason>`**: the Plan cannot be implemented as approved (two
   criteria contradict each other, something it depends on does not exist).
   It never softens a criterion to get past it. You decide what follows: often
@@ -235,7 +252,8 @@ pass, and runs your project's own checks. It answers in one of three ways:
 
 ## 5. Review, PR, decision entry, close
 
-After `DONE`, the main session offers each step once:
+After `DONE`, and with acceptance tests only after `acceptance: green`, the
+main session offers each step once:
 
 1. **Commit** the change.
 2. **`/invar:review SHOP-214`** (optional, advisory). A reviewer agent reports,
@@ -318,11 +336,12 @@ You never need them inside Claude Code. They are useful in a shell or in CI
 | `invar plan validate <TICKET>` | Checks the Plan's form |
 | `invar plan check <TICKET>` | Checks that the Plan is approved and unchanged, and the locks |
 | `invar plan approve <TICKET> [--acceptance\|--no-acceptance] [--reapprove] [--commit <MESSAGE>\|--no-commit]` | The approval, as `/invar:approve` runs it; signed with `approval.signed` |
-| `invar acceptance verify [<TICKET>]` | Checks the locks. Without a ticket: the whole test directory, for CI |
+| `invar acceptance verify [<TICKET>] [--results <report>… [--report-root <dir>]]` | Checks the locks. Without a ticket: the whole test directory, for CI. With `--results`, also that every locked test passed in your JUnit reports |
+| `invar acceptance run <TICKET>` | Runs the ticket's locked tests, and says per criterion whether they pass |
 | `invar acceptance unlock <TICKET> <file>…` | What `/invar:relock` runs |
 | `invar pr-body <TICKET>` | The PR description |
 | `invar decision log` | The decision log, newest first |
-| `invar done <TICKET> [--commit <message>]` | Closes the cycle |
+| `invar done <TICKET> [--commit <message>] [--results <report>…]` | Closes the cycle; with `--results`, only if the ticket's locked tests passed |
 | `invar hash --lock <file>` | Shows what a lock line records, for debugging |
 
 Every command has `--help`.

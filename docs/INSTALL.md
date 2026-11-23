@@ -97,7 +97,8 @@ Pest:
   writes or changes factories; a missing one is a `BLOCKED`.
 - **The acceptance directory in a test suite**, so your own CI runs these tests
   too: add `<directory>tests/Acceptance</directory>` to a `<testsuite>` in
-  `phpunit.xml`.
+  `phpunit.xml`. `invar acceptance verify --results` in CI refuses a locked
+  file your suite did not run.
 - **`AI_CONTEXT.md`, under `## Tests`**: how this project writes tests. The
   framework, the database, what may be faked (`Http::fake`, `Mail::fake`) and
   what never is (your own models, scopes and policies).
@@ -210,8 +211,50 @@ the Plan:
 
 It prints `verified <N> locked file(s)`, or fails with every problem: a locked file whose
 digest no longer matches, a malformed `invar-lock:` line, or a pending line nobody locked.
-Whether the tests pass is your own test step. With no `acceptance:` section in `invar.yaml`
-it warns and exits 0.
+With no `acceptance:` section in `invar.yaml` it warns and exits 0.
+
+### Check that the locked tests pass
+
+An unchanged test can still be red. Invar does not run your test suite: your test step
+does, and writes a JUnit report that `verify --results` reads. Every locked file must have
+a test case in the report, and every one of them must have passed:
+
+```yaml
+- name: Tests
+  run: vendor/bin/pest --log-junit junit.xml
+- name: Verify acceptance locks, and that the locked tests passed
+  if: ${{ !cancelled() }}
+  run: invar acceptance verify --results junit.xml
+```
+
+`if: ${{ !cancelled() }}` runs it after a red test step too, so that the job says which
+locked tests failed. It prints `verified <N> locked file(s), and <M> locked test(s) passed`,
+or fails naming the file, the test and its criterion (`AC2`) of each problem:
+
+- a locked file with no test case in any report: **not run by your test suite**. Add the
+  acceptance directory to a test suite (see [Acceptance tests](#acceptance-tests));
+- a test that is `failure`, `error` or `skipped`. A skipped locked test is never accepted;
+- a test that passed in one run and failed in another, such as a retry. Give every report
+  your CI writes (`--results junit.xml retry.xml`), and a test that passes only on a retry
+  is reported.
+
+Test cases of files that are not locked are ignored. A missing, empty or unreadable report
+is an error naming it.
+
+**In a container.** With Laravel Sail the tests run with the project at `/var/www/html`.
+Pest writes paths relative to the project, which need nothing. PHPUnit writes absolute ones,
+which then start with `/var/www/html` and are outside the project root as invar sees it. Say
+where the runner saw the project:
+
+```yaml
+- name: Tests
+  run: vendor/bin/sail exec -T laravel.test vendor/bin/phpunit --log-junit junit.xml
+- name: Verify acceptance locks, and that the locked tests passed
+  if: ${{ !cancelled() }}
+  run: invar acceptance verify --results junit.xml --report-root /var/www/html
+```
+
+Without `--report-root`, the error for such a path says to use it.
 
 `verify` needs no history, but `invar done` does: it compares the branch with its merge base,
 and refuses when it cannot. To run `done` in CI, check out with full history and give git the
@@ -229,6 +272,10 @@ base branch by the name invar looks for, since `actions/checkout` creates only `
 
 In a checkout you already have, `git fetch --unshallow origin develop:develop` does the same.
 Without the `develop:develop`, the fetch brings the history and still creates no branch.
+
+To close the cycle only when the ticket's locked tests passed, give `done` the same reports:
+`invar done SHOP-214 --results junit.xml`, with `--report-root` as above when the tests ran in
+a container. On a red test it refuses and deletes nothing.
 
 ## Optional: signed approvals
 
