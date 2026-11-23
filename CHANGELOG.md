@@ -14,6 +14,9 @@
   work for changing an approved Plan: a `failed` entry, a revision by the
   planner and a plain `/invar:approve`, or an edit by the developer and
   `--reapprove` (#153).
+  An `Edit` with an empty `old_string`, which creates a file or fills an
+  empty one, is judged like a `Write`, and an edit whose result the guard
+  cannot work out is judged by the text it writes (#153).
 
 ## 0.2.0 — 2026-11-18
 

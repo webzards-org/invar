@@ -62,7 +62,7 @@ use serde_json::Value;
 
 use crate::format::config;
 use crate::format::lock::{self, MARKER};
-use crate::format::plan::{Checked, Mode, Plan, Status};
+use crate::format::plan::{APPROVAL_KEYS, Checked, Mode, Plan, Status};
 use crate::fs::plans::{SPEC_FILE, UNLOCK_FILE};
 use crate::fs::{ProjectRoot, RootError};
 
@@ -228,15 +228,24 @@ fn judge_plan(path: &Path, relative: &Path, name: &str, tool: &str, payload: &Va
     if !matches!(tool, "Write" | "Edit") {
         return Verdict::Pass;
     }
-    let Some(after) = text_after(payload, text.as_deref()) else {
-        return Verdict::Pass;
+    let (written, ticket) = match text_after(payload, text.as_deref()) {
+        Some(after) => {
+            let after = Plan::check(&after, Mode::Light);
+            (
+                approval_written(before.as_ref(), &after),
+                ticket_or(&after, name),
+            )
+        }
+        None => {
+            let ticket = before
+                .as_ref()
+                .map_or_else(|| name.to_owned(), |b| ticket_or(b, name));
+            (approval_in_fragment(payload), ticket)
+        }
     };
-    let after = Plan::check(&after, Mode::Light);
-    let written = approval_written(before.as_ref(), &after);
     if written.is_empty() {
         return Verdict::Pass;
     }
-    let ticket = ticket_or(&after, name);
     let noun = if written.len() == 1 { "it" } else { "them" };
     Verdict::Deny {
         reason: format!(
@@ -279,6 +288,36 @@ fn approval_written(before: Option<&Checked>, after: &Checked) -> Vec<String> {
     };
     for (key, value) in &after.approval_values {
         if !had(key, value) {
+            written.push(format!("a value for `{key}`"));
+        }
+    }
+    written
+}
+
+/// The approval values the text a call writes holds on its own, when the file it would
+/// leave cannot be told ([`text_after`] is `None`): a line that is, once trimmed,
+/// `Status: approved` or an approval key with a value.
+///
+/// **This may over-deny.** A fragment has no header to read: `Approved-by: rade` in a
+/// criterion or a code block cannot be told from the header line, so it is denied too.
+/// Passing instead would let any call the guard cannot follow write an approval.
+fn approval_in_fragment(payload: &Value) -> Vec<String> {
+    let input = payload.get("tool_input");
+    let text_of = |key: &str| input.and_then(|i| i.get(key)).and_then(Value::as_str);
+    let Some(fragment) = text_of("content").or_else(|| text_of("new_string")) else {
+        return Vec::new();
+    };
+    let mut written = Vec::new();
+    let lines = || fragment.lines().map(str::trim);
+    if lines().any(|line| line == "Status: approved") {
+        written.push("`Status: approved`".to_owned());
+    }
+    for key in APPROVAL_KEYS {
+        let filled = lines().any(|line| {
+            line.split_once(':')
+                .is_some_and(|(k, value)| k == key && !value.trim().is_empty())
+        });
+        if filled {
             written.push(format!("a value for `{key}`"));
         }
     }
@@ -415,9 +454,10 @@ fn writes_digest(payload: &Value, existing: Option<&[u8]>) -> bool {
 
 /// The file the `Write` or `Edit` in `payload` would leave: `content` for a `Write`;
 /// for an `Edit`, `before`, the file as it is, with `old_string` replaced by
-/// `new_string` (every occurrence under `replace_all`). `None` when that cannot be
-/// told: an `Edit` of a file that is not there or not text, or a payload that is
-/// neither.
+/// `new_string` (every occurrence under `replace_all`), or `new_string` alone when
+/// `old_string` is empty and the file is not there or empty. `None` when that cannot
+/// be told: any other `Edit` of a file that is not there or not text, an empty
+/// `old_string` on a file with text in it, or a payload that is neither.
 fn text_after(payload: &Value, before: Option<&str>) -> Option<String> {
     let input = payload.get("tool_input");
     let text_of = |key: &str| input.and_then(|i| i.get(key)).and_then(Value::as_str);
@@ -425,7 +465,12 @@ fn text_after(payload: &Value, before: Option<&str>) -> Option<String> {
         return Some(content.to_owned());
     }
     let new = text_of("new_string")?;
-    let old = text_of("old_string").filter(|old| !old.is_empty())?;
+    let old = text_of("old_string")?;
+    if old.is_empty() {
+        // Claude Code creates the file, or fills an empty one, with `new_string`, and
+        // refuses the call on any other file (`plugin/NOTES.md` §11, #153).
+        return before.is_none_or(str::is_empty).then(|| new.to_owned());
+    }
     let before = before?;
     let replace_all = input
         .and_then(|i| i.get("replace_all"))

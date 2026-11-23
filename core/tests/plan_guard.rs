@@ -657,6 +657,45 @@ fn writing_and_revising_a_draft_with_empty_approval_keys_passes() {
 }
 
 #[test]
+fn an_edit_with_an_empty_old_string_that_writes_an_approved_plan_is_denied() {
+    // Claude Code creates the file, or fills an empty one, with `new_string`
+    // (`plugin/NOTES.md` §11): it is the file the call would leave.
+    let project = Project::new(DRAFT);
+    let new = ".invar/plans/SHOP-300-refunds/spec.md";
+    let approved = APPROVED.replace("SHOP-214", "SHOP-300");
+    let denied = || {
+        guard(edit_with(
+            &project.root(),
+            &project.path(new),
+            "",
+            &approved,
+        ))
+        .code(2)
+        .stderr(contains(
+            "this would write `Status: approved` and a value for `Approved-by` and a \
+                 value for `Approved-at` and a value for `Approved-checksum` into the header",
+        ))
+        .stderr(contains("`/invar:approve SHOP-300`"));
+    };
+    denied();
+    fs::create_dir_all(project.root().join(new).parent().unwrap()).unwrap();
+    fs::write(project.root().join(new), "").unwrap();
+    denied();
+}
+
+#[test]
+fn an_edit_with_an_empty_old_string_that_writes_a_draft_passes() {
+    let project = Project::new(DRAFT);
+    let new = project.path(".invar/plans/SHOP-300-refunds/spec.md");
+    passes_silently(edit_with(
+        &project.root(),
+        &new,
+        "",
+        &DRAFT.replace("SHOP-214", "SHOP-300"),
+    ));
+}
+
+#[test]
 fn a_value_the_draft_already_held_is_not_the_calls_doing() {
     // A draft may hold an approval value (plan-header.md §5.1): an edit that leaves
     // it as it is passes, and one that changes it is denied.

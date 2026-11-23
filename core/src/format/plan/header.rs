@@ -22,7 +22,7 @@ pub(super) const ACCEPTANCE: &str = "Acceptance";
 
 /// The keys only `plan approve` fills (§5, "Command only").
 /// `reset_to_draft` empties the same ones.
-pub(super) const APPROVAL_KEYS: [&str; 5] = [
+pub const APPROVAL_KEYS: [&str; 5] = [
     APPROVED_BY,
     APPROVED_AT,
     APPROVED_CHECKSUM,

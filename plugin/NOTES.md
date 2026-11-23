@@ -629,6 +629,24 @@ function, `text_after`, serves both checks). It is denied when that header says
 have: the keys plan-header.md §5 marks "Command only". A malformed value counts; a
 `Status: approved` in the body does not.
 
+**An `Edit` with an empty `old_string` — verified on 2026-11-23, Claude Code 2.1.309.**
+Run through Claude Code's own `Edit` tool in a throwaway directory:
+
+- on a file that does not exist: accepted, and the file is created holding exactly
+  `new_string`;
+- on an existing empty file: accepted, and the file then holds exactly `new_string`;
+- on a file with text in it: refused, `Cannot create new file - file already exists.`
+
+So such an `Edit` is a `Write` in all but name, and `text_after` treats it as one: on a
+missing or empty file the file it would leave is `new_string`. Before this, it returned
+nothing, and the Plan check passed an empty-`old_string` `Edit` that wrote a whole
+approved Plan, while the same content as a `Write` was denied. The guard does not rely
+on this behaviour staying as it is: whenever the file a `Write` or `Edit` would leave
+cannot be told, `content` or `new_string` is judged on its own, and a line that is,
+trimmed, `Status: approved` or an approval key with a value is denied. A fragment has no
+header to tell from its body, so that fallback can deny a body line too; the reason is
+the same as for a header.
+
 "Did not already have", not "has": a draft holding an approval value is not an error
 (§5.1), so an edit elsewhere in it passes. A `Write` of a new Plan has no "before", so
 any value in it is denied. The deny reason tells the agent the Plan is only the

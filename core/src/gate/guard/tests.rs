@@ -188,6 +188,51 @@ fn the_text_after_a_call_is_its_content_or_the_file_with_the_edit_applied() {
     assert_eq!(text_after(&call(json!({})), before), None);
 }
 
+#[test]
+fn an_edit_with_an_empty_old_string_leaves_its_new_string_in_a_missing_or_empty_file() {
+    // What Claude Code does with one (`plugin/NOTES.md` §11, #153).
+    let call = json!({ "tool_input": { "old_string": "", "new_string": "b" } });
+    assert_eq!(text_after(&call, None).as_deref(), Some("b"));
+    assert_eq!(text_after(&call, Some("")).as_deref(), Some("b"));
+    assert_eq!(text_after(&call, Some("a")), None);
+}
+
+/// An `Edit` of a Plan that is not there, with an `old_string` it cannot hold: the
+/// file the call would leave cannot be told, so `new_string` is judged on its own.
+fn on_a_fragment(new_string: &str) -> Verdict {
+    let (_dir, root, _spec) = project(&draft());
+    let input = serde_json::to_vec(&json!({
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": root.join(".invar/plans/SHOP-300-refunds/spec.md"),
+            "old_string": "Approved-checksum:",
+            "new_string": new_string,
+        },
+    }))
+    .unwrap();
+    decide(&input, Path::new("/"))
+}
+
+#[test]
+fn a_fragment_that_fills_an_approval_key_is_denied_and_an_empty_one_passes() {
+    match on_a_fragment("  Approved-checksum: x\n") {
+        Verdict::Deny { reason } => assert!(
+            reason.starts_with("this would write a value for `Approved-checksum` into the header"),
+            "{reason}"
+        ),
+        other => panic!("expected Deny, got {other:?}"),
+    }
+    assert!(matches!(
+        on_a_fragment("Status: approved"),
+        Verdict::Deny { .. }
+    ));
+    assert_eq!(on_a_fragment("Approved-checksum:\n"), Verdict::Pass);
+    assert_eq!(
+        on_a_fragment("Status: draft\nAcceptance:  \n"),
+        Verdict::Pass
+    );
+}
+
 // --- pass -----------------------------------------------------------------------
 
 #[test]

@@ -47,7 +47,7 @@ use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 pub use criteria::{Criterion, TestAction, TestToChange};
-pub use header::{Acceptance, Header, Status};
+pub use header::{APPROVAL_KEYS, Acceptance, Header, Status};
 pub use sections::{ACCEPTANCE_TESTS_TO_CHANGE, Section};
 
 use crate::diagnostics::Diagnostics;
