@@ -1770,8 +1770,18 @@ fn approve_starts_phase_2_only_on_the_recorded_line() {
 
     assert_eq!(
         meta["argument-hint"],
-        "[ticket] [--acceptance | --no-acceptance] [--no-start]"
+        "[ticket] [--acceptance | --no-acceptance] [--commit <message> | --no-commit] [--no-start]"
     );
+    // The commit flags exist on the command the skill runs (#154).
+    let help = Command::cargo_bin("invar")
+        .unwrap()
+        .args(["plan", "approve", "--help"])
+        .assert()
+        .success();
+    let help = String::from_utf8(help.get_output().stdout.clone()).unwrap();
+    for flag in ["--commit <MESSAGE>", "--no-commit"] {
+        assert!(help.contains(flag), "plan approve --help has no {flag}");
+    }
     let condition = flat
         .find("**If the output contains the line `approved <TICKET> checksum sha256:…`**")
         .expect("the start is conditional on the recorded line");

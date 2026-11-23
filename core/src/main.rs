@@ -24,6 +24,7 @@ mod git;
 mod init;
 mod pr_body;
 mod review_input;
+mod signature;
 
 use std::process::ExitCode;
 

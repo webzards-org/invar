@@ -230,6 +230,89 @@ base branch by the name invar looks for, since `actions/checkout` creates only `
 In a checkout you already have, `git fetch --unshallow origin develop:develop` does the same.
 Without the `develop:develop`, the fetch brings the history and still creates no branch.
 
+## Optional: signed approvals
+
+The checksum shows that a Plan has not changed since it was approved. It does not
+show who approved it: anything that can run `invar` can compute a checksum, and
+`Approved-by` is your git `user.name`, which anyone on the machine can set. A
+signed approval adds a signature by a key you hold, over the ticket and the
+checksum, written next to the Plan as `approval.sig`.
+
+**What it is worth depends on the key.** The agent runs in your shell, with your
+environment, including `SSH_AUTH_SOCK`. A key it can use without you gives no more
+than the checksum:
+
+- a key file with no passphrase, or a key loaded in `ssh-agent` without
+  confirmation, signs for the agent as readily as for you;
+- a key that asks you on every use signs only when you answer. Use one of:
+  - a security key (FIDO2), which needs a touch:
+    `ssh-keygen -t ed25519-sk -f ~/.ssh/id_invar_sk`;
+  - a key added to the agent with confirmation: `ssh-add -c ~/.ssh/id_invar`,
+    which asks through your desktop's askpass each time it is used;
+  - a passphrase key that is not loaded in the agent, with an askpass to ask for
+    the passphrase.
+
+`/invar:approve` runs without a terminal, so a passphrase or a confirmation is
+asked through `SSH_ASKPASS`. Set it before you start Claude Code, for example
+`export SSH_ASKPASS=/usr/libexec/gcr4-ssh-askpass` on a GNOME desktop. Without one,
+a passphrase key fails at once, with ssh-keygen's message, and nothing is approved.
+A touch on a security key needs no askpass.
+
+**The agent can trigger the same prompt.** The prompt says which key, not what is
+being signed. Answer it only right after you have run `/invar:approve` yourself. A
+prompt you did not expect is a reason to say no, and to find out what asked.
+
+To set it up:
+
+1. Tell git to sign with that key, as for signed commits:
+
+   ```bash
+   git config --global gpg.format ssh
+   git config --global user.signingkey ~/.ssh/id_invar_sk.pub
+   ```
+
+   `gpg.ssh.program` is used when you have set one, such as a password manager's
+   signer.
+
+2. Turn it on in `invar.yaml`:
+
+   ```yaml
+   approval:
+     signed: true
+   ```
+
+3. List who may approve in `.invar/approvers`, one line per key, in git's
+   allowed-signers format, and merge it to your base branch through review:
+
+   ```
+   dev@example.com namespaces="invar-approval" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...
+   ```
+
+   A check of approvals reads this file from the base branch, never from the
+   branch being checked, so a branch cannot add its own approver. Protect it with
+   `CODEOWNERS` like any file that decides who may merge.
+
+`plan approve` then signs every approval, within 90 seconds, and refuses one it
+cannot sign. Nothing else changes for the team: the agents never see the key.
+
+**Checking a signature by hand.** For a Plan as it is now, against the list on
+`origin/main`:
+
+```bash
+spec=.invar/plans/SHOP-214-cancel-unpaid-order/spec.md
+git show origin/main:.invar/approvers > /tmp/approvers
+printf 'invar-approval 1\nticket: %s\napproved-checksum: %s\n' \
+  "$(sed -n 's/^Ticket: //p' "$spec")" "$(sed -n 's/^Approved-checksum: //p' "$spec")" |
+  ssh-keygen -Y verify -f /tmp/approvers -I dev@example.com -n invar-approval \
+    -s "$(dirname "$spec")/approval.sig"
+```
+
+`Good "invar-approval" signature for dev@example.com` is the answer you want.
+`invar plan check` and `invar done` do not read the signature: they check the
+checksum, as before. A signature is a guarantee only where it is checked, and
+checked where the agent cannot change the answer: in CI, against the base branch's
+list.
+
 ---
 
 ## Troubleshooting

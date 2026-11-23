@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Added
+
+- **Signed approvals, opt-in.** With `approval.signed: true` in `invar.yaml`,
+  `invar plan approve` (and `/invar:approve`) signs the approval with your SSH
+  signing key, the one git uses for signed commits, and writes the signature
+  next to the Plan as `approval.sig`. It refuses an approval it cannot sign,
+  and writes nothing, when git has no SSH signing key, when the key does not
+  sign, or when signing takes more than 90 seconds. Who may approve is listed
+  in `.invar/approvers`, in git's allowed-signers format, read from the base
+  branch. A signature is worth more than the checksum only with a key that
+  asks you on each use; `docs/INSTALL.md` says how to set one up, and why
+  (#154). New contract `approval-signature.md` 1.0.0; `plan-header.md` 1.8.0;
+  `invar-yaml.md` 2.3.0.
+- **`plan approve --commit <MESSAGE>`** commits the approval, alone: the Plan,
+  and its signature when there is one. `approval.commit: true` does it every
+  time, as `Approve plan <TICKET>`; `--no-commit` skips it once. Your hooks
+  and commit signing apply, and nothing is pushed (#154).
+
+### Changed
+
+- **The README no longer says the agent cannot move its target.** It says
+  what holds: a change after approval is detected, and an approval written by
+  an agent with a shell is not caught by the checksum. A signed approval, with
+  a key that asks you on each use, shows who approved (#154).
+
 ### Fixed
 
 - **An agent can no longer approve a draft Plan by editing it.** `invar plan

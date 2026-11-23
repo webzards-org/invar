@@ -5,8 +5,9 @@
 **Keep the specification fixed while an AI agent writes the code against it.**
 
 Invar is a Claude Code plugin that turns AI-assisted coding into a disciplined
-cycle: a person agrees what "done" means, a checksum freezes it, and the agent
-that writes the code cannot move the target it is measured against.
+cycle: a person agrees what "done" means and approves it, a checksum freezes it,
+and a change to that target after approval stops the work before it counts as
+done.
 
 > **Beta.** The on-disk formats are stable; prompts and commands may still
 > change. [What that means](#status) ·
@@ -49,7 +50,7 @@ that predates AI agents:
 | Practice                        | In Invar                                                                                                                       |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Specification by example (ATDD) | Numbered acceptance criteria in a Plan the developer approves                                                                  |
-| Separation of duties            | The coder does not write the tests that judge it and cannot change its criteria; the reviewer works independently of the coder |
+| Separation of duties            | The coder does not write the tests that judge it, and a change to its criteria is detected; the reviewer works independently of the coder |
 | Test-first, red before green    | A locked test must fail on an assertion before the code exists                                                                 |
 | Design by contract              | Business invariants are explicit, named and checked in review                                                                  |
 | Architecture decision records   | A decision log keeps _why_, after the ticket is gone                                                                           |
@@ -57,7 +58,7 @@ that predates AI agents:
 
 **Invar recommends; the developer decides.** Approving a Plan, skipping tests,
 unlocking a test, recording a decision and closing a cycle are the developer's
-commands. The agent cannot run them.
+commands. The agent is refused when it tries to run them.
 
 ## How a ticket flows
 
@@ -254,6 +255,11 @@ the wording of their output. Every change is listed in
   the test-writer writes tests, it does not set up your test environment
   ([`docs/INSTALL.md`](docs/INSTALL.md#acceptance-tests)). Without one, approve
   tickets with `--no-acceptance`.
+- On disk, the approval is a checksum. It catches a careless or accidental
+  change; it does not stop an agent with a shell that sets out to write an
+  approval itself, because anything that can run `invar` can compute one. A
+  signed approval, made with a key that asks you on each use, shows who
+  approved ([`docs/INSTALL.md`](docs/INSTALL.md#optional-signed-approvals)).
 - `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`, together and with the labels
   Invar adds, must stay under the binding limit: 9,000 characters by default,
   at most 10,000. Above it,

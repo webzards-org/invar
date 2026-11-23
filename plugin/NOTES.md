@@ -1950,3 +1950,262 @@ The skill's ticket-resolving block behaves like `/invar:review`'s. Every
 | v | Date | Observed | Changed | Effect |
 |---|---|---|---|---|
 | 1 | 2026-10-20 | Nothing yet; first draft. | Skill: resolve the ticket as `/invar:review` does; read the Plan and the cycle's own record (coder's answer, review); pick `confirmed` / `failed` / `note`; a body of two to five sentences on what was decided and why; write `decision.md`, validate, show, stop. Protocol skill: offer it at closing and after `BLOCKED`. | Not run. |
+
+## 19. Signed approval — spike for #154
+
+Spike on 2026-11-23, before any code. git 2.53.0, OpenSSH 10.2p1 (Ubuntu
+1:10.2p1-2ubuntu3.8), Ubuntu on Linux 7.0.0 x86_64, a Wayland desktop with
+`gcr-ssh-agent`, Claude Code 2.1.309. Throwaway ed25519 keys made with
+`ssh-keygen` for every run; the developer's own key was never used. No FIDO key
+was available: the two HID devices are a touchpad and a sensor hub, so case (c)
+was **not measured**, and is not simulated here.
+
+### What was measured
+
+**A1 — verifying an SSH-signed commit.** The allowed-signers file was read with
+`git show <base>:.invar/approvers` into a temp file outside the work tree and
+passed as `-c gpg.ssh.allowedSignersFile=<tmp>`.
+
+| Commit | `git verify-commit` | `%G? [%GS] [%GK]` |
+|---|---|---|
+| Signed by a listed key | `Good "git" signature for dev@example with ED25519 key SHA256:…`, exit 0 | `G [dev@example] [SHA256:…]` |
+| Signed by a key not listed | `Good "git" signature with ED25519 key SHA256:…` then `No principal matched.`, exit 1 | `U [] [SHA256:…]` |
+| Unsigned | nothing, exit 1 | `N [] []` |
+| Tampered (message changed, signature kept) | `Signature verification failed: incorrect signature`, exit 1 | `B [] []` |
+| Listed key, no allowed-signers file configured | `error: gpg.ssh.allowedSignersFile needs to be configured and exist …`, exit 1 | `N [] []` |
+
+`%GS` is the principal from the allowed-signers file, not the commit's author.
+An unlisted key is `U`, a *good* signature: only `G` may count. Verification goes
+through git's config (`gpg.ssh.program`), which an agent can change in
+`.git/config` on its own machine; only a CI checkout is out of its reach.
+
+**A2 / A3 — signing without a TTY.** Every case was run twice: as a skill's
+`` ```! `` block (`claude -p "/spike154:sign <case>" --plugin-dir <throwaway
+plugin>`, the way §15 ran `/invar:approve`), and from the agent's own Bash tool.
+Both run without a TTY, in the same environment, and **gave the same result in
+every case**.
+
+| Key | Skill's shell block (A2) | Agent's Bash tool (A3) |
+|---|---|---|
+| (a) ed25519, no passphrase | Signs, at once | Signs, at once |
+| (b) passphrase key loaded in `ssh-agent` | Signs, at once | Signs, at once |
+| (b′) key loaded with `ssh-add -c` (confirm each use) | Signs after the agent's askpass asks `Allow use of key nopass?` and is answered | The same: the agent's shell triggers the same prompt |
+| (c) FIDO `sk-ssh-ed25519` | Not measured: no hardware key | Not measured |
+| (d) passphrase key not loaded, no `SSH_ASKPASS` set | Fails at once: `error: ssh_askpass: exec(/usr/bin/ssh-askpass): No such file or directory?`, `Load key …: incorrect passphrase supplied …`, `fatal: failed to write commit object`, exit 128 | The same |
+| (d) the same, `DISPLAY` unset | Fails at once: `Load key …: incorrect passphrase …`, exit 128 | The same |
+| (d) the same, `SSH_ASKPASS` set (a logging stub standing in for a GUI dialog) | Signs once the askpass answers (5 s: the block waited 5 s) | The same: the agent's shell raises the same prompt |
+| (d) the same, the askpass answering after 150 s | At 120 s Claude Code moved the block to the background, and the skill was given only `Command did not complete within its 120s timeout and was moved to the background (ID: …)`. The commit was signed at 150 s, and that output went only to a task file | Not run: the Bash tool's own 120 s timeout applies |
+
+Nothing hangs without a TTY: with no askpass, signing fails at once with
+ssh-keygen's words. **A prompt left for more than 120 s is the one bad case.** The
+signature is still made, but the block's output, the line `/invar:approve` keys
+on, never reaches the skill. So `plan approve` has to finish well inside 120 s,
+whatever happens. This desktop has a GUI askpass (`/usr/libexec/gcr4-ssh-askpass`)
+but `SSH_ASKPASS` is unset in Claude Code's environment, so (d) fails unless the
+developer sets it before starting Claude Code. The real dialog was not opened
+during the spike: it would wait for a person.
+
+**The agent's shell inherits `SSH_AUTH_SOCK`.** In this session it pointed at the
+desktop's `gcr-ssh-agent`, which held one unlocked ED25519 key (`ssh-add -l`
+from the agent's Bash tool listed it). Any key usable without a person, (a) and
+(b), is usable by the agent, and a signature with it proves no more than the
+checksum. A prompt per use, (b′), (c) or (d) with an askpass, needs a person,
+**but the agent can raise the same prompt itself**, and the prompt does not say
+what is being signed (`Allow use of key …?`, `Enter passphrase for …`). The
+guarantee is a person who answers a prompt only right after typing
+`/invar:approve`. The docs have to say exactly that.
+
+**A4 — signatures through the merge process.** A branch with an unsigned draft
+commit, a signed approval commit and an unsigned code commit, `main` moved on
+meanwhile:
+
+| Operation | The approval commit afterwards |
+|---|---|
+| `git rebase --signoff origin/main` | `N`: unsigned. Every commit is new |
+| the same with `commit.gpgsign=true` | `G`, but **every** commit is re-signed with the rebaser's key, the draft and the code commit included |
+| `git rebase origin/main`, no `--signoff` | `N` |
+| `git rebase --signoff` onto the commit the branch already starts from | `N`: `--signoff` rewrites every message |
+| squash merge | one unsigned commit on `main`; the Plan is gone from it anyway |
+| `--no-ff` merge | the PR's commits keep their signatures |
+
+A commit signature covers the parent, so no rebase can keep it. The step this
+repository takes before every merge (`git rebase --signoff origin/main`) unsigns
+the approval, and CI, run again on the force-pushed branch, would refuse it. Doing
+the same rebase with `commit.gpgsign=true` is worse: it re-signs every commit, a
+forged approval commit included, with the developer's key, and with a
+touch key it needs one touch per commit.
+
+**A5 — a detached signature over the approval instead.** `ssh-keygen -Y sign -f
+<key> -n invar-approval` over a three-line statement (`invar-approval 1`,
+`ticket: SHOP-214`, `approved-checksum: sha256:…`), which is what git runs for a
+commit with `-n git`:
+
+| Check | Result |
+|---|---|
+| `-Y verify -f <allowed> -I dev@example -n invar-approval` | `Good "invar-approval" signature for dev@example …`, exit 0 |
+| `-Y find-principals -f <allowed>` | `dev@example`, exit 0 |
+| a statement with another checksum | `Signature verification failed: incorrect signature`, exit 255 |
+| a signature made with `-n git` offered as an approval | `Couldn't verify signature: namespace does not match`, exit 255 |
+| a key not in the list | `No principal matched.`, exit 255 |
+
+It does not depend on any commit, so it survives the rebase, `--signoff`, a
+cherry-pick and any merge strategy. The allowed-signers line can also restrict the
+key: `dev@example namespaces="invar-approval" ssh-ed25519 …`.
+
+### Recommendation: sign the approval, not the commit
+
+The issue proposes a signed approval commit. A4 shows that this cannot survive
+the merge process the repository itself uses, and that the obvious fix
+(`commit.gpgsign` during the rebase) launders a forgery. **Recommended instead:**
+`plan approve` signs the approval statement with `ssh-keygen -Y sign`, using the
+key git is configured with (`user.signingkey`), and writes the signature next to
+the Plan as `.invar/plans/<name>/approval.sig`. Invar still never reads a key:
+ssh-keygen does, as it does for git. Commits stay ordinary, and `--commit` is a
+convenience rather than the mechanism.
+
+**SSH only, GPG later or never.** One verifier (`ssh-keygen -Y verify`) with an
+explicit allowed-signers file read from the base branch, and no keyring or
+trust database to set up in CI. `-Y` namespaces keep an approval signature
+apart from a commit signature. FIDO keys (`sk-ssh-ed25519`) are native, and
+GitHub already shows SSH signing keys. GPG would need a second verifier, keyring
+import in CI and a trust model, and `gpg-agent` caches a passphrase for 10
+minutes by default, so the agent can sign within that window.
+
+### `invar approval verify --base <ref>` — rules
+
+With the detached signature. Run in CI on the PR head; it reads, never writes.
+
+0. **Preconditions.** Full history: on a shallow checkout it refuses and names
+   `fetch-depth: 0`, as `done` does. The approvers list is
+   `git show <base>:.invar/approvers`, written to a temp file. It is never read
+   from the work tree or the PR head. ssh-keygen is run directly, not through
+   git's config.
+1. Every commit `C` in `merge-base(<base>, HEAD)..HEAD`, oldest first, and every
+   `.invar/plans/*/spec.md` at `C`, is classified by comparing it with `C`'s
+   parent:
+   - **approval:** `Status: approved` at `C`, and at the parent the Plan is
+     absent, a draft, or has another `Approved-checksum` or `approval.sig`;
+   - **body change while approved:** approved at both, same approval values,
+     another approval digest;
+   - **reset:** approved at the parent, draft at `C` (a `failed` entry). It needs
+     no signature;
+   - **deletion:** the Plan is gone at `C`.
+2. An **approval** must have `approval.sig` at `C`. That signature must verify,
+   with namespace `invar-approval` and a principal in the base's approvers, over
+   the statement built from `Ticket` and `Approved-checksum` at `C`.
+   `Approved-checksum` must equal the approval digest of the Plan at `C`.
+3. A **body change while approved** must be followed, before or at `HEAD`, by an
+   approval that passes 2, a reset, or a deletion.
+4. A **deletion** must come after an approval that passes 2, with no unresolved
+   body change in between: the Plan the code was closed against was signed.
+5. At `HEAD`, a Plan that is approved must pass 2.
+
+The issue's rule that an approval commit changes only that Plan's header belongs
+to a commit signature, where the signature would cover everything in the commit.
+With a detached signature, nothing else in the commit is signed, so the rule is
+not needed. I recommend dropping it.
+
+Refusals, all listed in one run, then a non-zero exit:
+
+- `the checkout is shallow, and approval verify reads every commit since <base>: check out with full history (actions/checkout: fetch-depth: 0)`
+- `<base> has no .invar/approvers, so no approval can be verified; add it on <base> first, in git's allowed-signers format`
+- `<commit>: <spec> is approved, and has no approval.sig: approve it with invar plan approve <TICKET>, with approval.signed on`
+- `<commit>: <spec>: the approval signature does not verify (<ssh-keygen's words>)`
+- `<commit>: <spec>: signed by a key not in <base>:.invar/approvers (<fingerprint>)`
+- `<commit>: <spec>: Approved-checksum does not match the Plan at this commit`
+- `<commit>: <spec>: the body changed after the approval at <commit>, and no signed approval, reset or deletion follows`
+- `<commit>: <spec> was deleted without a signed approval before it`
+
+Also a note, which does not fail the run: `this branch changes .invar/approvers; the change applies once it is on <base>`.
+
+**Approved-by from the signature.** For each approval, `verify` prints
+`<TICKET> approved at <commit> by <principal> (<key fingerprint>)`, the principal
+from `-Y find-principals` against the base's list. When the header's
+`Approved-by` differs, it prints a note naming both: the signature is the record,
+and the header stays a convenience.
+
+### Config, `plan approve`, `--commit`, `pr-body`
+
+- **`invar.yaml`:** `approval.signed: true`. Absent, or `false`, means today's
+  behavior, with no signature written or read. While it is on, `plan approve`
+  signs, and refuses when it cannot. Missing config:
+  `approval.signed is on, and git has no SSH signing key: set gpg.format to ssh and user.signingkey, see docs/INSTALL.md`.
+  Signing fails:
+  `the approval was not signed (<ssh-keygen's words>); nothing was written`.
+  The order is: validate, show the criteria, sign, then write header and
+  signature together, so a failed signature leaves the draft as it was. With
+  `--skill`, every refusal goes to stdout as `error: …`, as now. ssh-keygen is
+  given a deadline of 90 s, under Claude Code's 120 s. Past it, `plan approve`
+  kills it and refuses: `the signature was not made within 90 s; nothing was written: answer the key's prompt, then approve again`.
+  Otherwise the outcome would never reach `/invar:approve` (A2).
+- **`plan approve --commit`** (and `approval.commit` / `approval.commit_message`,
+  mirroring `done.commit`; default message `Approve plan {ticket}`): one commit
+  of `spec.md` and `approval.sig` alone, through `git commit --only`. The
+  project's hooks and signing apply, and are never bypassed. Nothing is pushed.
+  Optional, and not part of the guarantee. `/invar:approve` passes its
+  arguments through, so `/invar:approve SHOP-214 --commit` works without a
+  skill change.
+- **`pr-body --from-approval`:** not needed. `verify` refuses a branch whose
+  Plan at `HEAD` is approved without a valid signature, so the Plan that
+  `pr-body` renders at `HEAD` is the signed one. Recommended instead: when
+  `approval.sig` exists, `pr-body` adds one line naming the signer, verified
+  against the base's list.
+
+### Contracts
+
+- `plan-header.md` 1.7.1 → **1.8.0**: `approval.sig` in the Plan directory
+  (§2); `Approved-by` noted as text, the signature as the record, when signed.
+  An absent file means an unsigned approval, as before.
+- `invar-yaml.md` 2.2.2 → **2.3.0**: the `approval` section (`signed`,
+  `commit`, `commit_message`). Absent means today's behavior.
+- New `approval-signature.md` **1.0.0**: `.invar/approvers` (git's
+  allowed-signers format, read from the base), the statement, the namespace,
+  the file, and the verify rules above.
+
+### Open questions, with recommendations
+
+- **Required or opt-in?** Opt-in, `approval.signed: true`; absent is today.
+- **Does `/invar:approve` work with a prompt in the skill block?** Yes for a
+  confirm-on-use agent and for an askpass dialog, if `SSH_ASKPASS` is set in
+  Claude Code's environment. It fails at once and clearly without one. Not
+  measured for FIDO. A prompt left for over 120 s loses the output, so `plan
+  approve` signs with a 90 s deadline.
+- **The same for `acceptance unlock` and `decision approve`?** Not in this
+  issue. The same statement-and-namespace mechanism fits both
+  (`invar-unlock`, `invar-decision`): a follow-up issue once this one is used.
+
+### Proposed split
+
+1. Contracts (all three) and `plan approve` signing under `approval.signed`,
+   with `--commit`, its docs (INSTALL key setup, the stated limit), the CHANGELOG
+   and the README wording.
+2. `invar approval verify --base`, the CI example with `fetch-depth: 0`, and
+   USAGE.
+3. The `pr-body` signer line, if wanted.
+
+### Decided, and built in the first PR
+
+The developer took every recommendation above: a detached signature, the
+commit-by-commit rules with the deletion rule, a branch with no Plan passing with
+a note, a 90 s deadline, `approval.commit` in the config, a new contract, shipping
+without the FIDO case measured, and the README's first paragraph as the wording
+to fix.
+
+The first PR builds:
+
+- `contracts/formats/approval-signature.md` 1.0.0, `plan-header.md` 1.8.0 and
+  `invar-yaml.md` 2.3.0;
+- signing in `plan approve` under `approval.signed` (`core/src/signature/`);
+- `--commit <MESSAGE>`, `--no-commit` and `approval.commit`, mirroring `done`.
+
+`/invar:approve` changes only its `argument-hint`: the skill passes its arguments
+through. A refusal to sign reaches it as `error: …` on stdout, like any other. A
+commit that fails after the approval is written is a refusal too. The approval
+stays on disk, but the line the skill keys on is not printed, so Phase 2 does not
+start on an approval whose commit failed.
+
+**Not built here:** `invar approval verify`, so nothing in the core checks a
+signature yet, and the docs say so. Also not built: the `pr-body` signer line.
+**Not exercised:** a signed `/invar:approve` in a real session with a security
+key, and the 90 s deadline in a real session. The deadline is covered by a unit
+test of the wait.

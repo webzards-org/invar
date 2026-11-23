@@ -44,6 +44,10 @@ pub const SPEC_FILE: &str = "spec.md";
 /// The unlock record, beside the Plan (`acceptance-lock.md` §11.2).
 pub const UNLOCK_FILE: &str = "unlocked";
 
+/// The signature of a signed approval, beside the Plan (`approval-signature.md`
+/// §4).
+pub const SIGNATURE_FILE: &str = "approval.sig";
+
 /// A Plan directory whose name has the contract's shape and that holds a
 /// `spec.md`.
 #[derive(Debug, Clone, PartialEq, Eq)]
