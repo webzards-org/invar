@@ -32,10 +32,14 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "locks.json"
 
 SCHEMA = "invar.lock-fixtures/v1"
-FIXTURES_VERSION = "1.0.0"
+FIXTURES_VERSION = "1.1.0"
 
-# Replaced in a fixture's content by the digest of that same content.
+# Replaced in a fixture's content by the digest of that same content, over the
+# fixture's `criteria` too when it has them.
 THE_DIGEST = "{DIGEST}"
+# Replaced by the digest of the content without the list: what the line would
+# record if `ac=` had been added by hand afterwards.
+DIGEST_WITHOUT_LIST = "{DIGEST_WITHOUT_LIST}"
 WRONG_DIGEST = "sha256:" + "0" * 64
 SHORT_DIGEST = "sha256:b017737b"
 UPPER_DIGEST = "sha256:" + "AB" * 32
@@ -59,12 +63,15 @@ def canonicalize(text: str) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
-def lock_digest(text: str, line: int) -> str:
-    """The digest of a locked file (acceptance-lock.md section 4)."""
+def lock_digest(text: str, line: int, criteria: list[str] | None = None) -> str:
+    """The digest of a locked file (acceptance-lock.md section 4): over the list
+    too, as one line `ac=<list>` at the end, when the line has one."""
     lines = canonicalize(text).split("\n")
     del lines[line - 1]
     remaining = "\n".join(lines).rstrip("\n")
     covered = remaining + "\n" if remaining else ""
+    if criteria is not None:
+        covered += "ac=" + ",".join(criteria) + "\n"
     return "sha256:" + hashlib.sha256(covered.encode("utf-8")).hexdigest()
 
 
@@ -114,8 +121,11 @@ def pending(line: int) -> dict:
     return {"result": "pending", "ticket": "SHOP-214", "line": line}
 
 
-def locked(line: int, matches: bool = True) -> dict:
-    return {"result": "locked", "ticket": "SHOP-214", "line": line, "matches": matches}
+def locked(line: int, matches: bool = True, criteria: list[str] | None = None) -> dict:
+    entry = {"result": "locked", "ticket": "SHOP-214", "line": line, "matches": matches}
+    if criteria is not None:
+        entry["criteria"] = criteria
+    return entry
 
 
 def error(kind: str, *lines: int) -> dict:
@@ -156,6 +166,16 @@ FIXTURES: list[tuple[str, str | bytes, str, dict]] = [
     ("locked/bom-next-line.py", f"# invar-lock: SHOP-214 {THE_DIGEST}\n﻿alpha\n",
      "a U+FEFF that starts the next line is content: the file is not canonicalized twice", locked(1)),
     ("locked/mismatch.php", php(f"// invar-lock: SHOP-214 {WRONG_DIGEST}"), "the recorded digest is not the file's", locked(3, matches=False)),
+    ("locked/criteria.py", python(f"# invar-lock: SHOP-214 {THE_DIGEST} ac=AC1,AC2"),
+     "the criteria the file covers, under the digest", locked(1, criteria=["AC1", "AC2"])),
+    ("locked/criteria-one.php", php(f"// invar-lock: SHOP-214 {THE_DIGEST} ac=AC1"), "one criterion", locked(3, criteria=["AC1"])),
+    ("locked/criteria-js-block.js", js(f"/* invar-lock: SHOP-214 {THE_DIGEST} ac=AC1,AC10 */"),
+     "a block comment closed after the list, and AC10 sorted after AC1 by number", locked(1, criteria=["AC1", "AC10"])),
+    ("locked/criteria-text.py", python(f"# invar-lock: SHOP-214 {THE_DIGEST} ac=AC2 written by the test-writer"),
+     "trailing text after the list is ignored", locked(1, criteria=["AC2"])),
+    ("locked/criteria-by-hand.py", python(f"# invar-lock: SHOP-214 {DIGEST_WITHOUT_LIST} ac=AC1"),
+     "a list added by hand to a digest that does not cover it: the digest no longer matches",
+     locked(1, matches=False, criteria=["AC1"])),
 
     ("error/two-lines.php", php("// invar-lock: SHOP-214") + "// invar-lock: SHOP-215\n", "two lock lines", error("more-than-one", 3, 11)),
     ("error/two-lines-far-apart.php", LONG_PHP + "// invar-lock: SHOP-215\n", "the second is outside the window", error("more-than-one", 3, 40)),
@@ -175,6 +195,20 @@ FIXTURES: list[tuple[str, str | bytes, str, dict]] = [
     ("error/digest-after-text.py", python(f"# invar-lock: SHOP-214 by-hand {WRONG_DIGEST}"), "a digest out of place is not trailing text", error("digest", 1)),
     ("error/digest-after-tab.py", python(f"# invar-lock: SHOP-214\t{WRONG_DIGEST}"), "fields are separated by spaces", error("digest", 1)),
     ("error/two-digests.py", python(f"# invar-lock: SHOP-214 {WRONG_DIGEST} {WRONG_DIGEST}"), "one digest only", error("digest", 1)),
+    ("error/criteria-pending.py", python("# invar-lock: SHOP-214 ac=AC1"), "a pending line has no list", error("criteria", 1)),
+    ("error/criteria-empty.py", python(f"# invar-lock: SHOP-214 {WRONG_DIGEST} ac="), "an empty list", error("criteria", 1)),
+    ("error/criteria-lowercase.py", python(f"# invar-lock: SHOP-214 {WRONG_DIGEST} ac=ac1"), "ids are written `AC<n>`", error("criteria", 1)),
+    ("error/criteria-leading-zero.py", python(f"# invar-lock: SHOP-214 {WRONG_DIGEST} ac=AC01"), "no leading zero", error("criteria", 1)),
+    ("error/criteria-zero.py", python(f"# invar-lock: SHOP-214 {WRONG_DIGEST} ac=AC0"), "a positive number", error("criteria", 1)),
+    ("error/criteria-unsorted.py", python(f"# invar-lock: SHOP-214 {WRONG_DIGEST} ac=AC2,AC1"), "sorted by number", error("criteria", 1)),
+    ("error/criteria-text-sorted.py", python(f"# invar-lock: SHOP-214 {WRONG_DIGEST} ac=AC10,AC2"), "by number, not as text", error("criteria", 1)),
+    ("error/criteria-repeat.py", python(f"# invar-lock: SHOP-214 {WRONG_DIGEST} ac=AC1,AC1"), "no repeat", error("criteria", 1)),
+    ("error/criteria-space.py", python(f"# invar-lock: SHOP-214 {WRONG_DIGEST} ac=AC1, AC2"), "no spaces in the list", error("criteria", 1)),
+    ("error/criteria-glued-close.js", js(f"/* invar-lock: SHOP-214 {WRONG_DIGEST} ac=AC1*/"), "trailing text needs whitespace", error("criteria", 1)),
+    ("error/criteria-after-tab.py", python(f"# invar-lock: SHOP-214 {WRONG_DIGEST}\tac=AC1"), "fields are separated by spaces", error("criteria", 1)),
+    ("error/criteria-after-text.py", python(f"# invar-lock: SHOP-214 {WRONG_DIGEST} by-hand ac=AC1"), "a list out of place is not trailing text", error("criteria", 1)),
+    ("error/criteria-twice.py", python(f"# invar-lock: SHOP-214 {WRONG_DIGEST} ac=AC1 ac=AC2"), "one list only", error("criteria", 1)),
+    ("error/criteria-before-digest.py", python(f"# invar-lock: SHOP-214 ac=AC1 {WRONG_DIGEST}"), "the digest comes first, so this is a digest out of place", error("digest", 1)),
     ("error/invalid-utf8.py", b"# invar-lock: SHOP-214\n\xe9\n", "canonicalization's own error, with its offset", {"result": "error", "kind": "invalid-utf8", "offset": 23}),
 ]
 
@@ -195,7 +229,10 @@ def content_bytes(content: str | bytes, expected: dict) -> bytes:
     if isinstance(content, bytes):
         return content
     if THE_DIGEST in content:
-        content = content.replace(THE_DIGEST, lock_digest(content, expected["line"]))
+        digest = lock_digest(content, expected["line"], expected.get("criteria"))
+        content = content.replace(THE_DIGEST, digest)
+    if DIGEST_WITHOUT_LIST in content:
+        content = content.replace(DIGEST_WITHOUT_LIST, lock_digest(content, expected["line"]))
     return content.encode("utf-8")
 
 
@@ -206,11 +243,17 @@ def build_manifest() -> dict:
         raw = content_bytes(content, expected)
         entry = {"path": path, "bytes": len(raw), "note": note, **expected}
         if expected["result"] in ("pending", "locked"):
-            digest = lock_digest(raw.decode("utf-8"), expected["line"])
+            text = raw.decode("utf-8")
+            digest = lock_digest(text, expected["line"], expected.get("criteria"))
             entry["digest"] = digest
             digests[path] = digest
             if expected["result"] == "locked":
-                recorded = WRONG_DIGEST if not expected["matches"] else digest
+                if expected["matches"]:
+                    recorded = digest
+                elif DIGEST_WITHOUT_LIST in content:
+                    recorded = lock_digest(text, expected["line"])
+                else:
+                    recorded = WRONG_DIGEST
                 entry["recorded"] = recorded
         entries.append(entry)
 
