@@ -5,6 +5,7 @@
 //! §13b). What changes with configuration is the output of these commands.
 
 pub mod lock;
+pub mod results;
 pub mod spec;
 pub mod unlock;
 pub mod verify;

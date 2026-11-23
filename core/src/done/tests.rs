@@ -18,7 +18,7 @@ fn no_section() -> Config {
 
 /// `done` without `--commit`.
 fn close(root: &ProjectRoot, spec: &Path) -> Result<Closed, DoneError> {
-    super::close(root, spec, &no_section(), None)
+    super::close(root, spec, &no_section(), None, None)
 }
 
 fn contract_example(number: &str) -> String {
@@ -165,7 +165,7 @@ fn a_plan_that_cannot_be_removed_is_reported() {
 fn an_empty_commit_message_refuses_and_changes_nothing() {
     let (_dir, root, spec) = project(&approved_plan());
     for message in ["", "   ", "\n"] {
-        let err = super::close(&root, &spec, &no_section(), Some(message)).unwrap_err();
+        let err = super::close(&root, &spec, &no_section(), Some(message), None).unwrap_err();
         assert!(matches!(err, DoneError::EmptyCommitMessage), "{err}");
         assert!(spec.exists());
     }
@@ -176,7 +176,7 @@ fn commit_outside_a_repository_refuses_and_changes_nothing() {
     // Not a git repository: there is nothing to commit into, so the Plan is
     // not deleted only to fail afterwards.
     let (_dir, root, spec) = project(&approved_plan());
-    let err = super::close(&root, &spec, &no_section(), Some("chore: remove")).unwrap_err();
+    let err = super::close(&root, &spec, &no_section(), Some("chore: remove"), None).unwrap_err();
     assert!(
         matches!(err, DoneError::CommitOutsideRepository { .. }),
         "{err}"

@@ -911,6 +911,17 @@ fn verifying_the_locks_passes_silently() {
     }
 }
 
+#[test]
+fn running_the_locked_tests_passes_silently() {
+    // The coder's and the main session's, so not on `HUMAN_ONLY` (#156). `done --results`
+    // stays the developer's, as every `done` is.
+    let project = Project::new(APPROVED);
+    guard(bash(&project.root(), "invar acceptance run SHOP-214"))
+        .code(0)
+        .stdout("")
+        .stderr("");
+}
+
 // --- allow ----------------------------------------------------------------------
 
 #[test]

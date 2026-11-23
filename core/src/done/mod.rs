@@ -8,7 +8,8 @@
 //!    directory: deleting the Plan would delete the text the developer
 //!    reviewed, and that is the one way this flow could lose it silently.
 //! 3. refuse unless the acceptance locks hold (`acceptance-lock.md` §10), with
-//!    no pending line left. No test is run (A-2).
+//!    no pending line left. No test is run (A-2). With `--results`, also unless
+//!    every locked test of the ticket passed in those JUnit reports (§10.5).
 //! 4. delete the Plan directory, and with it the unlock record, having read what
 //!    it says for the output (`acceptance-lock.md` §11.4).
 //! 5. stage the deletion (`git rm -r --cached`), so it goes into the same
@@ -39,6 +40,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::acceptance::results::{self, Reports};
 use crate::acceptance::unlock;
 use crate::acceptance::verify::{self, Report, Stage};
 use crate::format::config::Config;
@@ -86,12 +88,14 @@ pub enum Staged {
 }
 
 /// Close the cycle of the Plan whose `spec.md` is `spec`; with `commit`,
-/// commit the deletion under that message.
+/// commit the deletion under that message; with `reports`, only if the ticket's
+/// locked tests passed in them.
 pub fn close(
     root: &ProjectRoot,
     spec: &Path,
     config: &Config,
     commit: Option<&str>,
+    reports: Option<&Reports>,
 ) -> Result<Closed, DoneError> {
     let plan_dir = spec
         .parent()
@@ -115,6 +119,11 @@ pub fn close(
     let mut report = verify::for_ticket(root, config, &approved, Stage::Closing);
     if !report.holds() {
         return Err(DoneError::Locks(report));
+    }
+    // With no section there is nothing to verify (D-21), and `for_ticket` said so.
+    if let (Some(reports), Some(acceptance)) = (reports, &config.acceptance) {
+        results::verify(root, &acceptance.dir, Some(&approved.ticket), reports)
+            .map_err(DoneError::Results)?;
     }
     // Read now, because the record goes with the directory.
     let unlocked = unlock::said(&plan_dir).unwrap_or_else(|err| {
@@ -227,6 +236,9 @@ pub enum DoneError {
     DraftPending { draft: PathBuf },
     /// The acceptance locks do not hold. Nothing was changed.
     Locks(Report),
+    /// `--results`, and the locked tests did not all pass, or the reports could not be
+    /// read. Nothing was changed.
+    Results(results::CheckError),
     /// The Plan directory could not be removed (perhaps in part).
     Remove {
         plan_dir: PathBuf,
@@ -270,6 +282,7 @@ impl fmt::Display for DoneError {
                 draft.display()
             ),
             Self::Locks(report) => write!(f, "{report}\nNothing was changed"),
+            Self::Results(err) => write!(f, "{err}\nNothing was changed"),
             Self::Remove { plan_dir, source } => write!(
                 f,
                 "cannot remove {}: {source}. Part of it may be gone already; remove the rest \

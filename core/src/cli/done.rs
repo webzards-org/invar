@@ -1,7 +1,9 @@
 //! `invar done [TICKET | PATH] [--commit <MESSAGE> | --no-commit] [--skill]`:
 //! delete the Plan, stage the deletion, and commit it when asked — by
 //! `--commit`, or by `done.commit: true` in `invar.yaml`. `--skill` is for
-//! `/invar:done`, whose shell block is this one command.
+//! `/invar:done`, whose shell block is this one command. `--results <REPORT>...`
+//! is for a team that closes cycles in CI: the ticket's locked tests must have
+//! passed in those JUnit reports.
 
 use anyhow::{Context as _, Result};
 
@@ -13,6 +15,7 @@ use crate::gate::check::CheckError;
 use crate::git;
 
 use super::plan::{require_approved, target};
+use super::results::ResultsArgs;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -47,6 +50,9 @@ pub struct Args {
     /// with its output, so the refusal would never reach the session.
     #[arg(long)]
     pub skill: bool,
+
+    #[command(flatten)]
+    pub results: ResultsArgs,
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -67,8 +73,9 @@ fn close(args: Args) -> Result<()> {
     };
     let config = super::config(&root)?;
     let commit = commit_message(&args, &config.done, &spec);
+    let reports = args.results.reports(&cwd)?;
 
-    let closed = match done::close(&root, &spec, &config, commit.as_deref()) {
+    let closed = match done::close(&root, &spec, &config, commit.as_deref(), reports.as_ref()) {
         Ok(closed) => closed,
         // The refusal for a Plan that is not valid in form says "fix every
         // problem listed above"; here is the list it points at.

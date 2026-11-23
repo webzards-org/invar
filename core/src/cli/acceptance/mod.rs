@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::Subcommand;
 
 mod lock;
+mod run;
 mod spec;
 mod unlock;
 mod verify;
@@ -54,7 +55,24 @@ pub enum Command {
     /// Refuses first what `invar acceptance spec` refuses. On success the last line is
     /// `unlocked <TICKET> <N> file(s), round <R> of 2`. An agent may not run it.
     Unlock(unlock::Args),
-    /// Check that the acceptance locks hold. Runs no test.
+    /// Run a ticket's locked acceptance tests, and say whether they pass.
+    ///
+    /// Run by the coder before it answers `DONE`, and by the main session after it.
+    /// Runs `acceptance.run` on the ticket's locked files only, never the suite, and
+    /// reads the JUnit report, never the exit code. Writes nothing.
+    ///
+    /// Prints, per criterion, `AC<n>: passed` or `AC<n>: not passed` with each test of
+    /// it that did not pass, its outcome and the first line of its message. A `skipped`
+    /// test has not passed, and neither has one that passed in one run and not in
+    /// another. The last line is `acceptance: green <TICKET>`, with exit 0, or
+    /// `acceptance: red <TICKET>`, with a non-zero exit.
+    ///
+    /// Refuses, with nothing on stdout, what `plan check` refuses; a ticket approved
+    /// as `skipped`; an `invar.yaml` with no `acceptance:` section; and a ticket with no
+    /// locked file.
+    Run(run::Args),
+    /// Check that the acceptance locks hold, and with `--results` that the locked tests
+    /// passed. Runs no test.
     ///
     /// With no ticket, for CI on every push: every locked file under
     /// `acceptance.dir` has the digest its line records, no line is malformed, and no
@@ -66,9 +84,15 @@ pub enum Command {
     /// only if the approved Plan declares it, and it asks for a locked test for the
     /// ticket when its Plan says `required`, with no pending line left.
     ///
-    /// Prints `verified <N> locked file(s)`, or every problem on stderr and exits
-    /// non-zero. With no `acceptance:` section it warns and exits 0. With a ticket, it
-    /// says on stderr which files the developer unlocked.
+    /// With `--results`, for CI after the team's own test step: also every locked file
+    /// (the ticket's, with a ticket) has a test case in those JUnit reports, and every
+    /// one of them passed. A `skipped` test has not passed, and neither has one that
+    /// passed in one report and not in another.
+    ///
+    /// Prints `verified <N> locked file(s)` (with `--results`, followed by `, and <M>
+    /// locked test(s) passed`), or every problem on stderr and exits non-zero. With no
+    /// `acceptance:` section it warns and exits 0. With a ticket, it says on stderr
+    /// which files the developer unlocked.
     Verify(verify::Args),
 }
 
@@ -77,6 +101,7 @@ pub fn run(command: Command) -> Result<()> {
         Command::Spec(args) => spec::run(args),
         Command::Lock(args) => lock::run(args),
         Command::Unlock(args) => unlock::run(args),
+        Command::Run(args) => run::run(args),
         Command::Verify(args) => verify::run(args),
     }
 }
