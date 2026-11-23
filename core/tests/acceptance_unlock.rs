@@ -175,6 +175,8 @@ fn report(cases: &[String]) -> String {
 fn the_line_goes_back_to_pending_and_nothing_else_in_the_file_changes() {
     let project = Project::new();
     assert!(project.read(A).contains("sha256:"));
+    // The list goes with the digest (acceptance-lock.md §11.2).
+    assert!(project.read(A).contains(" ac=AC1"));
     let b = project.read(B);
 
     project
@@ -457,6 +459,8 @@ fn an_unlocked_file_that_now_passes_locks_and_the_output_names_it() {
         .stdout(contains("sub/b_test.php (unlocked").not())
         .stdout(predicate::str::ends_with("locked SHOP-214 1 file(s)\n"));
     assert!(project.read(A).contains("sha256:"));
+    // A relock records the list again, from the run that locked it.
+    assert!(project.read(A).contains(" ac=AC1"), "{}", project.read(A));
 }
 
 #[test]

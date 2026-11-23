@@ -89,6 +89,9 @@ fn close(args: Args) -> Result<()> {
     for warning in &closed.warnings {
         eprintln!("warning: {warning}");
     }
+    for note in &closed.notes {
+        eprintln!("note: {note}");
+    }
     // On stdout, which is what `/invar:done` shows (D-31), and above the line it keys on.
     for line in &closed.unlocked {
         println!("{line}");

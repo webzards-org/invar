@@ -551,7 +551,7 @@ fn the_success_output_names_the_tests_of_each_criterion_in_the_plans_order() {
         out,
         format!(
             "Coverage:\nAC1:\n  {A}: it AC1 cancels\nAC2:\n  {B}: it AC2 refuses\n\n\
-             Locked:\n  {A} {a}\n  {B} {b}\n\nlocked SHOP-214 2 file(s)\n"
+             Locked:\n  {A} {a} ac=AC1\n  {B} {b} ac=AC2\n\nlocked SHOP-214 2 file(s)\n"
         )
     );
     assert!(project.temp_is_empty());
@@ -590,13 +590,14 @@ fn locking_writes_each_digest_and_changes_nothing_else() {
 
     let a = digest_of(&project, A);
     let b = digest_of(&project, B);
+    // The digest, then the criteria the file's tests named (acceptance-lock.md D-38).
     assert_eq!(
         fs::read_to_string(project.root().join(A)).unwrap(),
-        PENDING.replace("SHOP-214 written", &format!("SHOP-214 {a} written"))
+        PENDING.replace("SHOP-214 written", &format!("SHOP-214 {a} ac=AC1 written"))
     );
     assert_eq!(
         fs::read_to_string(project.root().join(B)).unwrap(),
-        odd.replace("SHOP-214 written", &format!("SHOP-214 {b} written"))
+        odd.replace("SHOP-214 written", &format!("SHOP-214 {b} ac=AC2 written"))
     );
 
     // Every other file, including the Plan, is as it was.
@@ -608,6 +609,36 @@ fn locking_writes_each_digest_and_changes_nothing_else() {
     }
     assert_eq!(after, expected);
     assert!(project.temp_is_empty());
+}
+
+#[test]
+fn locking_records_every_criterion_a_files_tests_named_sorted_by_number() {
+    let project = Project::new();
+    project.canned(&report(&[
+        case(A, "it AC2 refuses", "failure"),
+        case(A, "it AC1 cancels", "failure"),
+        case(A, "it AC1 cancels twice", "failure"),
+        case(B, "it AC2 refuses too", "failure"),
+    ]));
+    project.lock().success();
+    let line_of = |path: &str| {
+        fs::read_to_string(project.root().join(path))
+            .unwrap()
+            .lines()
+            .find(|line| line.contains("invar-lock:"))
+            .unwrap()
+            .to_owned()
+    };
+    assert!(line_of(A).contains(" ac=AC1,AC2 written"), "{}", line_of(A));
+    assert!(line_of(B).contains(" ac=AC2 written"), "{}", line_of(B));
+    // And `verify` holds the list to the digest.
+    Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(project.root())
+        .args(["acceptance", "verify"])
+        .assert()
+        .success()
+        .stdout("verified 2 locked file(s)\n");
 }
 
 #[test]

@@ -20,7 +20,7 @@ use super::unlock::{self, ReadError};
 use check::{Coverage, Problems};
 use find::{FindError, Found};
 use run::{Output, RunError, TIME_LIMIT};
-use write::{WriteError, Written};
+use write::{Criteria, WriteError, Written};
 
 pub mod check;
 pub mod find;
@@ -56,7 +56,18 @@ impl Locked {
         let _ = writeln!(out);
         let _ = writeln!(out, "Locked:");
         for file in &self.files {
-            let _ = writeln!(out, "  {} {}", file.path, file.digest);
+            if file.criteria.is_empty() {
+                let _ = writeln!(out, "  {} {}", file.path, file.digest);
+            } else {
+                let _ = writeln!(
+                    out,
+                    "  {} {} {}{}",
+                    file.path,
+                    file.digest,
+                    crate::format::lock::CRITERIA_PREFIX,
+                    file.criteria.join(",")
+                );
+            }
         }
         let _ = writeln!(out);
         for (file, round) in &self.skipped_red {
@@ -130,7 +141,17 @@ pub fn lock(
 
     let coverage = check::check(&ticket, &plan.criteria(), &found, &unlocked, &cases)
         .map_err(LockError::Checks)?;
-    let files = write::write(root, &ticket, &found.to_lock).map_err(LockError::Write)?;
+    // Each file records the criteria its tests named in this run (D-38).
+    let mut criteria = Criteria::new();
+    for (id, tests) in &coverage {
+        for test in tests {
+            criteria
+                .entry(test.file.clone())
+                .or_default()
+                .push(id.clone());
+        }
+    }
+    let files = write::write(root, &ticket, &found.to_lock, &criteria).map_err(LockError::Write)?;
 
     // The files are locked by now, so a record left behind is said and not refused for: an
     // open entry for a locked file grants nothing (§11.3).

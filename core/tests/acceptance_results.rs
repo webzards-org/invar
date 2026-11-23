@@ -48,8 +48,8 @@ impl Project {
     fn new() -> Self {
         let project = Self::bare(CONFIG);
         project.approve("required");
-        project.lock(A, "SHOP-214");
-        project.lock(B, "SHOP-214");
+        project.lock(A, "SHOP-214", &["AC1"]);
+        project.lock(B, "SHOP-214", &["AC2"]);
         project.write("fake-runner.sh", RUNNER);
         project
     }
@@ -102,15 +102,22 @@ impl Project {
         );
     }
 
-    /// `path`, locked for `ticket` with the digest `invar hash --lock` prints.
-    fn lock(&self, path: &str, ticket: &str) {
+    /// `path`, locked for `ticket` with the digest `invar hash --lock` prints, and the
+    /// list `ac`. With no `ac`, as a file was locked before lists were recorded.
+    fn lock(&self, path: &str, ticket: &str, ac: &[&str]) {
         let pending = format!("<?php\n// invar-lock: {ticket}\n{TEXT}");
-        let digest = self.hash(&["hash", "--lock"], &pending);
+        let list = ac.join(",");
+        let fields = if ac.is_empty() {
+            self.hash(&["hash", "--lock"], &pending)
+        } else {
+            let digest = self.hash(&["hash", "--lock", "--ac", &list], &pending);
+            format!("{digest} ac={list}")
+        };
         self.write(
             path,
             &pending.replace(
                 &format!("invar-lock: {ticket}"),
-                &format!("invar-lock: {ticket} {digest}"),
+                &format!("invar-lock: {ticket} {fields}"),
             ),
         );
     }
@@ -296,7 +303,7 @@ fn verify_results_ignores_test_cases_of_files_that_are_not_locked() {
 #[test]
 fn verify_results_without_a_ticket_checks_every_ticket_and_with_one_only_its_own() {
     let project = Project::new();
-    project.lock(OTHER, "SHOP-1");
+    project.lock(OTHER, "SHOP-1", &["AC1"]);
     project.write("junit.xml", &green());
     // SHOP-1's file is in no report.
     refused(
@@ -459,7 +466,7 @@ fn run_red_on_skipped_and_on_a_criterion_no_test_ran() {
 #[test]
 fn run_passes_only_the_tickets_locked_files_and_writes_nothing_else() {
     let project = Project::new();
-    project.lock(OTHER, "SHOP-1");
+    project.lock(OTHER, "SHOP-1", &["AC1"]);
     project.write(
         "tests/Acceptance/pending_test.php",
         "<?php\n// invar-lock: SHOP-214\nit('AC1 new', fn () => true);\n",
@@ -539,7 +546,7 @@ fn run_refuses_a_ticket_with_no_locked_file() {
         "tests/Acceptance/pending_test.php",
         "<?php\n// invar-lock: SHOP-214\nit('AC1 new', fn () => true);\n",
     );
-    project.lock(OTHER, "SHOP-1");
+    project.lock(OTHER, "SHOP-1", &["AC1"]);
     refused(
         project.invar(&["acceptance", "run", "SHOP-214"]),
         &["no file under tests/Acceptance is locked for it"],
@@ -606,4 +613,158 @@ fn done_without_results_reads_no_report() {
     );
     project.invar(&["done", "SHOP-214"]).success();
     assert!(!project.exists(SPEC));
+}
+
+// --- the criteria a file covers (acceptance-lock.md D-38) ------------------------------
+
+#[test]
+fn a_file_whose_tests_ran_only_in_part_is_refused_naming_the_missing_criterion() {
+    // The review's reproduction: AC2 excluded from the run by a filter.
+    let project = Project::new();
+    project.lock(A, "SHOP-214", &["AC1", "AC2"]);
+    project.write("tests/Acceptance/sub/b_test.php", "<?php\n");
+    project.write("junit.xml", &report(&[case(A, "it AC1: cancels", "")]));
+    refused(
+        project.invar(&["acceptance", "verify", "--results", "junit.xml"]),
+        &[
+            "(1 problem)",
+            &format!("{A}: AC2: no test of this criterion from this file is in the results"),
+        ],
+    );
+    // `done --results` uses the same rule.
+    refused(
+        project.invar(&["done", "SHOP-214", "--results", "junit.xml"]),
+        &[
+            &format!("{A}: AC2: no test of this criterion"),
+            "Nothing was changed",
+        ],
+    );
+    assert!(project.exists(SPEC));
+}
+
+#[test]
+fn a_file_locked_with_its_criteria_and_every_test_passed_is_green_with_no_note() {
+    let project = Project::new();
+    project.lock(A, "SHOP-214", &["AC1", "AC2"]);
+    project.write("tests/Acceptance/sub/b_test.php", "<?php\n");
+    project.write(
+        "junit.xml",
+        &report(&[
+            case(A, "it AC1: cancels", ""),
+            case(A, "it AC2: refuses a paid order", ""),
+        ]),
+    );
+    project
+        .invar(&["acceptance", "verify", "--results", "junit.xml"])
+        .success()
+        .stdout("verified 1 locked file(s), and 2 locked test(s) passed\n")
+        .stderr("");
+}
+
+#[test]
+fn editing_the_list_on_disk_breaks_the_digest() {
+    let project = Project::new();
+    project.lock(A, "SHOP-214", &["AC1", "AC2"]);
+    // As `sed -i 's/ac=AC1,AC2/ac=AC1/'` would, past the guard.
+    let path = project.root().join(A);
+    let text = fs::read_to_string(&path).unwrap();
+    fs::write(&path, text.replace("ac=AC1,AC2", "ac=AC1")).unwrap();
+    project.write("junit.xml", &green());
+    for args in [
+        &["acceptance", "verify"][..],
+        &["acceptance", "verify", "--results", "junit.xml"][..],
+    ] {
+        refused(
+            project.invar(args),
+            &[
+                "the acceptance locks do not hold",
+                A,
+                "changed after it was locked",
+            ],
+        );
+    }
+}
+
+#[test]
+fn a_file_locked_before_lists_keeps_the_weaker_check_and_gets_a_note() {
+    let project = Project::new();
+    project.lock(A, "SHOP-214", &[]);
+    project.write("junit.xml", &green());
+    let assert = project
+        .invar(&["acceptance", "verify", "--results", "junit.xml"])
+        .success()
+        .stdout("verified 2 locked file(s), and 2 locked test(s) passed\n");
+    let stderr = stderr_of(&assert);
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(
+        stderr.starts_with(&format!(
+            "note: {A}: locked before the criteria a file covers were recorded, so only a full \
+             run of it is checked"
+        )),
+        "{stderr}"
+    );
+    // Without `--results`, nothing is said, as before.
+    project
+        .invar(&["acceptance", "verify"])
+        .success()
+        .stdout("verified 2 locked file(s)\n")
+        .stderr("");
+}
+
+#[test]
+fn run_names_a_listed_criterion_its_file_did_not_run() {
+    let project = Project::new();
+    project.lock(A, "SHOP-214", &["AC1", "AC2"]);
+    project.write(
+        "canned.xml",
+        &report(&[case(A, "it AC1 cancels", ""), case(B, "it AC2 refuses", "")]),
+    );
+    let assert = project.invar(&["acceptance", "run", "SHOP-214"]).failure();
+    assert_eq!(
+        stdout_of(&assert),
+        format!(
+            "AC1: passed\nAC2: not passed\n  {A}: AC2: no test of this criterion from this file \
+             is in the results\nacceptance: red SHOP-214\n"
+        )
+    );
+}
+
+#[test]
+fn run_says_the_note_on_stderr_for_a_file_locked_before_lists() {
+    let project = Project::new();
+    project.lock(B, "SHOP-214", &[]);
+    project.write("canned.xml", &green());
+    let assert = project
+        .invar(&["acceptance", "run", "SHOP-214"])
+        .success()
+        .stdout("AC1: passed\nAC2: passed\nacceptance: green SHOP-214\n");
+    assert!(stderr_of(&assert).starts_with(&format!("note: {B}: locked before")));
+}
+
+// --- `--results` with no `acceptance:` section --------------------------------------------
+
+#[test]
+fn results_with_no_acceptance_section_is_an_error_for_verify_and_done() {
+    let project = Project::new();
+    project.write("invar.yaml", "");
+    project.write("junit.xml", &green());
+    refused(
+        project.invar(&["acceptance", "verify", "--results", "junit.xml"]),
+        &["`--results`", "no `acceptance:` section"],
+    );
+    refused(
+        project.invar(&["done", "SHOP-214", "--results", "junit.xml"]),
+        &[
+            "`--results`",
+            "no `acceptance:` section",
+            "nothing was changed",
+        ],
+    );
+    assert!(project.exists(SPEC));
+    // Without it, D-21 as before: a warning, and exit 0.
+    project
+        .invar(&["acceptance", "verify"])
+        .success()
+        .stdout("")
+        .stderr(predicates::str::contains("nothing to verify"));
 }

@@ -3,7 +3,8 @@
 //! The core never runs the team's suite (A-2). It reads the JUnit reports the team's
 //! own CI wrote, or the one `invar acceptance run` had `acceptance.run` write for the
 //! ticket's locked files, and decides on them: every locked file has a test case in
-//! them, and every one of its test cases passed, in every occurrence.
+//! them, every criterion its line records has a test case of that file naming it, and
+//! every one of its test cases passed, in every occurrence.
 //!
 //! [`locked`] says which files are locked, [`read_reports`] reads the reports, and
 //! [`check`] decides. The command that does it for one ticket is [`run`].
@@ -25,6 +26,12 @@ pub mod run;
 #[cfg(test)]
 mod tests;
 
+/// Why `--results` cannot run without an `acceptance:` section (§10.5): unlike D-21, the
+/// caller asked for a check.
+pub const NO_SECTION: &str = "`--results` asks whether the locked acceptance tests passed, \
+    and invar.yaml has no `acceptance:` section, so there is no `acceptance.dir` to find them \
+    in. Add the section, or leave out `--results`";
+
 /// What a run of the check is given, from the command line.
 #[derive(Debug, Clone, Default)]
 pub struct Reports {
@@ -34,11 +41,14 @@ pub struct Reports {
     pub report_root: Option<PathBuf>,
 }
 
-/// One locked file: its path relative to the project root, and its ticket.
+/// One locked file: its path relative to the project root, its ticket, and the
+/// criteria its line records it as covering. `None` for a line locked before lists were
+/// recorded (D-40).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockedFile {
     pub path: String,
     pub ticket: String,
+    pub criteria: Option<Vec<String>>,
 }
 
 /// Every file under `dir` locked with a digest that holds, of `ticket` or of any
@@ -61,6 +71,7 @@ pub fn locked(
             (holds && wanted && file.utf8_path).then_some(LockedFile {
                 path: file.path,
                 ticket: line.ticket,
+                criteria: line.criteria,
             })
         })
         .collect())
@@ -198,6 +209,11 @@ pub struct Results {
     pub tests: Vec<Test>,
     /// Locked files with no test case in any report.
     pub not_run: Vec<String>,
+    /// A criterion the line of a file records, with no test case of that file naming it:
+    /// the file ran only in part (D-38).
+    pub missing: Vec<(String, String)>,
+    /// Locked files whose line records no criteria, so only a run of some test is checked.
+    pub unlisted: Vec<String>,
     /// `acceptance.dir`, for what to do about a file that did not run.
     dir: String,
 }
@@ -235,21 +251,61 @@ pub fn check(dir: &str, locked: &[LockedFile], cases: &[TestCase]) -> Results {
             }),
         }
     }
-    let not_run = by_file
+    let not_run: Vec<String> = by_file
         .iter()
         .filter(|(_, tests)| tests.is_empty())
         .map(|(file, _)| (*file).to_owned())
         .collect();
+    let mut missing = Vec::new();
+    let mut unlisted = Vec::new();
+    for file in locked {
+        let Some(criteria) = &file.criteria else {
+            unlisted.push(file.path.clone());
+            continue;
+        };
+        // A file that did not run at all is said once, as not run.
+        if not_run.contains(&file.path) {
+            continue;
+        }
+        let tests = &by_file[file.path.as_str()];
+        for id in criteria {
+            let named = tests
+                .iter()
+                .any(|test| matches!(&test.criterion, Token::One(one) if one == id));
+            if !named {
+                missing.push((file.path.clone(), id.clone()));
+            }
+        }
+    }
+    missing.sort();
+    unlisted.sort();
+    unlisted.dedup();
     Results {
         tests: by_file.into_values().flatten().collect(),
         not_run,
+        missing,
+        unlisted,
         dir: dir.to_owned(),
     }
 }
 
 impl Results {
     pub fn green(&self) -> bool {
-        self.not_run.is_empty() && self.tests.iter().all(Test::passed)
+        self.not_run.is_empty() && self.missing.is_empty() && self.tests.iter().all(Test::passed)
+    }
+
+    /// A note per locked file whose line records no criteria: said, and never refused for.
+    pub fn notes(&self) -> Vec<String> {
+        self.unlisted
+            .iter()
+            .map(|file| {
+                format!(
+                    "{file}: locked before the criteria a file covers were recorded, so only a \
+                     full run of it is checked: some test of it ran, and every one that ran \
+                     passed. Locking it again records them"
+                )
+            })
+            .collect()
     }
 
     /// [`Self::green`], and every criterion has a test that ran: coverage held when the
@@ -268,7 +324,7 @@ impl Results {
         self.of(id).count()
     }
 
-    /// Every problem, a line each: files first, then tests.
+    /// Every problem, a line each: files first, then criteria missing from them, then tests.
     pub fn problems(&self) -> Vec<String> {
         let mut problems: Vec<String> = self
             .not_run
@@ -276,12 +332,24 @@ impl Results {
             .map(|file| self.not_run_problem(file))
             .collect();
         problems.extend(
+            self.missing
+                .iter()
+                .map(|(file, id)| missing_problem(file, id)),
+        );
+        problems.extend(
             self.tests
                 .iter()
                 .filter(|test| !test.passed())
                 .map(Test::describe),
         );
         problems
+    }
+
+    fn missing_for<'a>(&'a self, id: &'a str) -> impl Iterator<Item = &'a String> + 'a {
+        self.missing
+            .iter()
+            .filter(move |(_, missing)| missing == id)
+            .map(|(file, _)| file)
     }
 
     fn not_run_problem(&self, file: &str) -> String {
@@ -303,13 +371,17 @@ impl Results {
                 .of(&criterion.id)
                 .filter(|test| !test.passed())
                 .collect();
-            if ran > 0 && failed.is_empty() {
+            let missing: Vec<&String> = self.missing_for(&criterion.id).collect();
+            if ran > 0 && failed.is_empty() && missing.is_empty() {
                 let _ = writeln!(out, "{}: passed", criterion.id);
                 continue;
             }
             let _ = writeln!(out, "{}: not passed", criterion.id);
             if ran == 0 {
                 let _ = writeln!(out, "  no test of {} ran", criterion.id);
+            }
+            for file in missing {
+                let _ = writeln!(out, "  {}", missing_problem(file, &criterion.id));
             }
             for test in failed {
                 let _ = writeln!(out, "  {}", test.describe());
@@ -325,6 +397,12 @@ impl Results {
             .not_run
             .iter()
             .map(|file| self.not_run_problem(file))
+            .chain(
+                self.missing
+                    .iter()
+                    .filter(|(_, id)| !criteria.iter().any(|criterion| criterion.id == *id))
+                    .map(|(file, id)| missing_problem(file, id)),
+            )
             .chain(
                 self.tests
                     .iter()
@@ -348,10 +426,16 @@ impl Results {
     }
 }
 
-/// The refusal of `verify --results` and `done --results`: every problem, a line each.
+fn missing_problem(file: &str, id: &str) -> String {
+    format!("{file}: {id}: no test of this criterion from this file is in the results")
+}
+
+/// The refusal of `verify --results` and `done --results`: every problem, a line each,
+/// then the notes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotGreen {
     pub problems: Vec<String>,
+    pub notes: Vec<String>,
 }
 
 impl fmt::Display for NotGreen {
@@ -365,11 +449,23 @@ impl fmt::Display for NotGreen {
         for problem in &self.problems {
             write!(f, "\n{problem}")?;
         }
+        for note in &self.notes {
+            write!(f, "\nnote: {note}")?;
+        }
         Ok(())
     }
 }
 
 impl std::error::Error for NotGreen {}
+
+/// What a check that passed found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Verified {
+    /// The distinct tests of the files checked.
+    pub tests: usize,
+    /// [`Results::notes`], for stderr.
+    pub notes: Vec<String>,
+}
 
 /// Why the results could not be checked, or what they say when they are not green.
 #[derive(Debug)]
@@ -392,21 +488,25 @@ impl fmt::Display for CheckError {
 impl std::error::Error for CheckError {}
 
 /// The whole check for `verify --results` and `done --results`: the locked files of
-/// `ticket` (or of every ticket), against the reports. Returns how many tests passed.
+/// `ticket` (or of every ticket), against the reports.
 pub fn verify(
     root: &ProjectRoot,
     dir: &str,
     ticket: Option<&str>,
     reports: &Reports,
-) -> Result<usize, CheckError> {
+) -> Result<Verified, CheckError> {
     let files = locked(root, dir, ticket).map_err(CheckError::Find)?;
     let cases = read_reports(root, reports).map_err(CheckError::Reports)?;
     let results = check(dir, &files, &cases);
     if results.green() {
-        Ok(results.tests.len())
+        Ok(Verified {
+            tests: results.tests.len(),
+            notes: results.notes(),
+        })
     } else {
         Err(CheckError::NotGreen(NotGreen {
             problems: results.problems(),
+            notes: results.notes(),
         }))
     }
 }

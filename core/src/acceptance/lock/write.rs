@@ -1,5 +1,6 @@
 //! Writing the digests, all or nothing (`acceptance-lock.md` §9.4, D-15).
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io::{self, Write as _};
@@ -10,11 +11,16 @@ use crate::fs::ProjectRoot;
 
 use super::find::{TEMP_SUFFIX, TestFile};
 
+/// The criterion ids each file's tests named in the run, by path (§9.4, D-38).
+pub type Criteria = BTreeMap<String, Vec<String>>;
+
 /// One file locked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Written {
     pub path: String,
     pub digest: String,
+    /// What its `ac=` field records; empty when the line has none.
+    pub criteria: Vec<String>,
 }
 
 /// A new file ready beside its original. Dropping it removes what is left of the
@@ -32,25 +38,33 @@ impl Drop for Prepared {
     }
 }
 
-/// Lock every one of `files`, which are what the run was given.
+/// Lock every one of `files`, which are what the run was given, each with the criteria
+/// `criteria` lists for it.
 pub fn write(
     root: &ProjectRoot,
     ticket: &str,
     files: &[TestFile],
+    criteria: &Criteria,
 ) -> Result<Vec<Written>, WriteError> {
-    let prepared = prepare(root, ticket, files)?;
+    let prepared = prepare(root, ticket, files, criteria)?;
     install(prepared)
 }
 
-/// Steps 1 and 2 of §9.4. Nothing here touches a test file.
+/// Steps 1 and 2 of §9.4. Nothing here touches a test file. A file `criteria` has no
+/// entry for gets no `ac=` field.
 pub fn prepare(
     root: &ProjectRoot,
     ticket: &str,
     files: &[TestFile],
+    criteria: &Criteria,
 ) -> Result<Vec<Prepared>, WriteError> {
-    prepare_with(root, files, |bytes| {
-        let digest = lock::read(bytes)?.ok_or(LineError::NoLine)?.digest;
-        Ok((lock::with_digest(bytes, ticket)?, digest))
+    prepare_with(root, files, |path, bytes| {
+        let ids = criteria.get(path).map(Vec::as_slice).unwrap_or_default();
+        let locked = lock::with_digest_covering(bytes, ticket, ids)?;
+        let digest = lock::read(&locked)?
+            .and_then(|line| line.recorded)
+            .ok_or(LineError::NoLine)?;
+        Ok((locked, digest))
     })
 }
 
@@ -59,7 +73,7 @@ pub fn prepare(
 pub fn prepare_with(
     root: &ProjectRoot,
     files: &[TestFile],
-    change: impl Fn(&[u8]) -> Result<(Vec<u8>, String), LineError>,
+    change: impl Fn(&str, &[u8]) -> Result<(Vec<u8>, String), LineError>,
 ) -> Result<Vec<Prepared>, WriteError> {
     let changed: Vec<String> = files
         .iter()
@@ -72,10 +86,11 @@ pub fn prepare_with(
 
     let mut prepared = Vec::with_capacity(files.len());
     for file in files {
-        let (bytes, digest) = change(&file.bytes).map_err(|source| WriteError::Line {
-            path: file.path.clone(),
-            source,
-        })?;
+        let (bytes, digest) =
+            change(&file.path, &file.bytes).map_err(|source| WriteError::Line {
+                path: file.path.clone(),
+                source,
+            })?;
 
         let target = root.path().join(&file.path);
         let entry = Prepared {
@@ -84,6 +99,11 @@ pub fn prepare_with(
             written: Written {
                 path: file.path.clone(),
                 digest,
+                criteria: lock::read(&bytes)
+                    .ok()
+                    .flatten()
+                    .and_then(|line| line.criteria)
+                    .unwrap_or_default(),
             },
         };
         write_temp(&entry.temp, &entry.target, &bytes).map_err(|source| WriteError::Prepare {

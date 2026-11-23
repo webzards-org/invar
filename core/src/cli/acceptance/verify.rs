@@ -40,6 +40,9 @@ pub fn run(args: Args) -> Result<()> {
     };
     let config = crate::cli::config(&root)?;
     let reports = args.results.reports(&cwd)?;
+    if reports.is_some() && config.acceptance.is_none() {
+        anyhow::bail!("{}", results::NO_SECTION);
+    }
     let Some(acceptance) = &config.acceptance else {
         eprintln!(
             "warning: invar.yaml has no `acceptance:` section, so there is nothing to verify"
@@ -94,10 +97,15 @@ pub fn run(args: Args) -> Result<()> {
     }
     match passed {
         None => println!("verified {} locked file(s)", report.locked),
-        Some(tests) => println!(
-            "verified {} locked file(s), and {tests} locked test(s) passed",
-            report.locked
-        ),
+        Some(verified) => {
+            for note in &verified.notes {
+                eprintln!("note: {note}");
+            }
+            println!(
+                "verified {} locked file(s), and {} locked test(s) passed",
+                report.locked, verified.tests
+            );
+        }
     }
     Ok(())
 }

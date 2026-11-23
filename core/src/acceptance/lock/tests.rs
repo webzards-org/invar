@@ -326,7 +326,7 @@ fn every_file_gets_its_digest_and_no_temporary_file_stays() {
         pending(&root, "tests/Acceptance/b.py"),
     ];
 
-    let written = write_files(&root, "SHOP-214", &files).unwrap();
+    let written = write_files(&root, "SHOP-214", &files, &Default::default()).unwrap();
 
     assert_eq!(written.len(), 2);
     for one in &written {
@@ -357,7 +357,7 @@ fn a_changed_file_writes_nothing_and_all_changed_files_are_named() {
     );
     fs::remove_file(root.path().join("tests/Acceptance/c.py")).unwrap();
 
-    let message = write_files(&root, "SHOP-214", &files)
+    let message = write_files(&root, "SHOP-214", &files, &Default::default())
         .unwrap_err()
         .to_string();
 
@@ -378,7 +378,7 @@ fn a_failure_while_preparing_touches_no_file_and_leaves_no_temporary_file() {
     let bad = pending(&root, "tests/Acceptance/b.py");
     fs::create_dir(root.path().join("tests/Acceptance/.b.py.invar-tmp")).unwrap();
 
-    let err = prepare(&root, "SHOP-214", &[good, bad]).unwrap_err();
+    let err = prepare(&root, "SHOP-214", &[good, bad], &Default::default()).unwrap_err();
 
     assert!(matches!(err, WriteError::Prepare { .. }), "{err}");
     assert!(err.to_string().contains("nothing was locked"), "{err}");
@@ -406,7 +406,7 @@ fn a_failure_between_renames_names_what_was_written_and_what_was_not() {
         pending(&root, "tests/Acceptance/b.py"),
         pending(&root, "tests/Acceptance/c.py"),
     ];
-    let prepared = prepare(&root, "SHOP-214", &files).unwrap();
+    let prepared = prepare(&root, "SHOP-214", &files, &Default::default()).unwrap();
     // The rename of the second one fails: its temporary file has gone.
     fs::remove_file(root.path().join("tests/Acceptance/.b.py.invar-tmp")).unwrap();
 
@@ -462,7 +462,7 @@ fn a_locked_file_keeps_its_permissions() {
     let path = root.path().join(&file.path);
     fs::set_permissions(&path, fs::Permissions::from_mode(0o751)).unwrap();
 
-    write_files(&root, "SHOP-214", &[file]).unwrap();
+    write_files(&root, "SHOP-214", &[file], &Default::default()).unwrap();
 
     let mode = fs::metadata(&path).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o751);

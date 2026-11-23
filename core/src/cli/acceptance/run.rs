@@ -32,6 +32,9 @@ pub fn run(args: Args) -> Result<()> {
 
     match run::run(&root, &plan, mode, config.acceptance.as_ref()) {
         Ok(ran) => {
+            for note in &ran.notes {
+                eprintln!("note: {note}");
+            }
             print!("{}", ran.output);
             if ran.green {
                 Ok(())

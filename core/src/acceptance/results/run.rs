@@ -25,6 +25,8 @@ pub struct Ran {
     pub ticket: String,
     /// Every criterion has a test that ran, and every test passed.
     pub green: bool,
+    /// Said on stderr, and refused for nothing (§10.5).
+    pub notes: Vec<String>,
     /// [`Results::render`], ending with `acceptance: green|red <TICKET>`.
     pub output: String,
 }
@@ -75,6 +77,7 @@ pub fn run(
     let criteria = plan.criteria();
     Ok(Ran {
         green: results.green_for(&criteria),
+        notes: results.notes(),
         output: results.render(&ticket, &criteria),
         ticket,
     })
@@ -117,6 +120,7 @@ fn locked_files(
             Some(_) if line.matches() => files.push(LockedFile {
                 path: file.path,
                 ticket: line.ticket,
+                criteria: line.criteria,
             }),
             Some(recorded) => problems.push((
                 file.path,

@@ -65,6 +65,8 @@ pub struct Closed {
     pub warnings: Vec<String>,
     /// Which files the developer unlocked in this cycle, a line each.
     pub unlocked: Vec<String>,
+    /// With `--results`, a line per locked file whose line records no criteria.
+    pub notes: Vec<String>,
 }
 
 /// Whether the deletion was committed.
@@ -120,10 +122,16 @@ pub fn close(
     if !report.holds() {
         return Err(DoneError::Locks(report));
     }
-    // With no section there is nothing to verify (D-21), and `for_ticket` said so.
-    if let (Some(reports), Some(acceptance)) = (reports, &config.acceptance) {
-        results::verify(root, &acceptance.dir, Some(&approved.ticket), reports)
-            .map_err(DoneError::Results)?;
+    // Asked for, the check has to run: no section is a refusal here, not D-21's warning.
+    let mut notes = Vec::new();
+    if let Some(reports) = reports {
+        let acceptance = config
+            .acceptance
+            .as_ref()
+            .ok_or(DoneError::ResultsWithoutSection)?;
+        notes = results::verify(root, &acceptance.dir, Some(&approved.ticket), reports)
+            .map_err(DoneError::Results)?
+            .notes;
     }
     // Read now, because the record goes with the directory.
     let unlocked = unlock::said(&plan_dir).unwrap_or_else(|err| {
@@ -184,6 +192,7 @@ pub fn close(
         committed,
         warnings: report.warnings,
         unlocked,
+        notes,
     })
 }
 
@@ -239,6 +248,8 @@ pub enum DoneError {
     /// `--results`, and the locked tests did not all pass, or the reports could not be
     /// read. Nothing was changed.
     Results(results::CheckError),
+    /// `--results`, and `invar.yaml` has no `acceptance:` section. Nothing was changed.
+    ResultsWithoutSection,
     /// The Plan directory could not be removed (perhaps in part).
     Remove {
         plan_dir: PathBuf,
@@ -283,6 +294,9 @@ impl fmt::Display for DoneError {
             ),
             Self::Locks(report) => write!(f, "{report}\nNothing was changed"),
             Self::Results(err) => write!(f, "{err}\nNothing was changed"),
+            Self::ResultsWithoutSection => {
+                write!(f, "{}; nothing was changed", results::NO_SECTION)
+            }
             Self::Remove { plan_dir, source } => write!(
                 f,
                 "cannot remove {}: {source}. Part of it may be gone already; remove the rest \

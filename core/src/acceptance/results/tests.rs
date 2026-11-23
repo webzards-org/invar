@@ -16,8 +16,18 @@ fn locked(paths: &[&str]) -> Vec<LockedFile> {
         .map(|path| LockedFile {
             path: (*path).to_owned(),
             ticket: "SHOP-214".to_owned(),
+            criteria: None,
         })
         .collect()
+}
+
+/// One file, locked with the list `ids`.
+fn listed(path: &str, ids: &[&str]) -> LockedFile {
+    LockedFile {
+        path: path.to_owned(),
+        ticket: "SHOP-214".to_owned(),
+        criteria: Some(ids.iter().map(|id| (*id).to_owned()).collect()),
+    }
 }
 
 fn case(file: &str, name: &str, outcome: Outcome) -> TestCase {
@@ -201,4 +211,60 @@ fn a_criterion_no_test_ran_is_red_even_when_every_test_passed() {
     assert!(!results.green_for(&criteria(&["AC1", "AC2"])));
     let out = results.render("SHOP-214", &criteria(&["AC1", "AC2"]));
     assert!(out.ends_with("AC2: not passed\n  no test of AC2 ran\nacceptance: red SHOP-214\n"));
+}
+
+#[test]
+fn every_criterion_a_line_lists_needs_a_test_of_that_file_in_the_results() {
+    let files = [listed(A, &["AC1", "AC2"])];
+    let partial = check(DIR, &files, &[case(A, "it AC1: cancels", Outcome::Passed)]);
+    assert!(!partial.green());
+    assert_eq!(partial.missing, vec![(A.to_owned(), "AC2".to_owned())]);
+    assert_eq!(
+        partial.problems(),
+        vec![format!(
+            "{A}: AC2: no test of this criterion from this file is in the results"
+        )]
+    );
+    assert!(partial.notes().is_empty());
+
+    // A test of AC2 from another file does not count for this one.
+    let elsewhere = check(
+        DIR,
+        &[listed(A, &["AC1", "AC2"]), listed(B, &["AC2"])],
+        &[
+            case(A, "it AC1", Outcome::Passed),
+            case(B, "it AC2", Outcome::Passed),
+        ],
+    );
+    assert_eq!(elsewhere.missing, vec![(A.to_owned(), "AC2".to_owned())]);
+
+    let whole = check(
+        DIR,
+        &files,
+        &[
+            case(A, "it AC1", Outcome::Passed),
+            case(A, "it AC2", Outcome::Passed),
+        ],
+    );
+    assert!(whole.green(), "{:?}", whole.problems());
+}
+
+#[test]
+fn a_file_that_did_not_run_is_said_once_and_not_per_criterion() {
+    let results = check(DIR, &[listed(A, &["AC1", "AC2"])], &[]);
+    assert_eq!(results.not_run, vec![A.to_owned()]);
+    assert!(results.missing.is_empty());
+    assert_eq!(results.problems().len(), 1);
+}
+
+#[test]
+fn a_file_with_no_list_gets_a_note_and_the_rule_of_before() {
+    let results = check(DIR, &locked(&[A]), &[case(A, "it AC1", Outcome::Passed)]);
+    assert!(results.green());
+    let notes = results.notes();
+    assert_eq!(notes.len(), 1);
+    assert!(
+        notes[0].starts_with(&format!("{A}: locked before the criteria")),
+        "{notes:?}"
+    );
 }
