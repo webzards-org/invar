@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::{Criterion, JunitError, Outcome, TestCase, criterion, read};
+use super::{Criterion, JunitError, Outcome, TestCase, criterion, read, read_mapped};
 
 const ROOT: &str = "/project";
 
@@ -324,6 +324,51 @@ fn a_path_outside_the_root_is_an_error_naming_the_test_case_and_the_value() {
     }
     // A drive is compared exactly.
     assert!(file_of("D:/proj/A.php", "C:/proj").is_err());
+}
+
+fn mapped(file: &str, report_root: &str) -> Result<String, JunitError> {
+    let xml = format!("<testsuite><testcase name=\"t\" file=\"{file}\"/></testsuite>");
+    read_mapped(
+        xml.as_bytes(),
+        Path::new(ROOT),
+        Some(Path::new(report_root)),
+    )
+    .map(|cases| cases[0].file.clone())
+}
+
+#[test]
+fn a_path_under_the_report_root_is_mapped_to_the_project_root() {
+    // Laravel Sail mounts the project at `/var/www/html` (§3.1).
+    for report_root in ["/var/www/html", "/var/www/html/", "/var/www/./html"] {
+        assert_eq!(
+            mapped("/var/www/html/tests/Acceptance/A.php", report_root).unwrap(),
+            "tests/Acceptance/A.php",
+            "{report_root}"
+        );
+    }
+    // The project root still holds, and a relative path is unchanged.
+    assert_eq!(
+        mapped("/project/tests/A.php", "/var/www/html").unwrap(),
+        "tests/A.php"
+    );
+    assert_eq!(
+        mapped("tests/A.php", "/var/www/html").unwrap(),
+        "tests/A.php"
+    );
+    // Under neither, or the report root itself, is outside.
+    for file in [
+        "/var/www/other/A.php",
+        "/var/www/htmlx/A.php",
+        "/var/www/html",
+    ] {
+        assert!(
+            matches!(
+                mapped(file, "/var/www/html"),
+                Err(JunitError::OutsideRoot { .. })
+            ),
+            "{file}"
+        );
+    }
 }
 
 #[test]

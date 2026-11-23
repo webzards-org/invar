@@ -26,6 +26,7 @@ mod hash;
 mod init;
 mod plan;
 mod pr_body;
+mod results;
 mod review_input;
 
 #[derive(Debug, Parser)]
@@ -106,6 +107,9 @@ pub enum Command {
     /// Commits the deletion, alone, with `--commit <MESSAGE>`, or when
     /// `invar.yaml` sets `done.commit: true` (under `done.commit_message`,
     /// default "Remove plan {ticket}"); `--no-commit` only stages it.
+    ///
+    /// With `--results <REPORT>...`, also refuses, changing nothing, unless every
+    /// locked acceptance test of the ticket passed in those JUnit reports.
     Done(done::Args),
     /// Print the context the agents read: `AI_CONTEXT.md`,
     /// `BUSINESS_CONTEXT.md` and the decision log (§5, §5c, §7).

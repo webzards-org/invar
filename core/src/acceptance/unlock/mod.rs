@@ -70,7 +70,7 @@ pub fn unlock(
 
     // In this order so that a failure before the renames leaves every test as it was, and
     // no file is ever pending with nothing to say it was unlocked (§11.2).
-    let prepared = write::prepare_with(root, &to_unlock, |bytes| {
+    let prepared = write::prepare_with(root, &to_unlock, |_, bytes| {
         Ok((lock::without_digest(bytes, &ticket)?, String::new()))
     })
     .map_err(UnlockError::Write)?;

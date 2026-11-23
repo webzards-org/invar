@@ -155,7 +155,9 @@ flowchart TD
     Relock --> TW
     Coder -- "BLOCKED reason" --> Failed{{"👤 /invar:log + /invar:log-approve<br/>failed entry: Plan back to draft"}}
     Failed --> Planner
-    Coder -- DONE --> Commit[Commit]
+    Coder -- DONE --> RunA{"⚙ invar acceptance run<br/>if required: locked tests green?"}
+    RunA -- red --> Coder
+    RunA -- "green, or no acceptance tests" --> Commit[Commit]
 
     subgraph P4 [4 · Review and close]
         Commit --> Review[reviewer · advisory<br/>criteria · locked tests · every invariant · conventions · Scope]
@@ -166,7 +168,7 @@ flowchart TD
     end
 
     Done --> Merged([Merge])
-    Merged --> CIv[⚙ CI: invar acceptance verify<br/>on every later push]
+    Merged --> CIv[⚙ CI: invar acceptance verify --results<br/>on every later push]
 ```
 
 👤 a step only the developer can take · ⚙ a deterministic check by the CLI
@@ -367,10 +369,11 @@ that decides whether it works.
 3. Locking writes one line into each file:
 
    ```php
-   // invar-lock: SHOP-214 sha256:9c1e4f…
+   // invar-lock: SHOP-214 sha256:9c1e4f… ac=AC1,AC2
    ```
 
-   No manifest, no side files. The lock travels with the test.
+   No manifest, no side files. The lock travels with the test, and so does
+   the list of criteria it covers, under the same digest.
 4. The **coder** makes them pass and may not touch them. `plan check`, `done`
    and CI all notice a changed locked file.
 
@@ -385,6 +388,15 @@ the cycle should end as `failed`.
 configure in `invar.yaml` and reads its JUnit report, which Pest, PHPUnit,
 pytest and Vitest all write. It never parses your test code and never
 replaces your runner.
+
+**Green is read, not run.** A lock proves a test did not change, not that it
+passes. Invar never runs your suite: your CI does, and `invar acceptance verify
+--results junit.xml` reads its report. Every locked file must have run, with a
+test for each criterion its line lists, and every one of its tests must have
+passed; a skipped test, or one that passed
+only on a retry, is not accepted. In Claude Code, `invar acceptance run`
+runs the ticket's locked tests after the coder's `DONE`, so that a review is
+not spent on red tests. That is feedback; the CI check is the boundary.
 
 **After the merge, the locks keep working.** `invar acceptance verify` needs
 no Plan and no git history, so CI checks every locked file on every push, long
@@ -469,6 +481,8 @@ overestimate is worse than one you know the limits of.
 |---|---|---|
 | Plan checksum, lock digests (`plan check`, `done`, `acceptance verify`) | **Boundary** | A changed Plan or locked test is refused, in Claude Code and in CI alike |
 | Red-before-green at lock time | **Boundary** | A test that cannot fail is never locked |
+| Locked tests green (`acceptance verify --results` in CI, `done --results`) | **Boundary** | A locked test that did not run, failed, was skipped or passed only on a retry is refused, from the team's own report |
+| `acceptance run` after `DONE` | Convenience | Stops the main session offering a review of red tests. It runs in the agent's shell, so the CI check is what counts |
 | `plan guard` hook | Convenience | Saves the agent a wasted edit. It reads command lines, not a shell, so a script can get past it; the checksum still catches the result |
 | Separate agent contexts | Focus | Keeps each agent's view narrow. A determined agent could still read a file; nothing that reads it can change a verdict |
 | Deny rule on the decision log | Focus | Stops accidental reads. The log is advisory, so a leak costs focus, never correctness |

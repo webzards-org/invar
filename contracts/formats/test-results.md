@@ -1,6 +1,6 @@
 # Contract: test results (JUnit XML)
 
-**Version:** 1.1.0 — a failure's type and message are read; see §9
+**Version:** 1.2.0 — a report may be the team's own, `--report-root`, and repeated test cases; see §9
 **Status:** stable
 **Implements:** §14.2, §14.3; A-2, A-4, A-5 (`docs/TASKS-AT.md`)
 **Read by:** the core (`format/junit`), any later reimplementation
@@ -21,6 +21,11 @@ a failing test exits non-zero by design, and the outcome of each test is in the 
 This contract defines how a report is read. Running `acceptance.run`, choosing the report
 path (`invar-yaml.md` §3.6), reading lock lines and refusing anything belong to the
 command that uses it (AT-8).
+
+**A report may be the team's own** (D-9). `invar acceptance lock` and `invar acceptance run`
+read the report of a run they started. `invar acceptance verify --results` and `invar done
+--results` read reports the team's own test run wrote, such as its CI's, which the core did not
+ask for. Every report is read by the same rules, whoever wrote it (`acceptance-lock.md` §10.5).
 
 Fixtures, including real reports from Pest and PHPUnit: `contracts/fixtures/junit/`.
 
@@ -62,6 +67,14 @@ take the ticket from (§5).
 | More than one kind | The first of `error`, `failure`, `skipped` | D-5 |
 
 Any other child reads as `passed`, such as a `<warning>`.
+
+### 2.3 A test case more than once
+
+The reader returns every test case it finds, in document order, and never merges two: the same
+`name` and `file` can appear twice in one report, or in two reports, when a runner or a CI step
+retries a test. **The same test** is the same `file`, after §3, and the same `name`. What a repeat
+means is the caller's decision. For the results check it passes only if every occurrence passed
+(`acceptance-lock.md` §10.5, D-34 there).
 
 ### 2.2 What a failure says
 
@@ -106,7 +119,20 @@ absolute and not under the root, if a `..` climbs above the root, or if nothing 
 
 The core compares text, so the root has to be the path the runner sees. A runner in a
 container, or a path through a symlink, gives an absolute path outside the root, which is
-reported and not guessed at.
+reported and not guessed at, unless the caller gives the runner's root (§3.1).
+
+### 3.1 The root the runner saw
+
+A caller may pass a second root: the **report root**, the absolute path at which the runner saw
+the project root, as `--report-root <dir>` (D-10). Laravel Sail mounts the project at
+`/var/www/html`, so every absolute path in its report starts there. Absent, nothing changes.
+
+The report root is normalised as the root is, by steps 2 and 3, and is compared as text, so it need
+not exist where the core runs. In step 4, an absolute value whose segments start with those of the
+report root has them removed, and the rest is relative to the project root. Otherwise step 4 applies
+as written, against the project root. Relative values do not change. So with the report root
+`/var/www/html`, `/var/www/html/tests/A.php` gives `tests/A.php`, and `/var/www/other/A.php` is
+**Outside the root**.
 
 ## 4. The criterion, from the name
 
@@ -208,6 +234,16 @@ usually all it needs. Nothing decides on the text, so a strange message cannot c
 and is never an error. It is bounded because a stack trace can be any size, and the caller shows
 only the first lines.
 
+**D-9 — The report the team's CI wrote is read as one the core asked for** (A-2). The core never runs
+the team's suite, and the team's CI already does. Reading its report is how the core learns whether
+the locked tests passed without becoming a test runner. Nothing in the format tells the two apart, so
+nothing in the reading does.
+
+**D-10 — The runner's root is given, not guessed.** A container sees the project at a path of its own,
+and nothing in a report says where the project root was. Matching a path by its last segments would
+find `tests/A.php` in any directory, so the caller names the root the runner saw, and paths outside both
+roots are still reported (D-7).
+
 ## 8. Examples
 
 The real reports in `contracts/fixtures/junit/real/` are the executable form of these,
@@ -304,6 +340,11 @@ cannot load, and exit non-zero.
 **Wrong root**, naming `html`. A file holding `this is not xml` is **Not XML**.
 
 ## 9. Version history
+
+**1.2.0** — §1, §2.3, §3.1, D-9 and D-10 (#156): a report may be the team's own, and is read by the
+same rules; a caller may give the root the runner saw, to map a container's paths; the reader returns
+a repeated test case each time, and what a repeat means is the caller's. With no report root, every
+report reads as it did.
 
 **1.1.0** — §2.2 and D-8: a failure's type and message are read, for AT-8's refusals. No report
 reads differently otherwise: the same test cases, outcomes and errors.

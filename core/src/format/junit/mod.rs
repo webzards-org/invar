@@ -1,6 +1,6 @@
 //! The subset of JUnit XML the core reads.
 //!
-//! Implements `contracts/formats/test-results.md` v1.1.0. The contract is the
+//! Implements `contracts/formats/test-results.md` v1.2.0. The contract is the
 //! authority; section numbers below (`§3`, `D-5`) point into it.
 //!
 //! Bytes and the project root come in, and a list of test cases comes out. No
@@ -115,6 +115,18 @@ enum Open {
 /// Read the test cases of a report, in document order. The first problem in the
 /// document is the one reported (§6).
 pub fn read(bytes: &[u8], root: &Path) -> Result<Vec<TestCase>, JunitError> {
+    read_mapped(bytes, root, None)
+}
+
+/// [`read`], for a report written where the project is at `report_root`, such as
+/// `/var/www/html` in a container: an absolute `file` under it is mapped to the root
+/// before §3 step 4 applies (§3.1). The text is compared, so `report_root` need not
+/// exist here.
+pub fn read_mapped(
+    bytes: &[u8],
+    root: &Path,
+    report_root: Option<&Path>,
+) -> Result<Vec<TestCase>, JunitError> {
     let text = std::str::from_utf8(bytes).map_err(|err| JunitError::NotXml {
         reason: format!(
             "not valid UTF-8 (first invalid byte at offset {})",
@@ -127,7 +139,11 @@ pub fn read(bytes: &[u8], root: &Path) -> Result<Vec<TestCase>, JunitError> {
     }
 
     let root = root.to_string_lossy().replace('\\', "/");
-    let root = resolve(&root);
+    let report_root = report_root.map(|path| path.to_string_lossy().replace('\\', "/"));
+    let roots = Roots {
+        root: resolve(&root),
+        report_root: report_root.as_deref().and_then(resolve),
+    };
     let line_of = |position: u64| {
         1 + text.as_bytes()[..position as usize]
             .iter()
@@ -226,7 +242,7 @@ pub fn read(bytes: &[u8], root: &Path) -> Result<Vec<TestCase>, JunitError> {
             Some(Open::Suite) => match tag {
                 "testsuites" | "testsuite" => Open::Suite,
                 "testcase" => {
-                    cases.push(test_case(&attributes, &root, line_of(start))?);
+                    cases.push(test_case(&attributes, &roots, line_of(start))?);
                     Open::Case
                 }
                 _ => Open::Ignored,
@@ -285,7 +301,7 @@ fn attributes_of(element: &BytesStart<'_>) -> Result<Vec<(String, String)>, Stri
 /// A `<testcase>` from its attributes, with the outcome its children have yet to set.
 fn test_case(
     attributes: &[(String, String)],
-    root: &Option<Vec<&str>>,
+    roots: &Roots<'_>,
     line: usize,
 ) -> Result<TestCase, JunitError> {
     let value = |key: &str| {
@@ -306,7 +322,7 @@ fn test_case(
     }
     Ok(TestCase {
         name: name.to_owned(),
-        file: normalise(file, root).ok_or_else(|| JunitError::OutsideRoot {
+        file: normalise(file, roots).ok_or_else(|| JunitError::OutsideRoot {
             name: name.to_owned(),
             file: raw.to_owned(),
         })?,
@@ -343,12 +359,24 @@ fn without_suffix<'a>(file: &'a str, name: &str) -> &'a str {
         .unwrap_or(file)
 }
 
+/// The segments of the project root, and of the root the runner saw, if it was another.
+struct Roots<'a> {
+    root: Option<Vec<&'a str>>,
+    report_root: Option<Vec<&'a str>>,
+}
+
 /// `file` relative to the root, or `None` if it is not inside it (§3 steps 2 to 4).
-fn normalise(file: &str, root: &Option<Vec<&str>>) -> Option<String> {
+fn normalise(file: &str, roots: &Roots<'_>) -> Option<String> {
     let file = file.replace('\\', "/");
     let segments = resolve(&file)?;
+    let under = |root: &Option<Vec<&str>>| -> Option<usize> {
+        let root = root.as_ref()?;
+        segments.starts_with(root).then_some(root.len())
+    };
     let relative = if is_absolute(&file) {
-        segments.strip_prefix(root.as_ref()?.as_slice())?
+        // A path under the runner's root is under the project's (§3.1).
+        let prefix = under(&roots.report_root).or_else(|| under(&roots.root))?;
+        &segments[prefix..]
     } else {
         segments.as_slice()
     };

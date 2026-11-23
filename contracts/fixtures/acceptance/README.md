@@ -26,11 +26,14 @@ acceptance/
 |---|---|
 | `none` | none |
 | `pending` | `ticket`, `line`, and `digest`: the file's lock digest |
-| `locked` | `ticket`, `line`, `digest`, `recorded`: the digest on the line, and `matches`: whether the two are equal |
-| `error` | `kind` (`more-than-one`, `after-window`, `ticket`, `digest`) and `lines`; or `kind: invalid-utf8` and `offset` |
+| `locked` | `ticket`, `line`, `digest`, `recorded`: the digest on the line, and `matches`: whether the two are equal; `criteria`, the ids of its `ac=` field, only when the line has one (absent: no list) |
+| `error` | `kind` (`more-than-one`, `after-window`, `ticket`, `digest`, `criteria`) and `lines`; or `kind: invalid-utf8` and `offset` |
 
 Every entry has `path`, `bytes` and `note`. `bytes` is recorded so that a corrupted
 fixture is reported as a size difference, not as a mysterious wrong result.
+
+`digest` covers the `ac=` list when the line has one (`acceptance-lock.md` §4 step 4), so
+`criteria-by-hand.py`, a list added after the digest, does not match.
 
 `same_digest` lists groups of files that must produce one digest. Line endings, a
 BOM, trailing whitespace, the comment prefix, trailing text and the state of the line

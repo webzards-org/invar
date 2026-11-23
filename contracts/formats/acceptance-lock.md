@@ -1,10 +1,10 @@
 # Contract: the `invar-lock:` line
 
-**Version:** 1.3.0 — adds §11, unlocking a test; see §12
+**Version:** 1.5.0 — a locked line records the criteria its file covers, under the digest; see §12
 **Status:** stable
 **Implements:** §4d (Checksums); A-2, A-3, A-4, A-5 (`docs/TASKS-AT.md`)
 **Read by:** the core (`format/lock`; `invar hash --lock`; `invar acceptance lock` and
-`verify` and `unlock`; `plan check`; `done`; `plan guard`), any later reimplementation
+`verify` and `unlock` and `run`; `plan check`; `done`; `plan guard`), any later reimplementation
 
 > Changing this file is a **public-contract change** (§14.3). It is made
 > deliberately, in its own PR, with the reason recorded, the version bumped,
@@ -20,7 +20,7 @@ content was at that moment. Nothing else records a lock (D-1).
 
 This contract defines how the line is read, when it is an error, how the digest is
 computed, how a line comes to be locked (§9), what the commands that verify locks
-refuse (§10), and how the developer takes a lock off (§11).
+refuse (§10), whether locked tests passed (§10.5), and how the developer takes a lock off (§11).
 
 Fixtures: `contracts/fixtures/acceptance/`.
 
@@ -32,12 +32,15 @@ prefix works (`//`, `#`, `--`, `/*`, `<!--`, ` * ` inside a docblock), and so do
 prefix (D-2). After it comes one of two forms:
 
 ```
-invar-lock: <TICKET>                       pending
-invar-lock: <TICKET> sha256:<64 hex>       locked
+invar-lock: <TICKET>                                   pending
+invar-lock: <TICKET> sha256:<64 hex>                   locked, before 1.5.0
+invar-lock: <TICKET> sha256:<64 hex> ac=<id>[,<id>…]   locked, with its criteria
 ```
 
 A **pending** line names the ticket whose test-writer wrote the file, which is not
-locked yet. A **locked** line also records the digest of §4.
+locked yet. A **locked** line also records the digest of §4, and, from 1.5.0, the criteria
+the file's tests cover (D-38). A locked line without the list is valid: it is what every
+line locked before 1.5.0 holds, and it reads as it did.
 
 The rest of the line is read by these rules:
 
@@ -53,6 +56,15 @@ The rest of the line is read by these rules:
    on the same line: `/* invar-lock: SHOP-214 sha256:… */`.
 5. **Any other field that starts with `sha256:` is an error** (D-5). Trailing text never
    holds one, wherever it stands.
+6. **The list** is the field right after the digest, separated from it by spaces, when it
+   starts with `ac=`, lowercase. After `ac=` come one or more ids separated by `,`, with no
+   space: each `AC` and a positive number with no leading zero, as a criterion's id in the
+   Plan (`plan-header.md` §6.4), strictly increasing by number, so sorted and without a
+   repeat. `ac=AC1,AC2,AC10` is a list; `ac=AC2,AC1`, `ac=AC1,AC1`, `ac=AC01`, `ac=ac1`,
+   `ac=AC1, AC2` and `ac=` are errors.
+7. **Any other field that starts with `ac=` is an error** (D-39): on a pending line, a second
+   one, or one in trailing text, wherever it stands. Trailing text may follow the list, as it
+   may follow the digest, so a comment can still close after it.
 
 The closing of a comment needs its whitespace: `/* invar-lock: SHOP-214*/` has the ticket
 `SHOP-214*/`, which is an error.
@@ -80,6 +92,7 @@ that applies in this order:
 | **After the window** | The one lock line is after line 10 | That line |
 | **Ticket** | The ticket is missing or malformed, or no space follows the marker | That line |
 | **Digest** | A field that starts with `sha256:` breaks §2 | That line |
+| **Criteria** | A field that starts with `ac=` breaks §2 rules 6 and 7 | That line |
 
 A mention of `invar-lock:` in a test's own text counts as a line, and is reported as one.
 A file about the lock line itself cannot be locked; that is the price of a rule with no
@@ -96,21 +109,28 @@ This is an exact rule, so that another implementation produces the same bytes:
    left, in which case nothing is added. This is §4d step 4 again, since removing the last
    non-blank line can leave blank lines at the end. No other step runs twice: in
    particular a `U+FEFF` that now starts the text is content, not a BOM.
-4. **SHA-256** of the UTF-8 bytes, written `sha256:<64 lowercase hex>`.
+4. **When the line has a list, add one line**: `ac=` and the list exactly as the line writes
+   it, then `\n` (D-38). With no list, nothing is added, so the digest of a line without one
+   is exactly what it was before 1.5.0.
+5. **SHA-256** of the UTF-8 bytes, written `sha256:<64 lowercase hex>`.
 
 So the digest does not depend on line endings, a BOM or trailing whitespace; nor on the
 line's prefix, its ticket, its digest or its trailing text; nor on where within the
 window the line stands. It does depend on every other line, including the criterion's
-text in a docblock (D-4).
+text in a docblock (D-4), and on the list.
 
-Replacing a pending line with a locked one, or one ticket with another, therefore does
-not change the digest.
+Replacing one ticket with another therefore does not change the digest, and neither does
+replacing a pending line with a locked one that has no list. Adding, removing or changing
+a list does.
 
-The digest is written into the pending line in place, right after the ticket, and nothing
-else in the file changes: not the rest of the line, not its line ending, not one other byte.
+The digest, and the list after it with one space between them, are written into the
+pending line in place, right after the ticket, and nothing else in the file changes: not
+the rest of the line, not its line ending, not one other byte.
 
 **Worked example.** For a file of `# invar-lock: SHOP-214` and two more lines, step 3
-leaves `def test_ac1():\n    assert False\n`, and its digest is the one in example 8.2.
+leaves `def test_ac1():\n    assert False\n`, and its digest is the one in example 8.2. Locked
+with the list `AC1`, step 4 makes it `def test_ac1():\n    assert False\nac=AC1\n`, whose digest
+is the one in example 8.9.
 
 ## 5. One ticket per file
 
@@ -291,6 +311,60 @@ not make. It makes the skip visible and deliberate. It does not make it impossib
 main session reads (§10.4). `done` is shown through `/invar:done`, whose shell block carries stdout,
 and its success line stays the last.
 
+**D-32 — Results are read, and the suite is still never run** (A-2). Running the team's suite would
+need its database, its services and its time, and would make the core a CI runner. The team's CI
+already runs it, and every relevant runner writes JUnit XML, so the core reads that report. A report
+need not have been asked for by the core: any run that wrote it counts. The one run the core starts is
+the one `lock` already starts, on locked acceptance files only.
+
+**D-33 — `skipped` is never passed, and there is no setting.** A locked test that is skipped asserts
+nothing, and a coder that marks one skipped has weakened it as surely as one that edits it, without
+changing a byte the digest sees. A setting would be the way to switch the check off.
+
+**D-34 — A test that passes only on a retry is not passed.** Runners and CI steps retry flaky tests,
+and both runs can end up in the reports. A test that failed once and passed once has shown that it can
+fail; for a test that is the target, that is reported, not accepted. Merging by file and name is what
+makes a retry one test, and not two of which one passed.
+
+**D-35 — Results after integrity.** The results of a file that changed after locking say nothing about
+the test that was locked, so `verify` reports the broken lock and reads no report until it holds.
+
+**D-36 — `acceptance run` is feedback, and the boundary is CI.** It runs in the agent's environment,
+from the agent's shell, so an agent could fake what it prints. It exists so that the main session does
+not offer a review of red tests, and so that the coder sees what failed before it says `DONE`. What a
+person can rely on is `verify --results` on the team's CI, where the report comes from the team's own
+run.
+
+**D-37 — In `acceptance run`, a criterion with no test that ran is not passed.** Coverage held when the
+files were locked (§9.3), so a criterion with no test now means the run filtered it out. `verify` does
+not check coverage, because with no ticket it has no Plan.
+
+**D-38 — The line records the criteria its file covers, under the digest.** A file whose tests ran
+only in part passed the check of 1.4.0: it asked for one test case per file. An agent cannot change a
+locked file, but it can leave a test out of the run, through `phpunit.xml` or a filter in CI, and CI is
+where the check is the boundary and has no Plan to count criteria against. So the line says which
+criteria the file covers, and `verify --results` asks for each of them. The list is taken from the run
+that locked the file, because that run is what proved each test red for its criterion. It must be under
+the digest, or an agent could take `AC2` off the line and the digest would still hold; it goes in as one
+line after the covered text, for the reason `plan-header.md` D-19 puts `Acceptance` in the approval
+digest: a value the command writes, outside the body, and part of what was decided. A line with no list
+gets exactly the digest of before, so no file locked before 1.5.0 breaks. The ids are sorted and
+written one way only, so that there is one list for one set of criteria.
+
+**D-39 — An `ac=` field out of place is an error, as a `sha256:` one is.** As with D-5: read as trailing
+text, a list written after a tab, after other text or a second time would be ignored silently, and a
+person reading the line would believe it. A list on a pending line is an error for the same reason: only
+`lock` writes one, with the digest. `plan guard` denies a `Write` or `Edit` that writes either.
+
+**D-40 — A line locked before 1.5.0 keeps the check of 1.4.0, and says so.** Refusing it would break
+every project that locked before; giving it a list would mean writing into locked files, which only
+`lock` does. It is checked as before, and the note says the check is weaker for it, until the file is
+locked again, after `acceptance unlock` or under `## Acceptance tests to change`.
+
+**D-41 — `--results` with no `acceptance:` section is an error.** D-21 lets a project switch the lock
+check off by removing the section, because then nothing asked for it. A caller that passes `--results`
+asked for a check that cannot run; exiting 0 would let a CI step pass that checked nothing.
+
 ## 7. Open questions
 
 None.
@@ -369,6 +443,26 @@ closed with no whitespace before it.
 ```
 
 **Why:** truncated, uppercase, and out of place. None of them passes as a pending line (D-5).
+
+### 8.9 Valid — locked, with its criteria
+
+```
+# invar-lock: SHOP-214 sha256:af62a75863c29c1d9e9504ef95758cb7ec59c07d5265d67cabddf46810c1d04b ac=AC1
+/* invar-lock: SHOP-214 sha256:af62a75863c29c1d9e9504ef95758cb7ec59c07d5265d67cabddf46810c1d04b ac=AC1 */
+```
+
+The file of example 8.2, locked with the list `AC1`: the digest covers the list (§4 step 4), so
+it is not example 8.2's.
+
+### 8.10 Invalid — a malformed or misplaced list
+
+```
+# invar-lock: SHOP-214 ac=AC1
+# invar-lock: SHOP-214 sha256:af62a75863c29c1d9e9504ef95758cb7ec59c07d5265d67cabddf46810c1d04b ac=AC2,AC1
+# invar-lock: SHOP-214 sha256:af62a75863c29c1d9e9504ef95758cb7ec59c07d5265d67cabddf46810c1d04b ac=AC1 ac=AC2
+```
+
+**Why:** on a pending line, not sorted, and twice (D-39). Each is **Criteria**.
 
 ## 9. Locking
 
@@ -450,8 +544,10 @@ Only when every check holds:
 
 1. Every file to lock is read again and compared with the bytes that ran. If any changed, the
    command refuses, naming them, and writes nothing.
-2. The digest goes into each file's line (§4), and each result is written to a temporary file
-   beside the original, with the original's permissions.
+2. The digest and the list go into each file's line (§4). The list is every criterion id that
+   a test case of that file named in this run, one token each as §9.3 requires, sorted by
+   number (D-38). Each result is written to a temporary file beside the original, with the
+   original's permissions.
 3. Each temporary file is renamed over its original.
 
 A failure before step 3 leaves every test file as it was. A failure during step 3 is the only
@@ -460,8 +556,8 @@ partial case, and the message names the files written and the files not written 
 ### 9.5 The output on success
 
 On stdout: per criterion in the Plan's order, the tests that cover it, each with its file and
-name; then each file locked, with its digest; then one fixed last line that the test-writer
-keys on:
+name; then each file locked, with its digest and its list; then one fixed last line that the
+test-writer keys on:
 
 ```
 locked <TICKET> <N> file(s)
@@ -473,7 +569,7 @@ file that skipped the red check is named (§11.3).
 ## 10. Verifying
 
 One check, used by `plan check`, `done` and `invar acceptance verify`. None of them runs a test
-(A-2): green is the team's CI. Every problem is reported in one run (D-14), each naming its file
+(A-2). Whether the locked tests pass is read from JUnit reports, by §10.5. Every problem is reported in one run (D-14), each naming its file
 and ticket, and saying what to do.
 
 ### 10.1 Integrity
@@ -549,6 +645,68 @@ were unlocked (§11.4).
 exits 0. `plan check` and `done` go on as before, with one warning on stderr when the Plan says
 `required`, and nothing added to stderr otherwise.
 
+### 10.5 Whether the locked tests passed
+
+A lock proves a test did not change. It does not prove the test passes, and the coder's job is to
+make it pass. **The core still never runs the team's test suite** (A-2, D-32): it reads JUnit reports
+(`test-results.md`), and runs `acceptance.run` only on locked acceptance files, as `lock` does.
+
+**The files.** Every file under `acceptance.dir`, found as in §9.1, with a locked line whose digest
+is the file's: of every ticket, or of one ticket when the caller names it. Pending files, and files of
+no ticket, are not looked at. Test cases of any other file are ignored, as in §9.3 (D-10).
+
+**With no `acceptance:` section**, `--results` is an error naming the missing section, non-zero, for
+`verify` and for `done`, which then deletes nothing (D-41). Without `--results`, D-21 stands.
+
+**The rules**, the same for every caller. Each problem names the file, the test's name and its
+criterion by the token rule of `test-results.md` §4, and every problem is reported in one run (D-14):
+
+| What the reports hold | Means |
+|---|---|
+| No test case for a locked file | A problem: not run by the test suite; add `acceptance.dir` to a test suite |
+| A criterion the file's line lists, with no test case of that file naming it by the token rule | A problem: `<file>: <id>: no test of this criterion from this file is in the results` (D-38) |
+| A locked line with no list | Only the other rules apply. A note on stderr names the file: locked before criteria were recorded, so only a full run of it is checked (D-40) |
+| A test case that is `failure` or `error` | A problem, with the outcome and the first line of its message |
+| A test case that is `skipped` | A problem, always (D-33) |
+| The same test, by file and name, more than once | Passed only if every occurrence passed (D-34). Otherwise a problem, saying it passed in one run and not in another |
+| Every test case of every locked file `passed` | Passed |
+
+**The callers:**
+
+| Command | Reports | Files | Runs |
+|---|---|---|---|
+| `invar acceptance verify --results <REPORT>...` | The team's own, from its CI | Every ticket's; with a ticket, that ticket's | After §10.1 to §10.4 hold, and only then (D-35) |
+| `invar done <TICKET> --results <REPORT>...` | The team's own | The ticket's | After the checks `done` makes, before deleting anything |
+| `invar acceptance run <TICKET>` | The one its own run writes | The ticket's | On its own, below |
+
+`--report-root <DIR>` maps the paths in the reports (`test-results.md` §3.1), and needs
+`--results`. A report that is missing, empty or cannot be read is an error naming it, and nothing is
+checked. Without `--results`, `verify` and `done` read no report and print what they printed before.
+
+`verify --results` exits 0 with one line, `verified <N> locked file(s), and <M> locked test(s)
+passed`, where `<M>` counts the distinct tests of the files checked. On any problem it exits non-zero,
+with nothing on stdout and every problem on stderr.
+
+**`invar acceptance run <TICKET>`** is feedback for the dispatcher, not the boundary (D-36). It is an
+agent's command, and writes nothing. It refuses, with nothing on stdout, in this order: what `plan
+check` refuses; a Plan that does not say `required`; no `acceptance:` section; then any malformed line
+under `acceptance.dir`, and any of the ticket's files whose digest is not the one its line records;
+then no locked file for the ticket. It runs `acceptance.run` as §9.2 does, with only the ticket's
+locked files as `{files}`, and refuses as §9.2 does when the run has no result. On stdout:
+
+```
+AC1: passed
+AC2: not passed
+  tests/Acceptance/b_test.php: `it AC2 refuses` (AC2): failure: Failed asserting that false is true.
+acceptance: red SHOP-214
+```
+
+One line per criterion of the Plan, in its order, each test of it that did not pass below it; a
+criterion with no test that ran is not passed (D-37). Then, under `not passed, and of no criterion of
+the Plan:`, the locked files that did not run and the tests with no one id of the Plan that did not
+pass. The last line is fixed: `acceptance: green <TICKET>`, exit 0, when every criterion passed and
+nothing else is listed, and `acceptance: red <TICKET>`, non-zero, otherwise.
+
 ## 11. Unlocking
 
 A locked test can be wrong, and the coder must not be the one to decide that (A-8).
@@ -592,7 +750,7 @@ warn about. A path holding a line break is refused by `unlock`. A file listed tw
 the later round.
 
 **The files.** The lock line of each goes back to pending: the digest and the spaces before it are
-removed, and no other byte changes. Applied to the output of §4's writing, this gives back the pending
+removed, and the list and the spaces before it when there is one, and no other byte changes. Applied to the output of §4's writing, this gives back the pending
 file byte for byte.
 
 In order: every new file is written beside its original; the record is written; each file is renamed
@@ -639,6 +797,18 @@ unlocked by the developer: <path> (round <R>)
 or not it exists yet. A shell can still write it (D-30).
 
 ## 12. Version history
+
+**1.5.0** — §2 rules 6 and 7, the **Criteria** error of §3.1, §4 step 4, §9.4, §10.5, §11.2,
+examples 8.9 and 8.10, and D-38 to D-41 (#156, after review): a locked line records `ac=<ids>`, the
+criteria its file's tests named when it was locked, and the digest covers the list. `verify
+--results`, `done --results` and `acceptance run` ask for a test of each listed criterion from its
+file, so a file that ran only in part is refused. A line with no list reads, digests and verifies as
+before, with a note. `--results` with no `acceptance:` section is now an error.
+
+**1.4.0** — adds §10.5 and D-32 to D-37: whether the locked tests passed (#156). `verify` and `done`
+take `--results` and `--report-root`, and `invar acceptance run` is new. Without `--results`, nothing
+changes: no report is read, and every output is as before. The line, the digest, locking and unlocking
+do not change.
 
 **1.3.0** — adds §11 and D-25 to D-31: unlocking a test (AT-13). `lock`, `verify`, `spec` and `done`
 read the record. The line and the digest do not change, and nothing changes for a ticket with no

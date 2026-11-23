@@ -1,6 +1,6 @@
 //! The `invar-lock:` line of an acceptance test file.
 //!
-//! Implements `contracts/formats/acceptance-lock.md` v1.3.0. The contract is the
+//! Implements `contracts/formats/acceptance-lock.md` v1.5.0. The contract is the
 //! authority; section numbers below (`§2`, `D-3`) point into it.
 //!
 //! Reading the line and choosing what the digest covers are format knowledge, so
@@ -25,6 +25,9 @@ pub const WINDOW: usize = 10;
 /// What a recorded digest starts with (§2).
 const DIGEST_PREFIX: &str = "sha256:";
 
+/// What the list of criteria starts with (§2, D-38).
+pub const CRITERIA_PREFIX: &str = "ac=";
+
 /// The lock line of a file, and the digest of what it covers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockLine {
@@ -33,7 +36,10 @@ pub struct LockLine {
     pub line: usize,
     /// The digest on the line. `None` means the line is pending.
     pub recorded: Option<String>,
-    /// The file's digest as it is now (§4).
+    /// The criteria the line records the file as covering, sorted, from `ac=`. `None`
+    /// when the line has no list: pending, or locked before lists were recorded (D-38).
+    pub criteria: Option<Vec<String>>,
+    /// The file's digest as it is now, over the list too when there is one (§4).
     pub digest: String,
 }
 
@@ -51,13 +57,27 @@ pub fn read(bytes: &[u8]) -> Result<Option<LockLine>, LockError> {
 }
 
 /// `bytes` with the digest of [`read`] written into the pending line of `ticket`,
-/// right after the ticket (§4).
+/// right after the ticket (§4), and no list of criteria: a line as locked before 1.5.0,
+/// which the tests still need to write.
+#[cfg(test)]
+pub fn with_digest(bytes: &[u8], ticket: &str) -> Result<Vec<u8>, LockError> {
+    with_digest_covering(bytes, ticket, &[])
+}
+
+/// `bytes` with a digest and `ac=<criteria>` written into the pending line of `ticket`,
+/// right after the ticket, the digest covering the list (§4). An empty `criteria`
+/// writes no list. The ids are sorted by number and deduplicated here.
 ///
 /// Everything before the marker, any trailing text and the line's own ending stay,
 /// and no other byte changes: this works on the file as it is, not on its canonical
 /// form, so its line endings, BOM and trailing whitespace survive. Refuses a file
-/// with no line, a line for another ticket, and a line already locked.
-pub fn with_digest(bytes: &[u8], ticket: &str) -> Result<Vec<u8>, LockError> {
+/// with no line, a line for another ticket, a line already locked, and an id that is
+/// not `AC<n>`.
+pub fn with_digest_covering(
+    bytes: &[u8],
+    ticket: &str,
+    criteria: &[String],
+) -> Result<Vec<u8>, LockError> {
     let lock = read(bytes)?.ok_or(LockError::NoLine)?;
     if lock.ticket != ticket {
         return Err(LockError::OtherTicket {
@@ -80,16 +100,43 @@ pub fn with_digest(bytes: &[u8], ticket: &str) -> Result<Vec<u8>, LockError> {
     let spaces = text[marker..].len() - text[marker..].trim_start_matches(' ').len();
     let at = marker + spaces + lock.ticket.len();
 
-    let mut written = Vec::with_capacity(bytes.len() + lock.digest.len() + 1);
+    let fields = if criteria.is_empty() {
+        format!(" {}", lock.digest)
+    } else {
+        let (digest, list) = digest_covering(bytes, criteria)?;
+        format!(" {digest} {CRITERIA_PREFIX}{}", list.join(","))
+    };
+
+    let mut written = Vec::with_capacity(bytes.len() + fields.len());
     written.extend_from_slice(&bytes[..at]);
-    written.push(b' ');
-    written.extend_from_slice(lock.digest.as_bytes());
+    written.extend_from_slice(fields.as_bytes());
     written.extend_from_slice(&bytes[at..]);
     Ok(written)
 }
 
+/// The digest the lock line of `bytes` would record with the list `criteria`, and the
+/// list as it would be written: sorted by number, without repeats (§4). Whatever the
+/// line records now is left out. Refuses an id that is not `AC<n>`, and an empty list.
+pub fn digest_covering(
+    bytes: &[u8],
+    criteria: &[String],
+) -> Result<(String, Vec<String>), LockError> {
+    let canonical = digest::canonicalize_bytes(bytes).map_err(LockError::InvalidUtf8)?;
+    let lock = parse(&canonical)?.ok_or(LockError::NoLine)?;
+    let list = sorted(criteria)
+        .filter(|list| !list.is_empty())
+        .ok_or_else(|| LockError::Criteria {
+            line: lock.line,
+            found: criteria.join(","),
+            why: "an id is `AC` and a positive number with no leading zero",
+        })?;
+    let digest = digest::digest(&covered(&canonical, lock.line, Some(&list)));
+    Ok((digest, list))
+}
+
 /// `bytes` with the digest taken out of the locked line of `ticket`, and the spaces
-/// before it: the inverse of [`with_digest`] (§11.2).
+/// before it, and the list of criteria with its spaces when there is one: the inverse
+/// of [`with_digest_covering`] (§11.2).
 ///
 /// No other byte changes, for the same reason. Refuses a file with no line, a line for
 /// another ticket, and a line that is pending.
@@ -116,7 +163,12 @@ pub fn without_digest(bytes: &[u8], ticket: &str) -> Result<Vec<u8>, LockError> 
     let spaces = text[marker..].len() - text[marker..].trim_start_matches(' ').len();
     let from = marker + spaces + lock.ticket.len();
     let spaces = text[from..].len() - text[from..].trim_start_matches(' ').len();
-    let to = from + spaces + recorded.len();
+    let mut to = from + spaces + recorded.len();
+    if lock.criteria.is_some() {
+        // §2 puts only spaces between the digest and the list, too.
+        let spaces = text[to..].len() - text[to..].trim_start_matches(' ').len();
+        to += spaces + first_field(&text[to + spaces..]).len();
+    }
 
     let mut written = Vec::with_capacity(bytes.len() - (to - from));
     written.extend_from_slice(&bytes[..from]);
@@ -124,8 +176,9 @@ pub fn without_digest(bytes: &[u8], ticket: &str) -> Result<Vec<u8>, LockError> 
     Ok(written)
 }
 
-/// Whether any line of `text` is a lock line with a digest, or with a malformed
-/// `sha256:` field after its ticket (§2, D-5).
+/// Whether any line of `text` is a lock line with a digest, with a malformed `sha256:`
+/// field after its ticket (§2, D-5), or with an `ac=` field anywhere after it, well
+/// formed or not (D-39): each is something only `invar acceptance lock` writes.
 ///
 /// For a piece of text that is not a whole file, such as what an edit puts in: the window
 /// and the one-line rule of §3 say nothing about a fragment, so [`read`] cannot answer.
@@ -135,7 +188,10 @@ pub fn holds_digest(text: &str) -> bool {
         line.split_once(MARKER).is_some_and(|(_, after_marker)| {
             matches!(
                 fields(after_marker, 0),
-                Ok((_, Some(_))) | Err(LockError::Digest { .. })
+                Ok(Fields {
+                    recorded: Some(_),
+                    ..
+                }) | Err(LockError::Digest { .. } | LockError::Criteria { .. })
             )
         })
     })
@@ -161,17 +217,26 @@ fn parse(canonical: &str) -> Result<Option<LockLine>, LockError> {
 
     let text = canonical.split('\n').nth(line - 1).unwrap_or_default();
     let after_marker = text.split_once(MARKER).map_or("", |(_, rest)| rest);
-    let (ticket, recorded) = fields(after_marker, line)?;
+    let fields = fields(after_marker, line)?;
     Ok(Some(LockLine {
-        ticket: ticket.to_owned(),
+        ticket: fields.ticket.to_owned(),
         line,
-        recorded: recorded.map(str::to_owned),
-        digest: digest::digest(&covered(canonical, line)),
+        recorded: fields.recorded.map(str::to_owned),
+        digest: digest::digest(&covered(canonical, line, fields.criteria.as_deref())),
+        criteria: fields.criteria,
     }))
 }
 
-/// The ticket and the recorded digest, from what follows the marker (§2).
-fn fields(after_marker: &str, line: usize) -> Result<(&str, Option<&str>), LockError> {
+/// What follows the marker (§2).
+struct Fields<'a> {
+    ticket: &'a str,
+    recorded: Option<&'a str>,
+    criteria: Option<Vec<String>>,
+}
+
+/// The ticket, the recorded digest and the list of criteria, from what follows the
+/// marker (§2).
+fn fields(after_marker: &str, line: usize) -> Result<Fields<'_>, LockError> {
     let after_spaces = after_marker.trim_start_matches(' ');
     let ticket = first_field(after_spaces);
     if after_spaces.len() == after_marker.len() || !is_ticket(ticket) {
@@ -186,20 +251,86 @@ fn fields(after_marker: &str, line: usize) -> Result<(&str, Option<&str>), LockE
     // Empty unless only spaces came before it: a tab leaves `next` on whitespace.
     let candidate = first_field(next);
     let recorded = is_digest(candidate).then_some(candidate);
-    let trailing = match recorded {
+    let mut trailing = match recorded {
         Some(digest) => &next[digest.len()..],
         None => after_ticket,
     };
-    if let Some(field) = trailing
-        .split_whitespace()
-        .find(|field| field.starts_with(DIGEST_PREFIX))
-    {
-        return Err(LockError::Digest {
+
+    // The list comes right after the digest, separated by spaces only (D-38).
+    let mut criteria = None;
+    if recorded.is_some() {
+        let next = trailing.trim_start_matches(' ');
+        let candidate = first_field(next);
+        if next.len() < trailing.len() && candidate.starts_with(CRITERIA_PREFIX) {
+            let list = criteria_list(candidate).ok_or_else(|| LockError::Criteria {
+                line,
+                found: candidate.to_owned(),
+                why: "the list is ids such as `AC1`, sorted by number, with no repeat, separated \
+                      by commas and no spaces",
+            })?;
+            criteria = Some(list);
+            trailing = &next[candidate.len()..];
+        }
+    }
+
+    let field_starting = |prefix: &str| {
+        trailing
+            .split_whitespace()
+            .find(|field| field.starts_with(prefix))
+            .map(str::to_owned)
+    };
+    if let Some(found) = field_starting(DIGEST_PREFIX) {
+        return Err(LockError::Digest { line, found });
+    }
+    if let Some(found) = field_starting(CRITERIA_PREFIX) {
+        return Err(LockError::Criteria {
             line,
-            found: field.to_owned(),
+            found,
+            why: if recorded.is_none() {
+                "a pending line has no list: `invar acceptance lock` writes it, with the digest"
+            } else {
+                "the list comes once, right after the digest, separated from it by spaces"
+            },
         });
     }
-    Ok((ticket, recorded))
+    Ok(Fields {
+        ticket,
+        recorded,
+        criteria,
+    })
+}
+
+/// The ids of an `ac=` field, if it is well formed (§2): `AC<n>` with no leading zero,
+/// strictly increasing by number, comma-separated, at least one.
+fn criteria_list(field: &str) -> Option<Vec<String>> {
+    let ids: Vec<String> = field
+        .strip_prefix(CRITERIA_PREFIX)?
+        .split(',')
+        .map(str::to_owned)
+        .collect();
+    let numbers: Vec<u64> = ids.iter().map(|id| id_number(id)).collect::<Option<_>>()?;
+    numbers
+        .windows(2)
+        .all(|pair| pair[0] < pair[1])
+        .then_some(ids)
+}
+
+/// `ids` sorted by number with repeats removed, or `None` if one is not `AC<n>`.
+fn sorted(ids: &[String]) -> Option<Vec<String>> {
+    let mut numbers: Vec<u64> = ids.iter().map(|id| id_number(id)).collect::<Option<_>>()?;
+    numbers.sort_unstable();
+    numbers.dedup();
+    Some(numbers.iter().map(|n| format!("AC{n}")).collect())
+}
+
+/// The number of `AC<n>`, as the Plan writes an id (`plan-header.md` §6.4).
+fn id_number(id: &str) -> Option<u64> {
+    let digits = id.strip_prefix("AC")?;
+    let first = digits.bytes().next()?;
+    if !(b'1'..=b'9').contains(&first) || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 /// `text` up to the first whitespace; empty if it starts with some.
@@ -217,11 +348,12 @@ fn is_digest(field: &str) -> bool {
     })
 }
 
-/// What the digest covers: `canonical` without line `line` (§4, steps 2 and 3).
+/// What the digest covers: `canonical` without line `line` (§4, steps 2 and 3), then,
+/// when the line has a list, the line `ac=<list>` (step 4, D-38).
 ///
 /// Only §4d step 4 runs again, not all of it (D-7): `canonicalize` would strip a
 /// `U+FEFF` that removing the first line brought to the start.
-fn covered(canonical: &str, line: usize) -> String {
+fn covered(canonical: &str, line: usize, criteria: Option<&[String]>) -> String {
     let lines: Vec<&str> = canonical
         .split('\n')
         .enumerate()
@@ -232,6 +364,9 @@ fn covered(canonical: &str, line: usize) -> String {
     let mut covered = joined.trim_end_matches('\n').to_owned();
     if !covered.is_empty() {
         covered.push('\n');
+    }
+    if let Some(criteria) = criteria {
+        covered.push_str(&format!("{CRITERIA_PREFIX}{}\n", criteria.join(",")));
     }
     covered
 }
@@ -253,6 +388,12 @@ pub enum LockError {
     Digest {
         line: usize,
         found: String,
+    },
+    /// An `ac=` field that breaks §2: malformed, on a pending line, or out of place.
+    Criteria {
+        line: usize,
+        found: String,
+        why: &'static str,
     },
     /// [`with_digest`] or [`without_digest`] on a file with no lock line.
     NoLine,
@@ -305,6 +446,9 @@ impl fmt::Display for LockError {
                 "line {line}: `{found}` is not a recorded digest, which is `{DIGEST_PREFIX}` and \
                  64 lowercase hex characters, right after the ticket and separated by spaces"
             ),
+            Self::Criteria { line, found, why } => {
+                write!(f, "line {line}: `{found}` is not a list of criteria: {why}")
+            }
             Self::NoLine => write!(
                 f,
                 "no `{MARKER}` line to write a digest into; a test is locked from a pending line"

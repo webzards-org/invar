@@ -19,6 +19,34 @@
   and its signature when there is one. `approval.commit: true` does it every
   time, as `Approve plan <TICKET>`; `--no-commit` skips it once. Your hooks
   and commit signing apply, and nothing is pushed (#154).
+- **Locked acceptance tests have to pass, not only stay unchanged.**
+  `invar acceptance verify --results junit.xml` reads the JUnit report of your
+  own test run, for CI: every locked file must have a test case in it, and every
+  one must have passed. It fails, naming file, test and criterion, on a locked
+  file your suite did not run, on `failure`, `error` and `skipped`, and on a test
+  that passed only on a retry. `--report-root /var/www/html` maps the paths of a
+  runner in a container, such as PHPUnit under Laravel Sail. `invar done
+  --results` makes the same check for the ticket before it deletes anything.
+  Without `--results`, nothing changes. Invar still never runs your suite (#156).
+- **`invar acceptance run <TICKET>`** runs the ticket's locked tests, and only
+  them, and says per criterion whether they pass, ending with `acceptance:
+  green <TICKET>` or `acceptance: red <TICKET>`. The coder runs it before it
+  answers `DONE`, and the main session after: on red it shows what failed,
+  offers the coder again, and offers no commit, review or `/invar:done` (#156).
+  Contracts `acceptance-lock.md` 1.4.0 and `test-results.md` 1.2.0.
+- **A lock line records the criteria its file covers.** `invar acceptance lock`
+  writes `ac=AC1,AC2` after the digest, from the run that locked the file, and
+  the digest covers the list. `verify --results`, `done --results` and
+  `acceptance run` refuse a file whose tests ran only in part, naming the
+  criterion: `<file>: AC2: no test of this criterion from this file is in the
+  results`. Files locked before keep their digest and the weaker check, with a
+  note on stderr, until they are locked again. `invar hash --lock` shows the
+  list, and `--ac AC1,AC2` gives the digest a list would get. `plan guard`
+  denies writing `ac=` into a lock line by hand (#156). Contract
+  `acceptance-lock.md` 1.5.0.
+- **`--results` with no `acceptance:` section is an error**, for `verify` and
+  `done`: the check was asked for and cannot run. Without `--results`, a missing
+  section still only warns (#156).
 
 ### Changed
 

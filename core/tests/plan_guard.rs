@@ -364,6 +364,37 @@ fn a_malformed_digest_field_is_denied_too() {
 }
 
 #[test]
+fn a_list_of_criteria_written_by_hand_is_denied_as_a_digest_is() {
+    // `ac=` is under the digest, and only `invar acceptance lock` writes it (#156).
+    let project = with_test(TEST, PENDING);
+    for (old, new) in [
+        ("SHOP-214", "SHOP-214 ac=AC1"),
+        (
+            "# invar-lock: SHOP-214",
+            "# invar-lock: SHOP-214 ac=AC1,AC2",
+        ),
+    ] {
+        denied_as_hand_written(edit_with(&project.root(), &project.path(TEST), old, new));
+    }
+    for content in [
+        "# invar-lock: SHOP-214 ac=AC1\ndef test_ac1():\n    assert False\n".to_owned(),
+        format!("# invar-lock: SHOP-214 {DIGEST} ac=AC1\ndef test_ac1():\n    assert False\n"),
+    ] {
+        denied_as_hand_written(write_with(&project.root(), &project.path(TEST), &content));
+    }
+    // On a locked file, any edit is denied, a list included.
+    let project = with_test(TEST, LOCKED);
+    guard(edit_with(
+        &project.root(),
+        &project.path(TEST),
+        DIGEST,
+        &format!("{DIGEST} ac=AC1"),
+    ))
+    .code(2)
+    .stderr(contains("is a locked acceptance test of SHOP-214"));
+}
+
+#[test]
 fn an_edit_that_adds_the_digest_without_repeating_the_marker_is_denied() {
     let project = with_test(TEST, PENDING);
     denied_as_hand_written(edit_with(
@@ -909,6 +940,17 @@ fn verifying_the_locks_passes_silently() {
             .stdout("")
             .stderr("");
     }
+}
+
+#[test]
+fn running_the_locked_tests_passes_silently() {
+    // The coder's and the main session's, so not on `HUMAN_ONLY` (#156). `done --results`
+    // stays the developer's, as every `done` is.
+    let project = Project::new(APPROVED);
+    guard(bash(&project.root(), "invar acceptance run SHOP-214"))
+        .code(0)
+        .stdout("")
+        .stderr("");
 }
 
 // --- allow ----------------------------------------------------------------------

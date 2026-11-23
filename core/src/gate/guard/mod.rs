@@ -46,7 +46,7 @@
 //! - the path is under `acceptance.dir` and the file has a locked line, of any
 //!   ticket, whether or not its digest still matches. A pending file is the
 //!   test-writer working;
-//! - the path is under `acceptance.dir` and the call would write a digest into a lock
+//! - the path is under `acceptance.dir` and the call would write a digest or an `ac=` list into a lock
 //!   line. Only `invar acceptance lock` writes one, after it has run the tests (A-4).
 //!
 //! Only files under `acceptance.dir` are judged for a lock line, because anywhere else
@@ -381,10 +381,11 @@ fn judge_test(path: &Path, root: &ProjectRoot, relative: &Path, payload: &Value)
     if writes_digest(payload, existing.as_deref()) {
         return Verdict::Deny {
             reason: format!(
-                "this would write a digest into the `{MARKER}` line of {}. Only `invar acceptance \
-                 lock` writes a digest, after it has run the tests, and writing one by hand skips \
-                 the check that they fail before the code exists. Write the pending line, \
-                 `{MARKER} <TICKET>`, and run `invar acceptance lock <TICKET>`",
+                "this would write a digest or an `ac=` list into the `{MARKER}` line of {}. Only \
+                 `invar acceptance lock` writes a digest, and the criteria list with it, after it \
+                 has run the tests, and writing one by hand skips the check that they fail before \
+                 the code exists. Write the pending line, `{MARKER} <TICKET>`, and run `invar \
+                 acceptance lock <TICKET>`",
                 relative.display()
             ),
         };

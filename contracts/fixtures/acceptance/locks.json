@@ -1,6 +1,6 @@
 {
   "schema": "invar.lock-fixtures/v1",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "algorithm": "sha256",
   "digest_format": "sha256:<64 lowercase hex>",
   "contract": "contracts/formats/acceptance-lock.md. Every file must give the result listed for it, and each list in same_digest must give one digest. Expected values are regenerated deliberately, never as part of a code change.",
@@ -282,6 +282,78 @@
       "recorded": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     },
     {
+      "path": "locked/criteria.py",
+      "bytes": 139,
+      "note": "the criteria the file covers, under the digest",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "matches": true,
+      "criteria": [
+        "AC1",
+        "AC2"
+      ],
+      "digest": "sha256:7bac5ea2526244d0033a39a4dbb8503da8abced5a17731579e2848d0a18e1ba7",
+      "recorded": "sha256:7bac5ea2526244d0033a39a4dbb8503da8abced5a17731579e2848d0a18e1ba7"
+    },
+    {
+      "path": "locked/criteria-one.php",
+      "bytes": 263,
+      "note": "one criterion",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 3,
+      "matches": true,
+      "criteria": [
+        "AC1"
+      ],
+      "digest": "sha256:80333d7aa51c8bc9918facc4bbbc702861f3a1637111f880952725ca5a334cc4",
+      "recorded": "sha256:80333d7aa51c8bc9918facc4bbbc702861f3a1637111f880952725ca5a334cc4"
+    },
+    {
+      "path": "locked/criteria-js-block.js",
+      "bytes": 156,
+      "note": "a block comment closed after the list, and AC10 sorted after AC1 by number",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "matches": true,
+      "criteria": [
+        "AC1",
+        "AC10"
+      ],
+      "digest": "sha256:3878c7b3cf7235bb8a63ac6272cc3d0b1cc33b41c46bd84dcf1d31b72409434a",
+      "recorded": "sha256:3878c7b3cf7235bb8a63ac6272cc3d0b1cc33b41c46bd84dcf1d31b72409434a"
+    },
+    {
+      "path": "locked/criteria-text.py",
+      "bytes": 162,
+      "note": "trailing text after the list is ignored",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "matches": true,
+      "criteria": [
+        "AC2"
+      ],
+      "digest": "sha256:e4f3eca2ac731142864dbe82d89865af0e8502076b19ce9c231daf6d6faada8e",
+      "recorded": "sha256:e4f3eca2ac731142864dbe82d89865af0e8502076b19ce9c231daf6d6faada8e"
+    },
+    {
+      "path": "locked/criteria-by-hand.py",
+      "bytes": 135,
+      "note": "a list added by hand to a digest that does not cover it: the digest no longer matches",
+      "result": "locked",
+      "ticket": "SHOP-214",
+      "line": 1,
+      "matches": false,
+      "criteria": [
+        "AC1"
+      ],
+      "digest": "sha256:af62a75863c29c1d9e9504ef95758cb7ec59c07d5265d67cabddf46810c1d04b",
+      "recorded": "sha256:5d5da6ccd3116bee608b2a6c15d4c9f0d20f32b17b220cc13a643169ab874e07"
+    },
+    {
       "path": "error/two-lines.php",
       "bytes": 208,
       "note": "two lock lines",
@@ -457,6 +529,146 @@
       "path": "error/two-digests.py",
       "bytes": 200,
       "note": "one digest only",
+      "result": "error",
+      "kind": "digest",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-pending.py",
+      "bytes": 63,
+      "note": "a pending line has no list",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-empty.py",
+      "bytes": 132,
+      "note": "an empty list",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-lowercase.py",
+      "bytes": 135,
+      "note": "ids are written `AC<n>`",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-leading-zero.py",
+      "bytes": 136,
+      "note": "no leading zero",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-zero.py",
+      "bytes": 135,
+      "note": "a positive number",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-unsorted.py",
+      "bytes": 139,
+      "note": "sorted by number",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-text-sorted.py",
+      "bytes": 140,
+      "note": "by number, not as text",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-repeat.py",
+      "bytes": 139,
+      "note": "no repeat",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-space.py",
+      "bytes": 140,
+      "note": "no spaces in the list",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-glued-close.js",
+      "bytes": 150,
+      "note": "trailing text needs whitespace",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-after-tab.py",
+      "bytes": 135,
+      "note": "fields are separated by spaces",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-after-text.py",
+      "bytes": 143,
+      "note": "a list out of place is not trailing text",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-twice.py",
+      "bytes": 142,
+      "note": "one list only",
+      "result": "error",
+      "kind": "criteria",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "path": "error/criteria-before-digest.py",
+      "bytes": 135,
+      "note": "the digest comes first, so this is a digest out of place",
       "result": "error",
       "kind": "digest",
       "lines": [

@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::{LockError, LockLine, holds_digest, read, with_digest, without_digest};
+use super::{
+    LockError, LockLine, holds_digest, read, with_digest, with_digest_covering, without_digest,
+};
 use crate::digest::{canonicalize, digest};
 
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -57,6 +59,7 @@ fn every_fixture_reads_as_locks_json_says() {
                 assert_eq!(lock.ticket, text("ticket"), "{path}");
                 assert_eq!(lock.line, number("line"), "{path}");
                 assert_eq!(lock.recorded, None, "{path}");
+                assert_eq!(lock.criteria, None, "{path}");
                 assert_eq!(lock.digest, text("digest"), "{path}");
                 assert!(!lock.matches(), "{path}");
             }
@@ -64,6 +67,15 @@ fn every_fixture_reads_as_locks_json_says() {
                 assert_eq!(lock.ticket, text("ticket"), "{path}");
                 assert_eq!(lock.line, number("line"), "{path}");
                 assert_eq!(lock.recorded.as_deref(), Some(text("recorded")), "{path}");
+                // Absent means no list (`README.md`).
+                let criteria = fixture.get("criteria").map(|ids| {
+                    ids.as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|id| id.as_str().unwrap().to_owned())
+                        .collect::<Vec<_>>()
+                });
+                assert_eq!(lock.criteria, criteria, "{path}");
                 assert_eq!(lock.digest, text("digest"), "{path}");
                 assert_eq!(
                     lock.matches(),
@@ -103,6 +115,10 @@ fn every_fixture_reads_as_locks_json_says() {
                         assert_eq!(kind, "digest", "{path}: {err}");
                         lines(&[*line]);
                     }
+                    LockError::Criteria { line, .. } => {
+                        assert_eq!(kind, "criteria", "{path}: {err}");
+                        lines(&[*line]);
+                    }
                     other => panic!("{path}: `read` never returns {other:?}"),
                 }
             }
@@ -123,6 +139,7 @@ fn the_fixtures_cover_every_kind_of_result() {
         "after-window",
         "ticket",
         "digest",
+        "criteria",
         "invalid-utf8",
     ] {
         assert!(fixtures.iter().any(|f| f["kind"] == kind), "{kind}");
@@ -722,4 +739,94 @@ fn without_digest_refuses_no_line_another_ticket_and_a_pending_line() {
         without_digest(b"# invar-lock: SHOP-214\n", "SHOP-214"),
         Err(LockError::NotLocked { .. })
     ));
+}
+
+// --- the list of criteria (D-38) ---------------------------------------------------
+
+fn ids(list: &[&str]) -> Vec<String> {
+    list.iter().map(|id| (*id).to_owned()).collect()
+}
+
+#[test]
+fn a_list_is_written_after_the_digest_sorted_and_under_it() {
+    let pending = "<?php\r\n/* invar-lock: SHOP-214 */\r\nit('AC2 x');\r\n";
+    let locked = with_digest_covering(
+        pending.as_bytes(),
+        "SHOP-214",
+        &ids(&["AC10", "AC2", "AC2"]),
+    )
+    .unwrap();
+    let text = String::from_utf8(locked.clone()).unwrap();
+    let line = lock(&text);
+    assert!(line.matches(), "{text}");
+    assert_eq!(line.criteria, Some(ids(&["AC2", "AC10"])));
+    assert!(
+        text.contains(&format!(
+            "invar-lock: SHOP-214 {} ac=AC2,AC10 */\r\n",
+            line.digest
+        )),
+        "{text}"
+    );
+    // The digest is over the file without the line, then the list (§4 step 4).
+    let covered = "<?php\nit('AC2 x');\nac=AC2,AC10\n";
+    assert_eq!(line.digest, digest(covered));
+    // And not today's digest, which a line with no list still gets.
+    let plain =
+        lock(&String::from_utf8(with_digest(pending.as_bytes(), "SHOP-214").unwrap()).unwrap());
+    assert!(plain.matches());
+    assert_eq!(plain.criteria, None);
+    assert_ne!(plain.digest, line.digest);
+    // Unlocking takes the list off with the digest, byte for byte.
+    assert_eq!(
+        without_digest(&locked, "SHOP-214").unwrap(),
+        pending.as_bytes()
+    );
+}
+
+#[test]
+fn an_empty_list_writes_the_line_as_before_and_a_bad_id_is_refused() {
+    let pending = b"# invar-lock: SHOP-214\nx\n";
+    assert_eq!(
+        with_digest_covering(pending, "SHOP-214", &[]).unwrap(),
+        with_digest(pending, "SHOP-214").unwrap()
+    );
+    for bad in ["ac1", "AC01", "AC0", "AC", "AC1 "] {
+        assert!(
+            matches!(
+                with_digest_covering(pending, "SHOP-214", &ids(&[bad])),
+                Err(LockError::Criteria { .. })
+            ),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn changing_the_list_by_hand_breaks_the_digest() {
+    let pending = b"# invar-lock: SHOP-214\nit('AC1');\nit('AC2');\n";
+    let locked = with_digest_covering(pending, "SHOP-214", &ids(&["AC1", "AC2"])).unwrap();
+    let text = String::from_utf8(locked).unwrap();
+    for edited in [
+        text.replace("ac=AC1,AC2", "ac=AC1"),
+        text.replace("ac=AC1,AC2", "ac=AC1,AC2,AC3"),
+    ] {
+        assert!(!lock(&edited).matches(), "{edited}");
+    }
+    // Taking the list off leaves a line without one, whose digest is not the recorded one.
+    assert!(!lock(&text.replace(" ac=AC1,AC2", "")).matches());
+}
+
+#[test]
+fn holds_digest_counts_any_list_on_a_lock_line() {
+    let digest = format!("sha256:{}", "ab".repeat(32));
+    for text in [
+        "# invar-lock: SHOP-214 ac=AC1\n".to_owned(),
+        "# invar-lock: SHOP-214 written ac=AC1\n".to_owned(),
+        format!("# invar-lock: SHOP-214 {digest} ac=AC1\n"),
+        format!("# invar-lock: SHOP-214 {digest} ac=bad\n"),
+    ] {
+        assert!(holds_digest(&text), "{text:?}");
+    }
+    // Text that only mentions it, off a lock line, is not one.
+    assert!(!holds_digest("# the field is ac=AC1\n"));
 }
