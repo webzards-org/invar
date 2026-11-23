@@ -190,14 +190,16 @@ Then `invar acceptance lock SHOP-214` runs them. It locks the files only if:
   passes already checks nothing, and a test that crashes on a missing class
   is not red for the right reason.
 
-Locking writes a digest into the line:
+Locking writes a digest into the line, and the criteria the file's tests cover:
 
 ```php
-// invar-lock: SHOP-214 sha256:9c1e4f…
+// invar-lock: SHOP-214 sha256:9c1e4f… ac=AC1,AC2
 ```
 
 From then on nobody changes the file: the coder may not, the test-writer may
-not, and `plan check`, `done` and CI notice if it happens.
+not, and `plan check`, `done` and CI notice if it happens. The digest covers
+the `ac=` list too, so taking a criterion off the line is a change like any
+other. CI uses the list to check that every one of those criteria ran.
 
 The test-writer answers `LOCKED`, and the main session confirms it with
 `invar acceptance verify SHOP-214` before the coder starts. If it answers

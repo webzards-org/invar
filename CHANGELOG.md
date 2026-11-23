@@ -34,6 +34,19 @@
   answers `DONE`, and the main session after: on red it shows what failed,
   offers the coder again, and offers no commit, review or `/invar:done` (#156).
   Contracts `acceptance-lock.md` 1.4.0 and `test-results.md` 1.2.0.
+- **A lock line records the criteria its file covers.** `invar acceptance lock`
+  writes `ac=AC1,AC2` after the digest, from the run that locked the file, and
+  the digest covers the list. `verify --results`, `done --results` and
+  `acceptance run` refuse a file whose tests ran only in part, naming the
+  criterion: `<file>: AC2: no test of this criterion from this file is in the
+  results`. Files locked before keep their digest and the weaker check, with a
+  note on stderr, until they are locked again. `invar hash --lock` shows the
+  list, and `--ac AC1,AC2` gives the digest a list would get. `plan guard`
+  denies writing `ac=` into a lock line by hand (#156). Contract
+  `acceptance-lock.md` 1.5.0.
+- **`--results` with no `acceptance:` section is an error**, for `verify` and
+  `done`: the check was asked for and cannot run. Without `--results`, a missing
+  section still only warns (#156).
 
 ### Changed
 

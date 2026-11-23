@@ -369,10 +369,11 @@ that decides whether it works.
 3. Locking writes one line into each file:
 
    ```php
-   // invar-lock: SHOP-214 sha256:9c1e4f…
+   // invar-lock: SHOP-214 sha256:9c1e4f… ac=AC1,AC2
    ```
 
-   No manifest, no side files. The lock travels with the test.
+   No manifest, no side files. The lock travels with the test, and so does
+   the list of criteria it covers, under the same digest.
 4. The **coder** makes them pass and may not touch them. `plan check`, `done`
    and CI all notice a changed locked file.
 
@@ -390,8 +391,9 @@ replaces your runner.
 
 **Green is read, not run.** A lock proves a test did not change, not that it
 passes. Invar never runs your suite: your CI does, and `invar acceptance verify
---results junit.xml` reads its report. Every locked file must have run, and
-every one of its tests must have passed; a skipped test, or one that passed
+--results junit.xml` reads its report. Every locked file must have run, with a
+test for each criterion its line lists, and every one of its tests must have
+passed; a skipped test, or one that passed
 only on a retry, is not accepted. In Claude Code, `invar acceptance run`
 runs the ticket's locked tests after the coder's `DONE`, so that a review is
 not spent on red tests. That is feedback; the CI check is the boundary.

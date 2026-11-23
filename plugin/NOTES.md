@@ -1323,6 +1323,22 @@ report comes from the team's own test run, and `done --results` for a team that 
 the coder's `DONE` is the agent's word, and in the dispatch the agent's word is never the check
 (as with `LOCKED` and `verify`).
 
+**A file that ran only in part (found in review).** The first version of `verify --results` asked
+for one test case per locked file. A file with tests for `AC1` and `AC2`, and a report holding only
+the `AC1` one, printed `verified 1 locked file(s), and 1 locked test(s) passed`. An agent cannot
+change a locked file, but it can leave a test out of the run: a `<exclude>` in `phpunit.xml`, a
+`--filter` in the CI step. `acceptance run` caught it through the Plan's criteria, but CI, the
+boundary, has no Plan. So `acceptance lock` now writes `ac=AC1,AC2` on the line, from the run that
+proved those tests red, and `verify --results` asks for a test of each from that file.
+
+**Why the list is under the digest.** Outside it, the same agent would take `AC2` off the line, and
+the digest would still hold: the list would protect nothing. It goes in as one line after the
+covered text, as `Acceptance` goes into the approval digest (`plan-header.md` D-19), so a line
+without a list keeps exactly its old digest and no lock made before breaks. Those older files keep
+the weaker check, with a note on stderr, until they are locked again. `plan guard` denies a `Write`
+or `Edit` that writes `ac=` into a line, as it denies a digest; a shell can still write one, and
+then the digest no longer matches (`acceptance-lock.md` D-38 to D-40).
+
 **Not exercised** (needs a real Claude Code session).
 
 - [ ] A coder that runs it, sees `red`, fixes the code and reaches `green` before `DONE`

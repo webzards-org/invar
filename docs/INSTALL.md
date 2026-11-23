@@ -233,13 +233,29 @@ or fails naming the file, the test and its criterion (`AC2`) of each problem:
 
 - a locked file with no test case in any report: **not run by your test suite**. Add the
   acceptance directory to a test suite (see [Acceptance tests](#acceptance-tests));
+- a criterion the file's lock line lists (`ac=AC1,AC2`) with no test of it from that file in
+  any report: the file **ran only in part**, as when a filter or `phpunit.xml` leaves a test
+  out. `invar acceptance lock` writes the list from the run that locked the file, and the
+  digest covers it;
 - a test that is `failure`, `error` or `skipped`. A skipped locked test is never accepted;
 - a test that passed in one run and failed in another, such as a retry. Give every report
   your CI writes (`--results junit.xml retry.xml`), and a test that passes only on a retry
   is reported.
 
 Test cases of files that are not locked are ignored. A missing, empty or unreadable report
-is an error naming it.
+is an error naming it, and so is `--results` in a project whose `invar.yaml` has no
+`acceptance:` section.
+
+**Files locked before the list existed** have a lock line with no `ac=`. They still verify,
+and are checked as before: some test of the file ran, and every one that ran passed. A
+file whose tests ran only in part is not caught for them. `verify --results` says so on
+stderr, once per file:
+
+```
+note: tests/Acceptance/CancelOrderTest.php: locked before the criteria a file covers were recorded, so only a full run of it is checked: some test of it ran, and every one that ran passed. Locking it again records them
+```
+
+A file is locked again when a later ticket changes it, or after `/invar:relock`.
 
 **In a container.** With Laravel Sail the tests run with the project at `/var/www/html`.
 Pest writes paths relative to the project, which need nothing. PHPUnit writes absolute ones,
