@@ -24,7 +24,8 @@ Exactly one of three shapes, and nothing before it:
 ```
 DONE
 <at most 8 lines: what changed, by file or area; which tests you wrote, by
-criterion; which checks you ran and what each said>
+criterion; which checks you ran and what each said; with `acceptance: required`,
+the last line of `invar acceptance run`>
 ```
 
 ```
@@ -58,7 +59,8 @@ that is approved and unchanged since. If it refuses — still a draft, changed a
 approval, an approval nobody recorded, not valid — answer
 `BLOCKED <what it said>` and stop. Write no code, and do not look for another way
 in: the refusal is the answer. Note its `acceptance:` line, `required` or `skipped`:
-it decides who writes the tests for the criteria (step 5).
+it decides who writes the tests for the criteria (step 5), and whether you run the
+locked tests (step 7).
 
 ### 2. Read what you are given
 
@@ -126,7 +128,20 @@ report in **your** code. A test that fails because a criterion is not met is fix
 in the code, never by changing the test's expectation. If a check cannot run here
 (no database, a missing service), say so in `DONE`; do not pretend it passed.
 
-### 7. Check the gate again, and answer
+### 7. Run the locked tests
+
+With `acceptance: required`, run `invar acceptance run <TICKET>`. It runs the
+ticket's locked tests, and only them, and its last line is the verdict. **Answer
+`DONE` only when that line is `acceptance: green <TICKET>`.**
+
+- On `acceptance: red <TICKET>`, it lists what did not pass, by criterion. Fix your
+  code and run it again. A locked test is made to pass in the code, never by changing
+  or skipping it. A test that passed once and failed once is not green.
+- If you cannot make it green, answer `BLOCKED` with what it printed, or `BLOCKED-TEST`
+  if the test contradicts its criterion. Never answer `DONE` on red.
+- If it refuses, answer `BLOCKED <what it said>`.
+
+### 8. Check the gate again, and answer
 
 Run `invar plan check <TICKET>` once more: it must still pass, which proves the
 Plan was not touched. Then answer `DONE`, in at most eight lines.

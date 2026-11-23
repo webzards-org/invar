@@ -2400,3 +2400,133 @@ fn no_prompt_tells_an_agent_to_record_a_decision_entry() {
     // protocol skill, /invar:log and /invar:log-approve.
     assert!(mentions >= 6, "only {mentions} mentions");
 }
+
+// --- the locked tests after `DONE` (#156) -----------------------------------------------------
+
+/// The protocol skill's section on `DONE`, on one line.
+fn after_done() -> String {
+    one_line(&skill().1)
+        .split_once("## When the coder answers DONE")
+        .expect("the section")
+        .1
+        .split_once("## When the coder answers BLOCKED")
+        .unwrap()
+        .0
+        .to_owned()
+}
+
+#[test]
+fn after_done_a_required_ticket_runs_its_locked_tests_before_anything_else() {
+    let flat = phase_2();
+    assert!(flat.contains("**`DONE`** and a short summary — see \"When the coder answers DONE\"."));
+    assert!(
+        !flat.contains("and go to Closing."),
+        "DONE no longer goes straight to Closing"
+    );
+
+    let section = after_done();
+    let skipped = section
+        .find("**`acceptance: skipped`** — go to Closing.")
+        .unwrap();
+    let required = section.find("**`acceptance: required`**").unwrap();
+    let run = section
+        .find("run `invar acceptance run <TICKET>` **before anything else**")
+        .unwrap();
+    let green = section
+        .find("**`acceptance: green <TICKET>`** — go to Closing.")
+        .unwrap();
+    let red = section.find("**`acceptance: red <TICKET>`**").unwrap();
+    assert!(skipped < required && required < run && run < green && green < red);
+    assert!(section.contains("the `acceptance:` line of `invar plan check` decides"));
+}
+
+#[test]
+fn on_red_the_skill_offers_the_coder_again_and_nothing_of_closing() {
+    let section = after_done();
+    let red = section
+        .split_once("**`acceptance: red <TICKET>`**")
+        .unwrap()
+        .1
+        .split_once("**neither line**")
+        .unwrap()
+        .0;
+    assert!(red.contains("Tell the developer what did not pass, as printed"));
+    assert!(
+        red.contains("offer once to start the coder again with the ticket line and that output")
+    );
+    assert!(red.contains("**Offer nothing of Closing**"));
+    for step in [
+        "no commit",
+        "no `/invar:review`",
+        "no PR description",
+        "no decision entry",
+        "no `/invar:done`",
+    ] {
+        assert!(red.contains(step), "{step}: {red}");
+    }
+    // Neither line is not green either.
+    assert!(section.contains("**neither line** (a refusal, an error)"));
+    assert!(section.contains("offer nothing of Closing, and stop"));
+    // The fixed line decides, not the model.
+    assert!(section.contains(
+        "**The decision comes from that line**, never from your reading of the output or \
+         from the coder's summary"
+    ));
+    assert!(section.contains("the boundary is `invar acceptance verify --results`"));
+
+    let flat = one_line(&skill().1);
+    assert!(flat.contains(
+        "After `DONE`, and for a `required` ticket only after `acceptance: green <TICKET>`, the \
+         cycle ends in this order."
+    ));
+    let never = flat.split_once("## Never").unwrap().1;
+    assert!(never.contains(
+        "offer any step of Closing for a `required` ticket before `invar acceptance run` has \
+         printed `acceptance: green <TICKET>`"
+    ));
+    assert!(flat.contains(
+        "| `invar acceptance run <TICKET>` | yours, after the coder's `DONE` for a `required` \
+         ticket; Closing starts only on `acceptance: green <TICKET>` |"
+    ));
+}
+
+#[test]
+fn the_coder_answers_done_only_on_green() {
+    let flat = one_line(&frontmatter("agents/coder.md").1);
+    let step = flat
+        .split_once("### 7. Run the locked tests")
+        .expect("the step")
+        .1
+        .split_once("### 8. Check the gate again, and answer")
+        .expect("the last step comes after it")
+        .0;
+    assert!(step.contains("With `acceptance: required`, run `invar acceptance run <TICKET>`."));
+    assert!(
+        step.contains("**Answer `DONE` only when that line is `acceptance: green <TICKET>`.**")
+    );
+    assert!(step.contains("Never answer `DONE` on red."));
+    assert!(step.contains("never by changing or skipping it"));
+    // No branch on configuration: the command refuses what does not apply (§13b).
+    assert!(!step.contains("invar.yaml"), "{step}");
+    assert!(!step.contains("acceptance.run"), "{step}");
+}
+
+#[test]
+fn the_lines_the_prompts_key_on_are_the_ones_acceptance_run_prints() {
+    let help = Command::cargo_bin("invar")
+        .unwrap()
+        .args(["acceptance", "run", "--help"])
+        .assert()
+        .success();
+    let help = String::from_utf8(help.get_output().stdout.clone()).unwrap();
+    for line in ["`acceptance: green <TICKET>`", "`acceptance: red <TICKET>`"] {
+        assert!(help.contains(line), "{line}");
+        assert!(after_done().contains(line), "{line}");
+    }
+    assert!(
+        frontmatter("agents/coder.md")
+            .1
+            .contains("`acceptance: green <TICKET>`")
+    );
+    // `tests/acceptance_results.rs` holds the line itself to the bytes the command prints.
+}

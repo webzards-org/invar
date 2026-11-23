@@ -1304,6 +1304,33 @@ the runs were not repeated.
 - [ ] A coder on a real ticket answering `BLOCKED-TEST` for a test that is only hard to pass: this
       seed was as plain as it can be, so it says nothing about that judgement
 
+### The locked tests after `DONE` (#156)
+
+A coder could answer `DONE` with red locked tests, and the main session would offer the review and
+`/invar:done`. Now, for a `required` ticket, the coder runs `invar acceptance run <TICKET>` before
+`DONE`, and the main session runs it again after, before anything else. Closing is offered only on
+the fixed last line `acceptance: green <TICKET>`; on `red`, the main session shows what failed and
+offers the coder again with that output. The skill keys on the line, never on its reading of the
+output, and the coder's prompt has no branch on configuration: the command refuses what does not
+apply (§13b).
+
+**Why it is feedback, and not the boundary.** The command runs in the agent's environment and from
+its shell, so an agent that wanted to could fake what it prints, or run something else. It is there
+so that no review is spent on red tests, and so that the coder sees what failed while it can still
+fix it. The boundary is `invar acceptance verify --results <report>` in the team's CI, where the
+report comes from the team's own test run, and `done --results` for a team that closes cycles there
+(`acceptance-lock.md` §10.5, D-36). Why the main session runs it again after the coder already did:
+the coder's `DONE` is the agent's word, and in the dispatch the agent's word is never the check
+(as with `LOCKED` and `verify`).
+
+**Not exercised** (needs a real Claude Code session).
+
+- [ ] A coder that runs it, sees `red`, fixes the code and reaches `green` before `DONE`
+- [ ] A coder that answers `DONE` on red anyway, and the main session stopping on its own run
+- [ ] The main session offering the coder again with the output, and nothing of Closing
+- [ ] A run that refuses (no locked file, a changed file), and the main session stopping
+- [ ] A suite slow enough that two runs per cycle cost more than they save
+
 ## 15. `/invar:approve` (M1-19)
 
 `plugin/skills/approve/SKILL.md`, invoked as `/invar:approve [ticket]`.

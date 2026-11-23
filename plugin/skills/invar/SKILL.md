@@ -159,14 +159,35 @@ conventions, implements inside the Scope, and runs the project's own checks.
 
 It answers with one of three things.
 
-- **`DONE`** and a short summary — tell the developer what it says, as it says it,
-  and go to Closing.
+- **`DONE`** and a short summary — see "When the coder answers DONE".
 - **`BLOCKED <reason>`** — see "When the coder answers BLOCKED".
 - **`BLOCKED-TEST <file> <AC> <reason>`** — see "When the coder answers BLOCKED-TEST".
 
 If the developer wants something changed in the coder's work, start the coder again
 with the ticket line and the developer's request, verbatim. You still do not edit
 the code yourself.
+
+## When the coder answers DONE
+
+Tell the developer what it says, as it says it. Then the `acceptance:` line of
+`invar plan check` decides what comes next.
+
+- **`acceptance: skipped`** — go to Closing.
+- **`acceptance: required`** — run `invar acceptance run <TICKET>` **before anything
+  else**. It runs the ticket's locked tests, and only them, and its **last line** is
+  the verdict:
+  - **`acceptance: green <TICKET>`** — go to Closing.
+  - **`acceptance: red <TICKET>`** — the locked tests do not pass, whatever the coder
+    said. Tell the developer what did not pass, as printed, and offer once to start the
+    coder again with the ticket line and that output, verbatim. **Offer nothing of
+    Closing**: no commit, no `/invar:review`, no PR description, no decision entry, no
+    `/invar:done`.
+  - **neither line** (a refusal, an error) — tell the developer what it said, in its
+    words, offer nothing of Closing, and stop.
+
+**The decision comes from that line**, never from your reading of the output or from
+the coder's summary. This run is feedback, so that a review is not spent on red tests;
+the boundary is `invar acceptance verify --results` in the team's CI.
 
 ## When the coder answers BLOCKED
 
@@ -219,7 +240,8 @@ says to end the cycle as `failed`.
 
 ## Closing
 
-After `DONE`, the cycle ends in this order. Most of it is the developer's; your
+After `DONE`, and for a `required` ticket only after `acceptance: green <TICKET>`, the
+cycle ends in this order. Most of it is the developer's; your
 part is to offer each step once, at its moment, and to say where things stand.
 
 **commit → `/invar:review` (optional) → push → PR review → `/invar:log` and
@@ -302,6 +324,8 @@ implementing it.
 - run `invar plan approve` or `invar done`;
 - edit an approved Plan, or start the coder on a draft;
 - start the coder for a `required` ticket before `invar acceptance verify` passes;
+- offer any step of Closing for a `required` ticket before `invar acceptance run`
+  has printed `acceptance: green <TICKET>`;
 - edit or write tests yourself, or run `invar acceptance lock`: that is the
   test-writer's;
 - run `invar acceptance unlock`, or start the test-writer on a `BLOCKED-TEST` before
@@ -321,6 +345,7 @@ implementing it.
 |---|---|
 | `invar plan check <TICKET>` | before you start any agent; refuses draft, changed and unrecorded approvals; its `acceptance:` line decides who starts |
 | `invar acceptance verify <TICKET>` | yours, after the test-writer's `LOCKED`; the coder starts only if it passes |
+| `invar acceptance run <TICKET>` | yours, after the coder's `DONE` for a `required` ticket; Closing starts only on `acceptance: green <TICKET>` |
 | `invar plan validate <TICKET>` | form of a draft Plan (the planner runs it) |
 | `/invar:approve` | the developer's; `--acceptance` or `--no-acceptance` decides whether the ticket gets acceptance tests (otherwise `invar.yaml`); starts Phase 2 when the approval is recorded, unless `--no-start` |
 | `/invar:relock <TICKET> <file>...` | the developer's, after a `BLOCKED-TEST`: runs `invar acceptance unlock`; you start the test-writer when it succeeds |
