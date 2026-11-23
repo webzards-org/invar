@@ -12,6 +12,8 @@
 //! - **Only five values change** (plan-header.md §5.3): `Status`,
 //!   `Approved-by`, `Approved-at`, `Approved-checksum`, `Acceptance`. The write
 //!   is checked against the file read back: the body must be byte-identical.
+//!   With `approval.signed`, `approval.sig` is written beside it, first, and put
+//!   back as it was if the header cannot be written (approval-signature.md §5).
 //! - **A changed approval is never silently renewed** (D-12, resolving OQ-1).
 //!   An `approved` Plan that no longer matches its checksum — or whose approval
 //!   values are missing — is refused unless `--reapprove` is given.
@@ -26,6 +28,7 @@ use crate::diagnostics::Diagnostics;
 use crate::format::config::ACCEPTANCE_SECTION_EXAMPLE;
 use crate::format::plan::{Acceptance, Approval, Mode, Plan, Status};
 use crate::fs::ProjectRoot;
+use crate::fs::plans::SIGNATURE_FILE;
 
 use super::approval::{self, ApprovedValue, Prior, classify};
 use super::validate::{self, Report};
@@ -339,13 +342,59 @@ impl Pending {
         .map_err(ApproveError::Unwritable)
     }
 
+    /// The `Approved-checksum` this approval will write: what a signature
+    /// covers, with the ticket (`approval-signature.md` §3).
+    pub fn checksum(&self) -> &str {
+        &self.checksum
+    }
+
     /// Write the approval: `by` from `git config user.name`, `at` as
     /// `YYYY-MM-DD`. Refuses if the file changed since [`prepare`] read it,
-    /// and verifies the result by reading it back.
-    pub fn commit(mut self, by: String, at: String) -> Result<Approval, ApproveError> {
+    /// and verifies the result by reading it back. Unsigned; the CLI goes
+    /// through [`commit_signed`](Self::commit_signed).
+    #[cfg(test)]
+    pub fn commit(self, by: String, at: String) -> Result<Approval, ApproveError> {
+        self.commit_signed(by, at, None)
+    }
+
+    /// [`commit`](Self::commit), with `signature`, when there is one, written to
+    /// `approval.sig` beside the Plan first. If the header then cannot be
+    /// written, the earlier `approval.sig` is put back, or the new one removed
+    /// (`approval-signature.md` §5, step 5).
+    pub fn commit_signed(
+        self,
+        by: String,
+        at: String,
+        signature: Option<&str>,
+    ) -> Result<Approval, ApproveError> {
         if read(&self.spec)? != self.original {
             return Err(ApproveError::ChangedMeanwhile { spec: self.spec });
         }
+        let Some(signature) = signature else {
+            return self.write(by, at);
+        };
+        let path = signature_path(&self.spec);
+        let earlier = match std::fs::read(&path) {
+            Ok(bytes) => Some(bytes),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+            Err(source) => return Err(ApproveError::Write { spec: path, source }),
+        };
+        replace(&path, signature.as_bytes()).map_err(|source| ApproveError::Write {
+            spec: path.clone(),
+            source,
+        })?;
+        let written = self.write(by, at);
+        if written.is_err() {
+            // Best effort: the header error is the one to report.
+            let _ = match earlier {
+                Some(bytes) => replace(&path, &bytes),
+                None => std::fs::remove_file(&path),
+            };
+        }
+        written
+    }
+
+    fn write(mut self, by: String, at: String) -> Result<Approval, ApproveError> {
         let body = self.plan.body().to_owned();
         let approval = Approval {
             by,
@@ -378,6 +427,22 @@ impl Pending {
         }
         Ok(approval)
     }
+}
+
+/// `approval.sig`, beside `spec`.
+pub fn signature_path(spec: &Path) -> PathBuf {
+    spec.with_file_name(SIGNATURE_FILE)
+}
+
+/// Replace `path` with `bytes` atomically: a temporary file in the same
+/// directory, renamed over it.
+fn replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let temporary = path.with_extension("sig.tmp");
+    let result = std::fs::write(&temporary, bytes).and_then(|()| std::fs::rename(&temporary, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn read(spec: &Path) -> Result<String, ApproveError> {

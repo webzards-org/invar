@@ -35,6 +35,22 @@ pub fn user_name(dir: &Path) -> Result<String, GitError> {
     Ok(name)
 }
 
+/// `git config <key>`, run in `dir`: its value, or `None` when it is not set.
+/// Surrounding whitespace is trimmed, and an empty value is `None` too.
+pub fn config_value(dir: &Path, key: &str) -> Result<Option<String>, GitError> {
+    const COMMAND: &str = "git config";
+    let output = run(dir, &["config", key])?;
+    if !output.status.success() {
+        // Exit 1: the key is not set. Anything else is a real failure.
+        return match output.status.code() {
+            Some(1) => Ok(None),
+            _ => Err(failed(COMMAND, &output)),
+        };
+    }
+    let value = text(COMMAND, &output.stdout)?.trim();
+    Ok((!value.is_empty()).then(|| value.to_owned()))
+}
+
 /// Today's date, `YYYY-MM-DD`, as git would date a commit made now in `dir`:
 /// the committer clock, in the committer's local time zone
 /// (plan-header.md §5.3, D-13).
@@ -173,12 +189,37 @@ pub fn is_tracked(dir: &Path, path: &Path) -> Result<bool, GitError> {
 /// commit refused by any of them is an error with git's own words, never
 /// bypassed.
 pub fn commit_only(dir: &Path, path: &Path, message: &str) -> Result<(), GitError> {
+    commit_paths(dir, &[path], message)
+}
+
+/// Commit `paths` alone (relative to `dir`), with `message`, as [`commit_only`]
+/// does one path: `git commit --only -- <paths>`.
+pub fn commit_paths(dir: &Path, paths: &[&Path], message: &str) -> Result<(), GitError> {
     const COMMAND: &str = "git commit";
-    let path = path.to_string_lossy();
-    let output = run(
-        dir,
-        &["commit", "--quiet", "--only", "-m", message, "--", &path],
-    )?;
+    let paths: Vec<String> = paths
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    let mut args = vec!["commit", "--quiet", "--only", "-m", message, "--"];
+    args.extend(paths.iter().map(String::as_str));
+    let output = run(dir, &args)?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(())
+}
+
+/// Stage `paths` (relative to `dir`): `git add -- <paths>`. A new file has to be
+/// known to git before `git commit --only` can take it.
+pub fn stage(dir: &Path, paths: &[&Path]) -> Result<(), GitError> {
+    const COMMAND: &str = "git add";
+    let paths: Vec<String> = paths
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    let mut args = vec!["add", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    let output = run(dir, &args)?;
     if !output.status.success() {
         return Err(failed(COMMAND, &output));
     }

@@ -9,9 +9,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{
-    AcceptanceConfig, AcceptanceStyle, Config, ConfigError, Context, DEFAULT_BINDING_LIMIT,
-    DEFAULT_DONE_COMMIT_MESSAGE, Done, FILE_NAME, Git, Loaded, Review, Warning, load,
-    load_for_command, parse, parse_bytes,
+    AcceptanceConfig, AcceptanceStyle, Approval, Config, ConfigError, Context,
+    DEFAULT_APPROVAL_COMMIT_MESSAGE, DEFAULT_BINDING_LIMIT, DEFAULT_DONE_COMMIT_MESSAGE, Done,
+    FILE_NAME, Git, Loaded, Review, Warning, load, load_for_command, parse, parse_bytes,
 };
 use crate::fs::ProjectRoot;
 
@@ -78,6 +78,7 @@ fn contract_10_1_light_mode_project() {
                 commit_message: "chore: remove the Plan of {ticket}".to_owned(),
             },
             acceptance: None,
+            approval: Approval::default(),
         }
     );
     assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
@@ -317,6 +318,54 @@ fn an_unknown_key_under_done_warns() {
     let loaded = read("done:\n  comit: true\n");
     assert!(!loaded.config.done.commit);
     assert_eq!(warned_keys(&loaded), ["done.comit"]);
+}
+
+// --- approval -----------------------------------------------------------------
+
+#[test]
+fn the_approval_example_signs_and_commits_under_the_default_message() {
+    let loaded = read(&contract_example("valid-approval"));
+    assert!(loaded.warnings.is_empty());
+    let approval = loaded.config.approval;
+    assert!(approval.signed);
+    assert!(approval.commit);
+    assert_eq!(approval.message_for("SHOP-214"), "Approve plan SHOP-214");
+}
+
+#[test]
+fn an_absent_or_empty_approval_section_signs_and_commits_nothing() {
+    // D-13: absent means the behavior before the section existed.
+    let approval = Config::default().approval;
+    assert!(!approval.signed);
+    assert!(!approval.commit);
+    assert_eq!(approval.commit_message, DEFAULT_APPROVAL_COMMIT_MESSAGE);
+    assert_eq!(DEFAULT_APPROVAL_COMMIT_MESSAGE, "Approve plan {ticket}");
+    for text in ["approval:\n", "approval:\n  signed:\n  commit: ~\n"] {
+        assert_eq!(read(text).config, Config::default(), "{text:?}");
+    }
+}
+
+#[test]
+fn each_approval_key_is_read_on_its_own() {
+    let approval = read("approval:\n  signed: true\n").config.approval;
+    assert!(approval.signed && !approval.commit);
+    let approval = read("approval:\n  commit_message: \"chore: approve {ticket}\"\n")
+        .config
+        .approval;
+    assert!(!approval.signed && !approval.commit);
+    assert_eq!(approval.message_for("SHOP-214"), "chore: approve SHOP-214");
+}
+
+#[test]
+fn approval_values_follow_the_done_rules() {
+    let message = reject("approval:\n  signed: yes\n");
+    assert!(message.contains("invalid boolean"), "{message}");
+    let message = reject("approval:\n  commit_message: \"\"\n");
+    assert!(message.contains("`approval.commit_message`"), "{message}");
+    assert!(message.contains("one non-empty line"), "{message}");
+    let loaded = read("approval:\n  sigend: true\n");
+    assert!(!loaded.config.approval.signed);
+    assert_eq!(warned_keys(&loaded), ["approval.sigend"]);
 }
 
 // --- acceptance ---------------------------------------------------------------

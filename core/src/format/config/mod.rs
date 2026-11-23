@@ -1,10 +1,11 @@
 //! `invar.yaml` — the project config (§6).
 //!
-//! Implements `contracts/formats/invar-yaml.md` v2.2.2. The contract is the
+//! Implements `contracts/formats/invar-yaml.md` v2.3.0. The contract is the
 //! authority; section numbers below (`§3.4`, `D-2`) point into it.
 //!
 //! Light mode reads `scenarios`, `review.offer`, `git.base_branch`,
-//! `context.binding_limit`, `done.commit`, `done.commit_message` and the
+//! `context.binding_limit`, `done.commit`, `done.commit_message`, the `approval`
+//! section and the
 //! `acceptance` section. Everything else in a config
 //! is either a key of a later milestone, ignored silently (contract §5), or an
 //! unknown key, which produces a [`Warning`] and never a failure (§6) — a
@@ -46,7 +47,11 @@ pub const MAX_BINDING_LIMIT: usize = 10_000;
 /// Plan's ticket id.
 pub const DEFAULT_DONE_COMMIT_MESSAGE: &str = "Remove plan {ticket}";
 
-/// The placeholder `done.commit_message` may contain (§3.5).
+/// Default for `approval.commit_message` (§3.7).
+pub const DEFAULT_APPROVAL_COMMIT_MESSAGE: &str = "Approve plan {ticket}";
+
+/// The placeholder `done.commit_message` and `approval.commit_message` may
+/// contain (§3.5, §3.7).
 pub const TICKET_PLACEHOLDER: &str = "{ticket}";
 
 /// The placeholder in `acceptance.run` for the report's path (§3.6).
@@ -87,6 +92,7 @@ pub struct Config {
     pub done: Done,
     /// The `acceptance` section (§3.6). `None`: absent, so no acceptance tests.
     pub acceptance: Option<AcceptanceConfig>,
+    pub approval: Approval,
 }
 
 /// The `review` section (§3.2).
@@ -154,6 +160,36 @@ impl Default for Done {
     }
 }
 
+/// The `approval` section (§3.7): what `plan approve` does besides writing the
+/// header. Absent, it does nothing more (D-13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Approval {
+    /// `approval.signed` — sign every approval (`approval-signature.md` §5).
+    pub signed: bool,
+    /// `approval.commit` — commit the approval, alone, as `--commit` would.
+    pub commit: bool,
+    /// `approval.commit_message` — the message of that commit, with `{ticket}`
+    /// replaced by the Plan's ticket id. One non-empty line.
+    pub commit_message: String,
+}
+
+impl Approval {
+    /// The commit message for the Plan of `ticket`.
+    pub fn message_for(&self, ticket: &str) -> String {
+        self.commit_message.replace(TICKET_PLACEHOLDER, ticket)
+    }
+}
+
+impl Default for Approval {
+    fn default() -> Self {
+        Self {
+            signed: false,
+            commit: false,
+            commit_message: DEFAULT_APPROVAL_COMMIT_MESSAGE.to_owned(),
+        }
+    }
+}
+
 /// The `acceptance` section (§3.6): how this project runs its acceptance tests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcceptanceConfig {
@@ -197,6 +233,7 @@ impl Default for Config {
             context: Context::default(),
             done: Done::default(),
             acceptance: None,
+            approval: Approval::default(),
         }
     }
 }
@@ -401,21 +438,24 @@ pub fn parse(text: &str, path: &Path) -> Result<Loaded, ConfigError> {
 
     let done = raw.done.unwrap_or_default();
     unknown_keys(&done.other, "done.", &[], &mut warnings);
-    let commit_message = match done.commit_message {
-        None => DEFAULT_DONE_COMMIT_MESSAGE.to_owned(),
-        Some(message) => {
-            let trimmed = message.trim();
-            if trimmed.is_empty() || trimmed.contains(['\n', '\r']) {
-                problems.push(format!(
-                    "`done.commit_message` must be one non-empty line, found {message:?}; \
-                     `{TICKET_PLACEHOLDER}` stands for the ticket id. Remove the key for \
-                     the default, {DEFAULT_DONE_COMMIT_MESSAGE:?}"
-                ));
-                DEFAULT_DONE_COMMIT_MESSAGE.to_owned()
-            } else {
-                trimmed.to_owned()
-            }
-        }
+    let commit_message = one_line_message(
+        "done.commit_message",
+        done.commit_message,
+        DEFAULT_DONE_COMMIT_MESSAGE,
+        &mut problems,
+    );
+
+    let approval = raw.approval.unwrap_or_default();
+    unknown_keys(&approval.other, "approval.", &[], &mut warnings);
+    let approval = Approval {
+        signed: approval.signed.unwrap_or(false),
+        commit: approval.commit.unwrap_or(false),
+        commit_message: one_line_message(
+            "approval.commit_message",
+            approval.commit_message,
+            DEFAULT_APPROVAL_COMMIT_MESSAGE,
+            &mut problems,
+        ),
     };
 
     let acceptance = raw
@@ -447,9 +487,34 @@ pub fn parse(text: &str, path: &Path) -> Result<Loaded, ConfigError> {
                 commit_message,
             },
             acceptance,
+            approval,
         },
         warnings,
     })
+}
+
+/// A `commit_message` key (§3.5, §3.7): one non-empty line once trimmed, or
+/// `default` when absent. A bad value is added to `problems`.
+fn one_line_message(
+    key: &str,
+    value: Option<String>,
+    default: &str,
+    problems: &mut Vec<String>,
+) -> String {
+    let Some(message) = value else {
+        return default.to_owned();
+    };
+    let trimmed = message.trim();
+    if trimmed.is_empty() || trimmed.contains(['\n', '\r']) {
+        problems.push(format!(
+            "`{key}` must be one non-empty line, found {message:?}; \
+             `{TICKET_PLACEHOLDER}` stands for the ticket id. Remove the key for \
+             the default, {default:?}"
+        ));
+        default.to_owned()
+    } else {
+        trimmed.to_owned()
+    }
 }
 
 /// The `acceptance` section with its defaults applied, or `None` with every
@@ -652,6 +717,7 @@ struct RawConfig {
     context: Option<RawContext>,
     done: Option<RawDone>,
     acceptance: Option<RawAcceptance>,
+    approval: Option<RawApproval>,
     #[serde(flatten)]
     other: BTreeMap<String, IgnoredAny>,
 }
@@ -719,6 +785,15 @@ impl RawAcceptance {
 
 #[derive(Debug, Default, Deserialize)]
 struct RawDone {
+    commit: Option<bool>,
+    commit_message: Option<String>,
+    #[serde(flatten)]
+    other: BTreeMap<String, IgnoredAny>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawApproval {
+    signed: Option<bool>,
     commit: Option<bool>,
     commit_message: Option<String>,
     #[serde(flatten)]

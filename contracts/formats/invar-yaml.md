@@ -1,6 +1,6 @@
 # Contract: `invar.yaml`
 
-**Version:** 2.2.2 — `--colors=never` in the examples of `acceptance.run`; see §11
+**Version:** 2.3.0 — the `approval` section: a signed approval, and its commit; see §11
 **Status:** stable
 **Implements:** §6 (Config file), §13c (the review's base branch), §14.3; light
 mode L-2 and L-7 (`docs/TASKS-M1.md`); A-2, A-6 and A-7 (`docs/TASKS-AT.md`)
@@ -59,6 +59,9 @@ later milestone is read by this one without failing and without noise.
 | `acceptance.dir` | string | none: **required** in the section | Where the acceptance tests live, relative to the project root |
 | `acceptance.run` | list of strings | none: **required** in the section | The command that runs them, with no shell |
 | `acceptance.fakes_allowed` | list of strings | empty | What the tests may fake; not interpreted by the core |
+| `approval.signed` | bool | `false` | Whether `plan approve` signs the approval (`approval-signature.md`); see §3.7 |
+| `approval.commit` | bool | `false` | Whether `plan approve` commits the approval without being given `--commit` |
+| `approval.commit_message` | string | `Approve plan {ticket}` | The message of that commit; `{ticket}` is replaced by the Plan's ticket id |
 
 A dotted key is a key inside a section: `review.offer` is written as
 
@@ -67,7 +70,7 @@ review:
   offer: true
 ```
 
-The sections `review`, `git`, `context`, `done` and `acceptance` must be mappings
+The sections `review`, `git`, `context`, `done`, `acceptance` and `approval` must be mappings
 when present. An empty section (`review:` with nothing under it) is the same as an
 absent one.
 
@@ -207,6 +210,43 @@ as they are.
 
 `invar init` writes this section commented out (D-12).
 
+### 3.7 The `approval` section
+
+Read by `invar plan approve`. Absent, or empty, it changes nothing: no signature
+is made, and no commit (D-13).
+
+```yaml
+approval:
+  signed: true
+  commit: true
+  commit_message: "chore: approve the Plan of {ticket}"
+```
+
+**`signed`**, `false` by default. When `true`, `plan approve` signs every
+approval it writes with the developer's SSH signing key, and refuses an approval
+it cannot sign (`approval-signature.md` §5). The signature is written next to the
+Plan as `approval.sig`. The key only says what `plan approve` writes: whether a
+branch's approvals are signed is checked where the agent cannot change the
+answer, against the base branch's `.invar/approvers` (`approval-signature.md`
+§6).
+
+**`commit`** and **`commit_message`** work as `done.commit` and
+`done.commit_message` do (§3.5), for the approval instead of the deletion:
+
+1. `plan approve --commit <MESSAGE>` commits under that message, whatever the
+   config says;
+2. `--no-commit` writes the approval and commits nothing, whatever the config
+   says;
+3. otherwise `approval.commit` decides. Absent, it is `false`.
+
+The commit holds the Plan's `spec.md`, and its `approval.sig` when there is one,
+and nothing else: anything else that is staged stays staged. The project's hooks,
+signing and identity apply and are never bypassed, and nothing is pushed. The
+commit is a convenience: the guarantee is the signature, which does not depend on
+any commit (`approval-signature.md` D-1). `commit_message` follows the rules of
+`done.commit_message`: one line, non-empty once surrounding whitespace is removed,
+`{ticket}` any number of times or not at all.
+
 ## 4. Value rules
 
 These apply to every key in §3.
@@ -256,7 +296,7 @@ version of `invar` must not break an older one.
 
 - The warning names the key by its full dotted path (`review.ofer`,
   `senarios`), so a typo is easy to find.
-- Unknown keys are reported at the top level and inside the five sections
+- Unknown keys are reported at the top level and inside the six sections
   this version reads. Keys inside an ignored subtree (`lint.rules.…`) are never reported;
   that subtree belongs to a later milestone as a whole.
 - The value of an unknown key is not validated. It may be any YAML.
@@ -387,6 +427,11 @@ and `dir` depend on the project, and the core must not guess them (A-2). An acti
 section with a wrong command would stop the first cycle at the test-writer, on a
 project that has not chosen acceptance tests at all. Commented out, the section is one
 edit away, and a project that does nothing keeps the behavior of an absent section.
+
+**D-13 — Signing is opt-in** (2.3.0). A signature needs a key set up for SSH
+signing, and, to be worth more than the checksum, one that asks a person on each
+use (`approval-signature.md` §7). A project that has neither keeps working as
+before, and turns it on once it has.
 
 ## 9. Open questions
 
@@ -580,7 +625,34 @@ acceptance:
 
 **Why:** the tests the core runs and locks stay inside the project.
 
+### 10.13 Valid — a signed approval, committed
+
+<!-- example: valid-approval -->
+```yaml
+approval:
+  signed: true
+  commit: true
+```
+
+**Why:** every approval is signed, and committed as `Approve plan <TICKET>`.
+
 ## 11. Version history
+
+**2.3.0 — the `approval` section (#154).**
+
+- §3, new §3.7: `approval.signed`, `approval.commit` and `approval.commit_message`.
+  New D-13 and example 10.13.
+- §6: unknown keys are reported inside `approval` too.
+- `plan approve` reads them: it signs the approval (`approval-signature.md` 1.0.0),
+  and commits it when asked.
+
+**Why:** an approval anyone with a shell can write is not a person's decision. A
+signature by a key the developer holds is one the agent cannot make, where the key
+asks a person on each use (#154).
+
+**Compatibility:** an absent section is today's behavior, so every valid file stays
+valid and means what it meant. A file written for 2.3.0 and read by an older core
+gets a warning for the unknown `approval` key, and nothing is signed.
 
 **2.2.2 — `--colors=never` in the examples (AT-11).** Pest's colour codes reached the messages
 of `invar acceptance lock`. No key, value or rule changes.

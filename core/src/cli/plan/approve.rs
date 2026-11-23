@@ -1,5 +1,5 @@
 //! `invar plan approve [TICKET | PATH] [--acceptance | --no-acceptance]
-//! [--reapprove] [--no-start] [--skill]`.
+//! [--reapprove] [--commit <MESSAGE> | --no-commit] [--no-start] [--skill]`.
 //!
 //! Without a ticket, the one Plan under `.invar/plans/`; with several, it
 //! names them and approves none. `--no-start` and `--skill` are for
@@ -7,21 +7,28 @@
 //!
 //! Order matters: validate, compare with any earlier approval and decide
 //! `Acceptance` from that, read who is approving and today's date from git,
-//! check that those values can be written, print the acceptance criteria and
-//! the decision, and only then write. Everything that can be known to fail
-//! fails before the criteria are shown, so a person does not read the
+//! check that those values can be written and, with `approval.signed`, that git
+//! has an SSH signing key, print the acceptance criteria and the decision, sign,
+//! and only then write, and commit when asked. Everything that can be known to
+//! fail fails before the criteria are shown, so a person does not read the
 //! criteria of an approval that was never going to be recorded. What is left
-//! is the file changing in the meantime, which the commit refuses, and a disk
-//! that fails.
+//! is the key refusing to sign, which writes nothing, the file changing in the
+//! meantime, which the write refuses, a disk that fails, and a commit that
+//! fails, which leaves the approval written and says so.
+//!
+//! The signature is made after the criteria are printed, so that a key which
+//! asks a person (a touch, a passphrase) asks once they have read them.
 
 use anyhow::{Context as _, Result, bail};
 
+use crate::format::config::Config;
 use crate::format::plan::{Acceptance, Mode};
 use crate::gate::approval::Prior;
 use crate::gate::approve::{self, ApproveError, Decision};
 use crate::git;
+use crate::signature::{self, Signer};
 
-use crate::fs::{self, plans::SPEC_FILE};
+use crate::fs::{self, ProjectRoot, plans::SPEC_FILE};
 
 use super::target;
 use super::validate::print_report;
@@ -70,6 +77,22 @@ pub struct Args {
     #[arg(long)]
     pub reapprove: bool,
 
+    /// Also commit the approval, alone, with this message:
+    /// `--commit "chore: approve the Plan of SHOP-214"`.
+    ///
+    /// Only the Plan's `spec.md`, and its `approval.sig` when the approval is
+    /// signed, go into the commit; anything else that is staged stays staged.
+    /// The project's hooks and signing apply. Nothing is pushed. Without it,
+    /// nothing is committed, unless `invar.yaml` sets `approval.commit: true`,
+    /// which commits under `approval.commit_message` (default "Approve plan
+    /// {ticket}").
+    #[arg(long, value_name = "MESSAGE")]
+    pub commit: Option<String>,
+
+    /// Commit nothing, even when `invar.yaml` sets `approval.commit: true`.
+    #[arg(long)]
+    pub no_commit: bool,
+
     /// Approve without starting Phase 2: ends the output with `Phase 2: not
     /// started (--no-start)`.
     ///
@@ -104,6 +127,9 @@ fn approve(args: Args) -> Result<()> {
         bail!(
             "`--acceptance` cannot be used with `--no-acceptance`: name the one this ticket needs"
         );
+    }
+    if args.commit.is_some() && args.no_commit {
+        bail!("`--commit` cannot be used with `--no-commit`: name the one you want");
     }
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
     let query = match args.target {
@@ -169,6 +195,12 @@ fn approve(args: Args) -> Result<()> {
     let by = git::user_name(root.path())?;
     let at = git::today(root.path())?;
     pending.check_values(&by, &at)?;
+    // Read before the criteria are shown, like the values above: a missing key
+    // is known now (approval-signature.md §5).
+    let signer = match config.approval.signed {
+        true => Some(Signer::from_git(root.path())?),
+        false => None,
+    };
 
     let shown = target::shown(pending.spec(), &cwd);
     match pending.replaces() {
@@ -209,14 +241,73 @@ fn approve(args: Args) -> Result<()> {
     println!();
 
     let ticket = pending.ticket().to_owned();
-    let approval = pending.commit(by, at)?;
+    let spec = pending.spec().to_owned();
+    let signature = match &signer {
+        Some(signer) => {
+            println!("signing with {} — answer its prompt if it asks", signer.key);
+            let statement = signature::statement(&ticket, pending.checksum());
+            Some(signer.sign(root.path(), &statement, signature::DEADLINE)?)
+        }
+        None => None,
+    };
+    let approval = pending.commit_signed(by, at, signature.as_deref())?;
     println!("approved: {shown}");
     println!("  Approved-by: {}", approval.by);
     println!("  Approved-at: {}", approval.at);
     println!("  Approved-checksum: {}", approval.checksum);
     println!("  Acceptance: {}", approval.acceptance.as_str());
+    let signature_file = approve::signature_path(&spec);
+    if signature.is_some() {
+        println!("  Signature: {}", target::shown(&signature_file, &cwd));
+    }
+
+    if let Some(message) = commit_message(&args.commit, args.no_commit, &config, &ticket) {
+        let mut paths = vec![spec.as_path()];
+        if signature.is_some() {
+            paths.push(signature_file.as_path());
+        }
+        commit(&root, &paths, &message).with_context(|| {
+            format!(
+                "the approval of {ticket} is recorded, and committing it failed; commit it \
+                 yourself, or approve with `--no-commit`"
+            )
+        })?;
+        println!("  committed: {message}");
+    }
     println!();
     println!("{}", recorded_line(&ticket, &approval.checksum));
+    Ok(())
+}
+
+/// The message to commit the approval under, or `None` to commit nothing:
+/// `--commit <MESSAGE>`, then `--no-commit`, then `approval.commit` with its
+/// `approval.commit_message` (invar-yaml.md §3.7).
+fn commit_message(
+    flag: &Option<String>,
+    no_commit: bool,
+    config: &Config,
+    ticket: &str,
+) -> Option<String> {
+    if let Some(message) = flag {
+        return Some(message.clone());
+    }
+    (!no_commit && config.approval.commit).then(|| config.approval.message_for(ticket))
+}
+
+/// Stage and commit `paths` alone: a Plan written by the planner may be new to
+/// git.
+fn commit(root: &ProjectRoot, paths: &[&std::path::Path], message: &str) -> Result<()> {
+    let relative: Vec<std::path::PathBuf> = paths
+        .iter()
+        .map(|path| match root.relative_path(path) {
+            Ok(Some(relative)) => Ok(relative),
+            Ok(None) => bail!("{} is outside the project", path.display()),
+            Err(err) => Err(err.into()),
+        })
+        .collect::<Result<_>>()?;
+    let relative: Vec<&std::path::Path> = relative.iter().map(|p| p.as_path()).collect();
+    git::stage(root.path(), &relative)?;
+    git::commit_paths(root.path(), &relative, message)?;
     Ok(())
 }
 
