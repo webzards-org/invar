@@ -142,8 +142,16 @@ whether this ticket gets **locked acceptance tests**:
 | `/invar:approve SHOP-214 --no-start` | records the approval, and starts nothing yet |
 
 From now on the Plan is frozen. If anyone changes it, even by one character,
-`invar plan check` refuses and no agent starts. To change an approved Plan,
-ask the planner to revise it and approve again with `--reapprove`.
+`invar plan check` refuses and no agent starts. No agent edits an approved
+Plan, and none can approve a draft by writing the approval fields into it: the
+hook refuses both. To change an approved Plan, either:
+
+- record a `failed` entry (`/invar:log SHOP-214`, then
+  `/invar:log-approve SHOP-214`). The Plan goes back to draft with its
+  approval cleared; ask the planner to revise it, then approve it with
+  `/invar:approve SHOP-214`, as any draft; or
+- edit the Plan yourself, then approve it again with
+  `/invar:approve SHOP-214 --reapprove`.
 
 ## 3. The acceptance tests are locked
 

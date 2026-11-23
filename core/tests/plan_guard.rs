@@ -512,6 +512,315 @@ fn an_approved_plan_with_crlf_is_denied_too() {
     guard(edit(&project.root(), &project.path(SPEC))).code(2);
 }
 
+// --- approval values written into a draft (#153) ------------------------------------
+
+/// A draft as `reset_to_draft` leaves one: every approval key there, and empty.
+const DRAFT: &str = "---\nTicket: SHOP-214\nModule: orders\nStatus: draft\nApproved-by:\n\
+    Approved-at:\nApproved-checksum:\nLockfile-checksum:\nAcceptance:\n---\n\n\
+    ## Ticket\nSHOP-214\n\n## Acceptance criteria\n- AC1: refused with 403\n";
+
+const CHECKSUM: &str = "sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b";
+
+/// Each approval key, and the value an edit fills it with.
+fn approval_values() -> [(&'static str, String); 5] {
+    [
+        ("Approved-by", "rade".to_owned()),
+        ("Approved-at", "2026-10-05".to_owned()),
+        ("Approved-checksum", CHECKSUM.to_owned()),
+        ("Lockfile-checksum", CHECKSUM.replace("b9", "c0")),
+        ("Acceptance", "required".to_owned()),
+    ]
+}
+
+fn denied_as_approval(stdin: String, written: &str) {
+    guard(stdin)
+        .code(2)
+        .stderr(contains(format!(
+            "this would write {written} into the header of"
+        )))
+        .stderr(contains("Only `invar plan approve` writes"))
+        .stderr(contains("tell the developer it is ready and wait"))
+        .stderr(contains("`/invar:approve SHOP-214`"));
+}
+
+#[test]
+fn an_edit_that_sets_a_draft_to_approved_is_denied() {
+    let project = Project::new(DRAFT);
+    denied_as_approval(
+        edit_with(
+            &project.root(),
+            &project.path(SPEC),
+            "Status: draft",
+            "Status: approved",
+        ),
+        "`Status: approved`",
+    );
+}
+
+#[test]
+fn an_edit_that_fills_any_approval_key_of_a_draft_is_denied() {
+    let project = Project::new(DRAFT);
+    for (key, value) in approval_values() {
+        denied_as_approval(
+            edit_with(
+                &project.root(),
+                &project.path(SPEC),
+                &format!("{key}:\n"),
+                &format!("{key}: {value}\n"),
+            ),
+            &format!("a value for `{key}`"),
+        );
+    }
+}
+
+#[test]
+fn an_edit_that_fills_a_value_without_naming_its_key_is_denied() {
+    // `new_string` holds neither `Status` nor `Approved-by`: the header the call
+    // would leave holds both all the same.
+    let project = Project::new(DRAFT);
+    denied_as_approval(
+        edit_with(
+            &project.root(),
+            &project.path(SPEC),
+            ": draft",
+            ": approved",
+        ),
+        "`Status: approved`",
+    );
+    denied_as_approval(
+        edit_with(&project.root(), &project.path(SPEC), "-by:", "-by: rade"),
+        "a value for `Approved-by`",
+    );
+}
+
+#[test]
+fn a_write_of_a_new_plan_that_holds_any_approval_value_is_denied() {
+    let project = Project::new(DRAFT);
+    let new = project.path(".invar/plans/SHOP-300-refunds/spec.md");
+    let draft = DRAFT.replace("SHOP-214", "SHOP-300");
+    let denied = |content: String, written: &str| {
+        guard(write_with(&project.root(), &new, &content))
+            .code(2)
+            .stderr(contains(format!(
+                "this would write {written} into the header of"
+            )))
+            .stderr(contains("`/invar:approve SHOP-300`"));
+    };
+    denied(
+        draft.replace("Status: draft", "Status: approved"),
+        "`Status: approved`",
+    );
+    for (key, value) in approval_values() {
+        denied(
+            draft.replace(&format!("{key}:\n"), &format!("{key}: {value}\n")),
+            &format!("a value for `{key}`"),
+        );
+    }
+}
+
+#[test]
+fn a_write_over_a_draft_that_approves_it_is_denied() {
+    let project = Project::new(DRAFT);
+    denied_as_approval(
+        write_with(
+            &project.root(),
+            &project.path(SPEC),
+            &DRAFT
+                .replace("Status: draft", "Status: approved")
+                .replace("Approved-by:\n", "Approved-by: rade\n"),
+        ),
+        "`Status: approved` and a value for `Approved-by`",
+    );
+}
+
+#[test]
+fn writing_and_revising_a_draft_with_empty_approval_keys_passes() {
+    let project = Project::new(DRAFT);
+    // Phase 1: the planner writes a new Plan, then revises it.
+    let new = project.path(".invar/plans/SHOP-300-refunds/spec.md");
+    passes_silently(write_with(
+        &project.root(),
+        &new,
+        &DRAFT.replace("SHOP-214", "SHOP-300"),
+    ));
+    passes_silently(edit_with(
+        &project.root(),
+        &project.path(SPEC),
+        "refused with 403",
+        "refused with 409",
+    ));
+    passes_silently(write_with(
+        &project.root(),
+        &project.path(SPEC),
+        &DRAFT.replace("refused with 403", "refused with 409"),
+    ));
+}
+
+#[test]
+fn an_edit_with_an_empty_old_string_that_writes_an_approved_plan_is_denied() {
+    // Claude Code creates the file, or fills an empty one, with `new_string`
+    // (`plugin/NOTES.md` §11): it is the file the call would leave.
+    let project = Project::new(DRAFT);
+    let new = ".invar/plans/SHOP-300-refunds/spec.md";
+    let approved = APPROVED.replace("SHOP-214", "SHOP-300");
+    let denied = || {
+        guard(edit_with(
+            &project.root(),
+            &project.path(new),
+            "",
+            &approved,
+        ))
+        .code(2)
+        .stderr(contains(
+            "this would write `Status: approved` and a value for `Approved-by` and a \
+                 value for `Approved-at` and a value for `Approved-checksum` into the header",
+        ))
+        .stderr(contains("`/invar:approve SHOP-300`"));
+    };
+    denied();
+    fs::create_dir_all(project.root().join(new).parent().unwrap()).unwrap();
+    fs::write(project.root().join(new), "").unwrap();
+    denied();
+}
+
+#[test]
+fn an_edit_with_an_empty_old_string_that_writes_a_draft_passes() {
+    let project = Project::new(DRAFT);
+    let new = project.path(".invar/plans/SHOP-300-refunds/spec.md");
+    passes_silently(edit_with(
+        &project.root(),
+        &new,
+        "",
+        &DRAFT.replace("SHOP-214", "SHOP-300"),
+    ));
+}
+
+#[test]
+fn a_value_the_draft_already_held_is_not_the_calls_doing() {
+    // A draft may hold an approval value (plan-header.md §5.1): an edit that leaves
+    // it as it is passes, and one that changes it is denied.
+    let held = DRAFT.replace("Acceptance:\n", "Acceptance: required\n");
+    let project = Project::new(&held);
+    passes_silently(edit_with(
+        &project.root(),
+        &project.path(SPEC),
+        "refused with 403",
+        "refused with 409",
+    ));
+    passes_silently(write_with(
+        &project.root(),
+        &project.path(SPEC),
+        &held.replace("refused with 403", "refused with 409"),
+    ));
+    denied_as_approval(
+        edit_with(&project.root(), &project.path(SPEC), "required", "skipped"),
+        "a value for `Acceptance`",
+    );
+}
+
+#[test]
+fn status_approved_in_the_body_is_not_an_approval() {
+    let project = Project::new(DRAFT);
+    passes_silently(edit_with(
+        &project.root(),
+        &project.path(SPEC),
+        "- AC1: refused with 403\n",
+        "- AC1: refused with 403\n- AC2: the header then says `Status: approved`\n\n\
+         ```\nStatus: approved\nApproved-by: rade\n```\n",
+    ));
+    let new = project.path(".invar/plans/SHOP-300-refunds/spec.md");
+    passes_silently(write_with(
+        &project.root(),
+        &new,
+        &format!(
+            "{}\nStatus: approved\nAcceptance: required\n",
+            DRAFT.replace("SHOP-214", "SHOP-300")
+        ),
+    ));
+}
+
+/// Contract example `number`'s Plan, as `decision.rs` reads it.
+fn contract_example(number: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/plan-header.md");
+    let text = fs::read_to_string(path).unwrap();
+    let after = text.split_once(&format!("### {number} ")).unwrap().1;
+    let body = after.split_once("```markdown\n").unwrap().1;
+    body.split_once("\n```\n").unwrap().0.to_owned() + "\n"
+}
+
+#[test]
+fn a_failed_plan_goes_back_to_draft_is_revised_by_the_planner_and_approved_again() {
+    let draft = contract_example("9.1");
+    let project = Project::new(&(contract_example("9.2") + draft.split_once("\n---\n").unwrap().1));
+    let gitconfig = project.root().join(".gitconfig-test");
+    fs::write(&gitconfig, "[user]\n\tname = rade\n").unwrap();
+    let invar = |args: &[&str]| {
+        Command::cargo_bin("invar")
+            .unwrap()
+            .current_dir(project.root())
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("XDG_CONFIG_HOME")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", &gitconfig)
+            .env("HOME", project.root())
+            .env("GIT_COMMITTER_DATE", "2026-10-06T18:37:12+02:00")
+            .args(args)
+            .assert()
+    };
+    invar(&["plan", "check", "SHOP-214"]).success();
+    let revision = (
+        "## Intent\n",
+        "## Intent\nRevised after the failed attempt.\n",
+    );
+    let revise = || edit_with(&project.root(), &project.path(SPEC), revision.0, revision.1);
+
+    // Approved: the planner's edit is denied.
+    guard(revise())
+        .code(2)
+        .stderr(contains("is the approved Plan for SHOP-214"))
+        .stderr(contains("record a `failed` entry"));
+
+    // The developer records the failure; the CLI resets the Plan, past the guard.
+    invar(&[
+        "decision",
+        "record",
+        "--ticket",
+        "SHOP-214",
+        "--type",
+        "failed",
+        "-m",
+        "Reservations belong to the warehouse.",
+    ])
+    .success()
+    .stdout(contains(format!("reset: {SPEC} is `draft` again")));
+
+    // The planner revises the draft, and cannot approve it.
+    passes_silently(revise());
+    let spec = project.root().join(SPEC);
+    let reset = fs::read_to_string(&spec).unwrap();
+    fs::write(&spec, reset.replacen(revision.0, revision.1, 1)).unwrap();
+    denied_as_approval(
+        edit_with(
+            &project.root(),
+            &project.path(SPEC),
+            "Status: draft",
+            "Status: approved",
+        ),
+        "`Status: approved`",
+    );
+    invar(&["plan", "check", "SHOP-214"])
+        .failure()
+        .stderr(contains("is still a draft"));
+
+    // The developer approves it: a draft needs no `--reapprove`.
+    invar(&["plan", "approve", "SHOP-214"])
+        .success()
+        .stdout(contains("approved SHOP-214 checksum sha256:"));
+    invar(&["plan", "check", "SHOP-214"]).success();
+    assert!(fs::read_to_string(&spec).unwrap().contains(revision.1));
+}
+
 // --- commands only the developer runs -------------------------------------------
 
 #[test]
@@ -706,6 +1015,18 @@ fn the_help_says_the_checksum_is_the_boundary() {
         ))
         .stdout(contains("never sees a file changed through `Bash`"))
         .stdout(contains("invar plan check"));
+}
+
+#[test]
+fn the_help_says_a_shell_write_of_approval_values_gets_past_it() {
+    Command::cargo_bin("invar")
+        .unwrap()
+        .args(["plan", "guard", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("fills an"))
+        .stdout(contains("Lockfile-checksum"))
+        .stdout(contains("acceptance-lock.md D-20"));
 }
 
 #[test]

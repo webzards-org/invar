@@ -33,7 +33,14 @@
 //! denied in these cases only:
 //!
 //! - the path is an existing `.invar/plans/<name>/spec.md` whose header says
-//!   `Status: approved`. A draft Plan is edited freely; that is Phase 1 working;
+//!   `Status: approved`;
+//! - the path is a `.invar/plans/<name>/spec.md`, a draft or not there yet, and the
+//!   header the call would leave says `Status: approved`, or holds a value for an
+//!   approval key (`Approved-by`, `Approved-at`, `Approved-checksum`,
+//!   `Lockfile-checksum`, `Acceptance`) that the file did not already have. Only
+//!   `invar plan approve` writes them (plan-header.md §5); a value a draft already
+//!   holds is not an error there (§5.1), so an edit that leaves it alone passes. Any
+//!   other edit of a draft passes; that is Phase 1 working;
 //! - the path is the unlock record of a Plan, whether or not it exists yet. Only
 //!   `invar acceptance unlock` and `invar acceptance lock` write it;
 //! - the path is under `acceptance.dir` and the file has a locked line, of any
@@ -43,7 +50,10 @@
 //!   line. Only `invar acceptance lock` writes one, after it has run the tests (A-4).
 //!
 //! Only files under `acceptance.dir` are judged for a lock line, because anywhere else
-//! `invar-lock:` is just text, such as in invar's own contract.
+//! `invar-lock:` is just text, such as in invar's own contract. Likewise only a Plan's
+//! header is judged for approval values: `Status: approved` in its body is just text.
+//! Both judge the file the call would leave ([`text_after`]), because an `Edit`'s
+//! `new_string` need not name the key or the marker it fills.
 
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -52,7 +62,7 @@ use serde_json::Value;
 
 use crate::format::config;
 use crate::format::lock::{self, MARKER};
-use crate::format::plan::{Mode, Plan, Status};
+use crate::format::plan::{APPROVAL_KEYS, Checked, Mode, Plan, Status};
 use crate::fs::plans::{SPEC_FILE, UNLOCK_FILE};
 use crate::fs::{ProjectRoot, RootError};
 
@@ -65,8 +75,8 @@ pub enum Verdict {
     /// Nothing the guard holds: the tool call takes its normal course, including
     /// any permission prompt. The guard never answers "allow" outright.
     Pass,
-    /// An approved Plan, a locked test, or a digest written by hand: the tool call is
-    /// denied, and `reason` tells the agent why and what to do instead.
+    /// An approved Plan, approval values or a digest written by hand, or a locked test:
+    /// the tool call is denied, and `reason` tells the agent why and what to do instead.
     Deny { reason: String },
     /// The guard could not decide. The tool call takes its normal course and
     /// `problem` is reported to the developer.
@@ -162,7 +172,7 @@ fn judge(path: &Path, tool: &str, payload: &Value) -> Verdict {
         };
     }
     match plan_dir_name(&relative, SPEC_FILE) {
-        Some(name) => judge_plan(path, &relative, &name),
+        Some(name) => judge_plan(path, &relative, &name, tool, payload),
         // The tools whose payloads are known (`plugin/NOTES.md` §11). Any other keeps
         // what it had: the Plan is all it is judged for.
         None if matches!(tool, "Write" | "Edit") => judge_test(path, &root, &relative, payload),
@@ -170,10 +180,10 @@ fn judge(path: &Path, tool: &str, payload: &Value) -> Verdict {
     }
 }
 
-fn judge_plan(path: &Path, relative: &Path, name: &str) -> Verdict {
+fn judge_plan(path: &Path, relative: &Path, name: &str, tool: &str, payload: &Value) -> Verdict {
     let text = match std::fs::read(path) {
         Ok(bytes) => match String::from_utf8(bytes) {
-            Ok(text) => text,
+            Ok(text) => Some(text),
             Err(_) => {
                 return Verdict::Unsure {
                     problem: format!(
@@ -184,7 +194,7 @@ fn judge_plan(path: &Path, relative: &Path, name: &str) -> Verdict {
             }
         },
         // A Plan being written for the first time.
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Verdict::Pass,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => None,
         Err(err) => {
             return Verdict::Unsure {
                 problem: format!("cannot read {}: {err}", relative.display()),
@@ -192,26 +202,126 @@ fn judge_plan(path: &Path, relative: &Path, name: &str) -> Verdict {
         }
     };
 
-    // `Status` reads the same in either mode; the sections, which differ by
-    // mode, play no part here.
-    let checked = Plan::check(&text, Mode::Light);
-    if checked.status != Some(Status::Approved) {
+    // `Status` and the approval keys read the same in either mode; the
+    // sections, which differ by mode, play no part here.
+    let before = text.as_deref().map(|text| Plan::check(text, Mode::Light));
+    if let Some(checked) = &before
+        && checked.status == Some(Status::Approved)
+    {
+        let ticket = ticket_or(checked, name);
+        return Verdict::Deny {
+            reason: format!(
+                "{} is the approved Plan for {ticket}. Its text is what the developer \
+                 approved, and `Approved-checksum` holds it fixed, so it is not edited \
+                 during implementation — through any tool. If the Plan is wrong or \
+                 incomplete, stop and tell the developer what should change. They decide \
+                 how it changes: they record a `failed` entry, which returns the Plan to \
+                 draft for the planner to revise and for them to approve again with \
+                 `/invar:approve {ticket}`, or they edit it themselves and approve it \
+                 again with `invar plan approve {ticket} --reapprove`",
+                relative.display()
+            ),
+        };
+    }
+
+    // The tools whose payloads are known (`plugin/NOTES.md` §11).
+    if !matches!(tool, "Write" | "Edit") {
         return Verdict::Pass;
     }
-    let ticket = checked
-        .ticket
-        .map(|(ticket, _)| ticket)
-        .unwrap_or_else(|| name.to_owned());
+    let (written, ticket) = match text_after(payload, text.as_deref()) {
+        Some(after) => {
+            let after = Plan::check(&after, Mode::Light);
+            (
+                approval_written(before.as_ref(), &after),
+                ticket_or(&after, name),
+            )
+        }
+        None => {
+            let ticket = before
+                .as_ref()
+                .map_or_else(|| name.to_owned(), |b| ticket_or(b, name));
+            (approval_in_fragment(payload), ticket)
+        }
+    };
+    if written.is_empty() {
+        return Verdict::Pass;
+    }
+    let noun = if written.len() == 1 { "it" } else { "them" };
     Verdict::Deny {
         reason: format!(
-            "{} is the approved Plan for {ticket}. Its text is what the developer \
-             approved, and `Approved-checksum` holds it fixed, so it is not edited \
-             during implementation — through any tool. If the Plan is wrong or \
-             incomplete, stop and tell the developer what should change; they edit it \
-             and approve it again with `invar plan approve {ticket} --reapprove`",
+            "this would write {} into the header of {}. Only `invar plan approve` writes \
+             {noun}, when the developer approves the Plan, so a draft keeps `Status: draft` \
+             and leaves every approval key as it is. If the Plan is ready, stop: tell the \
+             developer it is ready and wait. Only the developer approves it, with \
+             `/invar:approve {ticket}`",
+            written.join(" and "),
             relative.display()
         ),
     }
+}
+
+/// `Ticket` from the header, or else the Plan's directory name.
+fn ticket_or(checked: &Checked, name: &str) -> String {
+    checked
+        .ticket
+        .as_ref()
+        .map_or_else(|| name.to_owned(), |(ticket, _)| ticket.clone())
+}
+
+/// The approval values `after` holds that `before` did not, as the reason names them:
+/// `Status: approved`, then each key whose value the call writes. A value the Plan
+/// already had is not this call's doing: a draft may hold one (plan-header.md §5.1),
+/// and an edit elsewhere in it changes nothing about its approval.
+fn approval_written(before: Option<&Checked>, after: &Checked) -> Vec<String> {
+    let mut written = Vec::new();
+    // `judge_plan` has already denied a Plan that was approved before the call.
+    if after.status == Some(Status::Approved) {
+        written.push("`Status: approved`".to_owned());
+    }
+    let had = |key: &str, value: &str| {
+        before.is_some_and(|before| {
+            before
+                .approval_values
+                .iter()
+                .any(|(k, v)| *k == key && v == value)
+        })
+    };
+    for (key, value) in &after.approval_values {
+        if !had(key, value) {
+            written.push(format!("a value for `{key}`"));
+        }
+    }
+    written
+}
+
+/// The approval values the text a call writes holds on its own, when the file it would
+/// leave cannot be told ([`text_after`] is `None`): a line that is, once trimmed,
+/// `Status: approved` or an approval key with a value.
+///
+/// **This may over-deny.** A fragment has no header to read: `Approved-by: rade` in a
+/// criterion or a code block cannot be told from the header line, so it is denied too.
+/// Passing instead would let any call the guard cannot follow write an approval.
+fn approval_in_fragment(payload: &Value) -> Vec<String> {
+    let input = payload.get("tool_input");
+    let text_of = |key: &str| input.and_then(|i| i.get(key)).and_then(Value::as_str);
+    let Some(fragment) = text_of("content").or_else(|| text_of("new_string")) else {
+        return Vec::new();
+    };
+    let mut written = Vec::new();
+    let lines = || fragment.lines().map(str::trim);
+    if lines().any(|line| line == "Status: approved") {
+        written.push("`Status: approved`".to_owned());
+    }
+    for key in APPROVAL_KEYS {
+        let filled = lines().any(|line| {
+            line.split_once(':')
+                .is_some_and(|(k, value)| k == key && !value.trim().is_empty())
+        });
+        if filled {
+            written.push(format!("a value for `{key}`"));
+        }
+    }
+    written
 }
 
 /// `<name>` when `relative` is `.invar/plans/<name>/<file>`.
@@ -333,21 +443,44 @@ fn writes_digest(payload: &Value, existing: Option<&[u8]>) -> bool {
     if lock::holds_digest(new) {
         return true;
     }
-    let before = existing.and_then(|bytes| std::str::from_utf8(bytes).ok());
-    let (Some(before), Some(old)) = (before, text_of("old_string").filter(|old| !old.is_empty()))
-    else {
+    let Some(before) = existing.and_then(|bytes| std::str::from_utf8(bytes).ok()) else {
         return false;
     };
+    let Some(after) = text_after(payload, Some(before)) else {
+        return false;
+    };
+    lock::holds_digest(&after) && !lock::holds_digest(before)
+}
+
+/// The file the `Write` or `Edit` in `payload` would leave: `content` for a `Write`;
+/// for an `Edit`, `before`, the file as it is, with `old_string` replaced by
+/// `new_string` (every occurrence under `replace_all`), or `new_string` alone when
+/// `old_string` is empty and the file is not there or empty. `None` when that cannot
+/// be told: any other `Edit` of a file that is not there or not text, an empty
+/// `old_string` on a file with text in it, or a payload that is neither.
+fn text_after(payload: &Value, before: Option<&str>) -> Option<String> {
+    let input = payload.get("tool_input");
+    let text_of = |key: &str| input.and_then(|i| i.get(key)).and_then(Value::as_str);
+    if let Some(content) = text_of("content") {
+        return Some(content.to_owned());
+    }
+    let new = text_of("new_string")?;
+    let old = text_of("old_string")?;
+    if old.is_empty() {
+        // Claude Code creates the file, or fills an empty one, with `new_string`, and
+        // refuses the call on any other file (`plugin/NOTES.md` §11, #153).
+        return before.is_none_or(str::is_empty).then(|| new.to_owned());
+    }
+    let before = before?;
     let replace_all = input
         .and_then(|i| i.get("replace_all"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let after = if replace_all {
+    Some(if replace_all {
         before.replace(old, new)
     } else {
         before.replacen(old, new, 1)
-    };
-    lock::holds_digest(&after) && !lock::holds_digest(before)
+    })
 }
 
 /// Whether `relative` is a path below `dir`, as `acceptance.dir` may write it (`./t`).

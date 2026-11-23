@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 use tempfile::TempDir;
 
-use super::{Verdict, decide};
+use super::{Verdict, decide, text_after};
 
 const APPROVED: &str = "---\nTicket: SHOP-214\nModule: orders\nStatus: approved\n\
     Approved-by: rade\nApproved-at: 2026-10-05\n\
@@ -123,6 +123,114 @@ fn a_path_through_a_symlink_is_still_denied() {
     let link = root.join("plan-link");
     std::os::unix::fs::symlink(root.join(".invar/plans/SHOP-214-cancel"), &link).unwrap();
     assert!(matches!(on(&link.join("spec.md")), Verdict::Deny { .. }));
+}
+
+#[test]
+fn a_draft_given_its_approval_values_by_an_edit_is_denied_naming_them() {
+    let (_dir, _root, spec) = project(&draft());
+    let input = serde_json::to_vec(&json!({
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": spec,
+            "old_string": "Status: draft\nApproved-by:",
+            "new_string": "Status: approved\nApproved-by: rade",
+        },
+    }))
+    .unwrap();
+    match decide(&input, Path::new("/")) {
+        Verdict::Deny { reason } => {
+            assert!(
+                reason.starts_with(
+                    "this would write `Status: approved` and a value for `Approved-by` into \
+                     the header of .invar/plans/SHOP-214-cancel/spec.md"
+                ),
+                "{reason}"
+            );
+            // `Approved-at` and `Approved-checksum` were in the draft already.
+            assert!(!reason.contains("`Approved-at`"), "{reason}");
+            assert!(reason.contains("`/invar:approve SHOP-214`"), "{reason}");
+        }
+        other => panic!("expected Deny, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_plan_that_cannot_be_read_stays_unsure_whatever_the_call_writes() {
+    let (_dir, _root, spec) = project(&draft());
+    fs::write(&spec, b"---\nStatus: draft\xff\n---\n").unwrap();
+    let input = serde_json::to_vec(&json!({
+        "tool_name": "Write",
+        "tool_input": { "file_path": spec, "content": APPROVED },
+    }))
+    .unwrap();
+    assert_unsure(decide(&input, Path::new("/")), "not valid UTF-8");
+}
+
+#[test]
+fn the_text_after_a_call_is_its_content_or_the_file_with_the_edit_applied() {
+    let call = |input: serde_json::Value| json!({ "tool_input": input });
+    let before = Some("a a a");
+    assert_eq!(
+        text_after(&call(json!({ "content": "new" })), None).as_deref(),
+        Some("new")
+    );
+    let edit = json!({ "old_string": "a", "new_string": "b" });
+    assert_eq!(
+        text_after(&call(edit.clone()), before).as_deref(),
+        Some("b a a")
+    );
+    let all = json!({ "old_string": "a", "new_string": "b", "replace_all": true });
+    assert_eq!(text_after(&call(all), before).as_deref(), Some("b b b"));
+    // An edit of a file that is not there, an empty `old_string`, no edit at all.
+    assert_eq!(text_after(&call(edit), None), None);
+    let empty = json!({ "old_string": "", "new_string": "b" });
+    assert_eq!(text_after(&call(empty), before), None);
+    assert_eq!(text_after(&call(json!({})), before), None);
+}
+
+#[test]
+fn an_edit_with_an_empty_old_string_leaves_its_new_string_in_a_missing_or_empty_file() {
+    // What Claude Code does with one (`plugin/NOTES.md` §11, #153).
+    let call = json!({ "tool_input": { "old_string": "", "new_string": "b" } });
+    assert_eq!(text_after(&call, None).as_deref(), Some("b"));
+    assert_eq!(text_after(&call, Some("")).as_deref(), Some("b"));
+    assert_eq!(text_after(&call, Some("a")), None);
+}
+
+/// An `Edit` of a Plan that is not there, with an `old_string` it cannot hold: the
+/// file the call would leave cannot be told, so `new_string` is judged on its own.
+fn on_a_fragment(new_string: &str) -> Verdict {
+    let (_dir, root, _spec) = project(&draft());
+    let input = serde_json::to_vec(&json!({
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": root.join(".invar/plans/SHOP-300-refunds/spec.md"),
+            "old_string": "Approved-checksum:",
+            "new_string": new_string,
+        },
+    }))
+    .unwrap();
+    decide(&input, Path::new("/"))
+}
+
+#[test]
+fn a_fragment_that_fills_an_approval_key_is_denied_and_an_empty_one_passes() {
+    match on_a_fragment("  Approved-checksum: x\n") {
+        Verdict::Deny { reason } => assert!(
+            reason.starts_with("this would write a value for `Approved-checksum` into the header"),
+            "{reason}"
+        ),
+        other => panic!("expected Deny, got {other:?}"),
+    }
+    assert!(matches!(
+        on_a_fragment("Status: approved"),
+        Verdict::Deny { .. }
+    ));
+    assert_eq!(on_a_fragment("Approved-checksum:\n"), Verdict::Pass);
+    assert_eq!(
+        on_a_fragment("Status: draft\nAcceptance:  \n"),
+        Verdict::Pass
+    );
 }
 
 // --- pass -----------------------------------------------------------------------
