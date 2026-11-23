@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Fixed
+
+- **An agent can no longer approve a draft Plan by editing it.** `invar plan
+  guard` now also judges the header a `Write` or `Edit` would leave in a
+  draft or a new `spec.md`, and denies one that sets `Status: approved` or
+  fills `Approved-by`, `Approved-at`, `Approved-checksum`,
+  `Lockfile-checksum` or `Acceptance` with a value the file did not have.
+  Only `invar plan approve` writes them. A shell write still gets past the
+  guard, as for locked tests. `docs/USAGE.md` now gives the two routes that
+  work for changing an approved Plan: a `failed` entry, a revision by the
+  planner and a plain `/invar:approve`, or an edit by the developer and
+  `--reapprove` (#153).
+  An `Edit` with an empty `old_string`, which creates a file or fills an
+  empty one, is judged like a `Write`, and an edit whose result the guard
+  cannot work out is judged by the text it writes (#153).
+
 ## 0.2.0 — 2026-11-18
 
 The first beta release. Everything here is new; nothing changes how an
