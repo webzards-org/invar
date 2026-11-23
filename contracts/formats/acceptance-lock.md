@@ -1,10 +1,10 @@
 # Contract: the `invar-lock:` line
 
-**Version:** 1.3.0 — adds §11, unlocking a test; see §12
+**Version:** 1.4.0 — adds §10.5, whether the locked tests passed; see §12
 **Status:** stable
 **Implements:** §4d (Checksums); A-2, A-3, A-4, A-5 (`docs/TASKS-AT.md`)
 **Read by:** the core (`format/lock`; `invar hash --lock`; `invar acceptance lock` and
-`verify` and `unlock`; `plan check`; `done`; `plan guard`), any later reimplementation
+`verify` and `unlock` and `run`; `plan check`; `done`; `plan guard`), any later reimplementation
 
 > Changing this file is a **public-contract change** (§14.3). It is made
 > deliberately, in its own PR, with the reason recorded, the version bumped,
@@ -20,7 +20,7 @@ content was at that moment. Nothing else records a lock (D-1).
 
 This contract defines how the line is read, when it is an error, how the digest is
 computed, how a line comes to be locked (§9), what the commands that verify locks
-refuse (§10), and how the developer takes a lock off (§11).
+refuse (§10), whether locked tests passed (§10.5), and how the developer takes a lock off (§11).
 
 Fixtures: `contracts/fixtures/acceptance/`.
 
@@ -291,6 +291,34 @@ not make. It makes the skip visible and deliberate. It does not make it impossib
 main session reads (§10.4). `done` is shown through `/invar:done`, whose shell block carries stdout,
 and its success line stays the last.
 
+**D-32 — Results are read, and the suite is still never run** (A-2). Running the team's suite would
+need its database, its services and its time, and would make the core a CI runner. The team's CI
+already runs it, and every relevant runner writes JUnit XML, so the core reads that report. A report
+need not have been asked for by the core: any run that wrote it counts. The one run the core starts is
+the one `lock` already starts, on locked acceptance files only.
+
+**D-33 — `skipped` is never passed, and there is no setting.** A locked test that is skipped asserts
+nothing, and a coder that marks one skipped has weakened it as surely as one that edits it, without
+changing a byte the digest sees. A setting would be the way to switch the check off.
+
+**D-34 — A test that passes only on a retry is not passed.** Runners and CI steps retry flaky tests,
+and both runs can end up in the reports. A test that failed once and passed once has shown that it can
+fail; for a test that is the target, that is reported, not accepted. Merging by file and name is what
+makes a retry one test, and not two of which one passed.
+
+**D-35 — Results after integrity.** The results of a file that changed after locking say nothing about
+the test that was locked, so `verify` reports the broken lock and reads no report until it holds.
+
+**D-36 — `acceptance run` is feedback, and the boundary is CI.** It runs in the agent's environment,
+from the agent's shell, so an agent could fake what it prints. It exists so that the main session does
+not offer a review of red tests, and so that the coder sees what failed before it says `DONE`. What a
+person can rely on is `verify --results` on the team's CI, where the report comes from the team's own
+run.
+
+**D-37 — In `acceptance run`, a criterion with no test that ran is not passed.** Coverage held when the
+files were locked (§9.3), so a criterion with no test now means the run filtered it out. `verify` does
+not check coverage, because with no ticket it has no Plan.
+
 ## 7. Open questions
 
 None.
@@ -473,7 +501,7 @@ file that skipped the red check is named (§11.3).
 ## 10. Verifying
 
 One check, used by `plan check`, `done` and `invar acceptance verify`. None of them runs a test
-(A-2): green is the team's CI. Every problem is reported in one run (D-14), each naming its file
+(A-2). Whether the locked tests pass is read from JUnit reports, by §10.5. Every problem is reported in one run (D-14), each naming its file
 and ticket, and saying what to do.
 
 ### 10.1 Integrity
@@ -548,6 +576,63 @@ were unlocked (§11.4).
 **No `acceptance:` section** (D-21): `verify` warns on stderr that there is nothing to verify, and
 exits 0. `plan check` and `done` go on as before, with one warning on stderr when the Plan says
 `required`, and nothing added to stderr otherwise.
+
+### 10.5 Whether the locked tests passed
+
+A lock proves a test did not change. It does not prove the test passes, and the coder's job is to
+make it pass. **The core still never runs the team's test suite** (A-2, D-32): it reads JUnit reports
+(`test-results.md`), and runs `acceptance.run` only on locked acceptance files, as `lock` does.
+
+**The files.** Every file under `acceptance.dir`, found as in §9.1, with a locked line whose digest
+is the file's: of every ticket, or of one ticket when the caller names it. Pending files, and files of
+no ticket, are not looked at. Test cases of any other file are ignored, as in §9.3 (D-10).
+
+**The rules**, the same for every caller. Each problem names the file, the test's name and its
+criterion by the token rule of `test-results.md` §4, and every problem is reported in one run (D-14):
+
+| What the reports hold | Means |
+|---|---|
+| No test case for a locked file | A problem: not run by the test suite; add `acceptance.dir` to a test suite |
+| A test case that is `failure` or `error` | A problem, with the outcome and the first line of its message |
+| A test case that is `skipped` | A problem, always (D-33) |
+| The same test, by file and name, more than once | Passed only if every occurrence passed (D-34). Otherwise a problem, saying it passed in one run and not in another |
+| Every test case of every locked file `passed` | Passed |
+
+**The callers:**
+
+| Command | Reports | Files | Runs |
+|---|---|---|---|
+| `invar acceptance verify --results <REPORT>...` | The team's own, from its CI | Every ticket's; with a ticket, that ticket's | After §10.1 to §10.4 hold, and only then (D-35) |
+| `invar done <TICKET> --results <REPORT>...` | The team's own | The ticket's | After the checks `done` makes, before deleting anything |
+| `invar acceptance run <TICKET>` | The one its own run writes | The ticket's | On its own, below |
+
+`--report-root <DIR>` maps the paths in the reports (`test-results.md` §3.1), and needs
+`--results`. A report that is missing, empty or cannot be read is an error naming it, and nothing is
+checked. Without `--results`, `verify` and `done` read no report and print what they printed before.
+
+`verify --results` exits 0 with one line, `verified <N> locked file(s), and <M> locked test(s)
+passed`, where `<M>` counts the distinct tests of the files checked. On any problem it exits non-zero,
+with nothing on stdout and every problem on stderr.
+
+**`invar acceptance run <TICKET>`** is feedback for the dispatcher, not the boundary (D-36). It is an
+agent's command, and writes nothing. It refuses, with nothing on stdout, in this order: what `plan
+check` refuses; a Plan that does not say `required`; no `acceptance:` section; then any malformed line
+under `acceptance.dir`, and any of the ticket's files whose digest is not the one its line records;
+then no locked file for the ticket. It runs `acceptance.run` as §9.2 does, with only the ticket's
+locked files as `{files}`, and refuses as §9.2 does when the run has no result. On stdout:
+
+```
+AC1: passed
+AC2: not passed
+  tests/Acceptance/b_test.php: `it AC2 refuses` (AC2): failure: Failed asserting that false is true.
+acceptance: red SHOP-214
+```
+
+One line per criterion of the Plan, in its order, each test of it that did not pass below it; a
+criterion with no test that ran is not passed (D-37). Then, under `not passed, and of no criterion of
+the Plan:`, the locked files that did not run and the tests with no one id of the Plan that did not
+pass. The last line is fixed: `acceptance: green <TICKET>`, exit 0, when every criterion passed and
+nothing else is listed, and `acceptance: red <TICKET>`, non-zero, otherwise.
 
 ## 11. Unlocking
 
@@ -639,6 +724,11 @@ unlocked by the developer: <path> (round <R>)
 or not it exists yet. A shell can still write it (D-30).
 
 ## 12. Version history
+
+**1.4.0** — adds §10.5 and D-32 to D-37: whether the locked tests passed (#156). `verify` and `done`
+take `--results` and `--report-root`, and `invar acceptance run` is new. Without `--results`, nothing
+changes: no report is read, and every output is as before. The line, the digest, locking and unlocking
+do not change.
 
 **1.3.0** — adds §11 and D-25 to D-31: unlocking a test (AT-13). `lock`, `verify`, `spec` and `done`
 read the record. The line and the digest do not change, and nothing changes for a ticket with no
