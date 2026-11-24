@@ -549,3 +549,62 @@ fn the_stop_hook_holds_a_draft_to_the_same_rules() {
         "{out}"
     );
 }
+
+// --- the old form, when the file has ids (review of #166) ---------------------------
+
+const OLD_FORM: &str = "- AI_CONTEXT: controllers stay thin\n\
+                        - BUSINESS_CONTEXT invariant: every query scoped.\n";
+const AC1_ONLY: &str = "- AC1: Given a, when b, then c.\n";
+
+#[test]
+fn the_old_form_is_refused_when_the_file_has_ids_naming_the_line_and_the_ids() {
+    let project = Project::new("");
+    project.business("- INV-1: every query is team-scoped.\n- INV-2: paid orders stay.\n");
+    project.plan(NAME, &plan_with(AC1_ONLY, OLD_FORM));
+    let out = out_of(&project.validate(&["SHOP-214"]).failure());
+    assert!(
+        out.contains(
+            "spec.md:30: name the invariant by its id: `- BUSINESS_CONTEXT INV-<n>: <guidance>`; \
+             BUSINESS_CONTEXT.md defines INV-1, INV-2"
+        ),
+        "{out}"
+    );
+    assert_eq!(out.lines().count(), 1, "{out}");
+}
+
+#[test]
+fn the_old_form_is_the_form_without_ids_or_without_a_file() {
+    let without_ids = Project::new("");
+    without_ids.business("- every query is team-scoped.\n");
+    without_ids.plan(NAME, &plan_with(AC1_ONLY, OLD_FORM));
+    without_ids.validate(&["SHOP-214"]).success();
+
+    let empty = Project::new("");
+    empty.business("<!-- - INV-1: ... -->\n");
+    empty.plan(NAME, &plan_with(AC1_ONLY, OLD_FORM));
+    empty.validate(&["SHOP-214"]).success();
+
+    let absent = Project::new("");
+    absent.plan(NAME, &plan_with(AC1_ONLY, OLD_FORM));
+    absent.validate(&["SHOP-214"]).success();
+}
+
+#[test]
+fn a_plan_mixing_an_id_and_the_old_form_is_refused_for_the_old_form_only() {
+    let project = Project::new("");
+    project.business("- INV-1: every query is team-scoped.\n- INV-2: paid orders stay.\n");
+    project.plan(
+        NAME,
+        &plan_with(
+            "- AC1 (INV-1): Given a, when b, then c.\n",
+            "- BUSINESS_CONTEXT INV-1: the order is loaded through the team scope\n\
+             - BUSINESS_CONTEXT invariant: paid orders stay.\n",
+        ),
+    );
+    let out = out_of(&project.validate(&["SHOP-214"]).failure());
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert!(
+        out.contains("spec.md:30: name the invariant by its id"),
+        "{out}"
+    );
+}

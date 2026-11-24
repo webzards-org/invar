@@ -75,6 +75,19 @@ pub fn check(invariants: &Invariants, refs: &InvariantRefs) -> Diagnostics {
                 }
             }
         }
+        // With ids, the old form names an invariant the core cannot see: the gate
+        // would call it NOT NAMED, and no criterion would have to cite it.
+        if !defined.is_empty() {
+            for &line in &refs.without_id {
+                found.at(
+                    line,
+                    format!(
+                        "name the invariant by its id: `- BUSINESS_CONTEXT INV-<n>: \
+                         <guidance>`; {why} (plan-header.md §6.3)"
+                    ),
+                );
+            }
+        }
     }
 
     for &(number, line) in &refs.named {

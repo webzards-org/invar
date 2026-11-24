@@ -24,6 +24,7 @@ fn refs(named: &[(u64, usize)], cited: &[(&str, &[u64], usize)]) -> InvariantRef
             .iter()
             .map(|(id, numbers, line)| ((*id).to_owned(), numbers.to_vec(), *line))
             .collect(),
+        without_id: Vec::new(),
     }
 }
 

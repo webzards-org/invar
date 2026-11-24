@@ -423,6 +423,9 @@ pub struct InvariantRefs {
     pub named: Vec<(u64, usize)>,
     /// A criterion that cites invariants: its id, the numbers and the line.
     pub cited: Vec<(String, Vec<u64>, usize)>,
+    /// The lines of `- BUSINESS_CONTEXT invariant: …` and other `BUSINESS_CONTEXT`
+    /// items with no id: the form for a file without ids, refused when it has them.
+    pub without_id: Vec<usize>,
 }
 
 impl InvariantRefs {
@@ -470,13 +473,22 @@ enum Named<'a> {
     Id(u64),
     /// `- BUSINESS_CONTEXT <token>` where the token is meant as an id and is not one.
     Malformed(&'a str),
+    /// `- BUSINESS_CONTEXT invariant: …`, or `- BUSINESS_CONTEXT: …`: a business rule
+    /// named without an id.
+    WithoutId,
     None,
 }
 
 fn named(visible: &str) -> Named<'_> {
     let (is_item, text) = read_line(visible);
-    let Some(rest) = text.strip_prefix(SOURCE).filter(|_| is_item) else {
+    if !is_item {
         return Named::None;
+    }
+    let Some(rest) = text.strip_prefix(SOURCE) else {
+        return match text.strip_prefix(SOURCE.trim_end()) {
+            Some(rest) if rest.starts_with(':') => Named::WithoutId,
+            _ => Named::None,
+        };
     };
     let token = rest.split_whitespace().next().unwrap_or("");
     if let Some(number) = token
@@ -488,22 +500,23 @@ fn named(visible: &str) -> Named<'_> {
     if crate::context::invariants::looks_like_id(token) {
         Named::Malformed(token)
     } else {
-        Named::None
+        Named::WithoutId
     }
 }
 
-/// The invariants `## Implementation context` names by id; `content` starts at line
+/// The invariants `## Implementation context` names by id, and the lines of the items
+/// that name a business rule without one, into `refs`; `content` starts at line
 /// `first_line`.
-pub(super) fn named_invariants(content: &str, first_line: usize) -> Vec<(u64, usize)> {
-    let mut found = Vec::new();
+pub(super) fn named_invariants(content: &str, first_line: usize, refs: &mut InvariantRefs) {
     let mut in_comment = false;
     for (index, (raw, _)) in super::split_lines(content).into_iter().enumerate() {
         let visible = without_comments(raw, &mut in_comment);
-        if let Named::Id(number) = named(&visible) {
-            found.push((number, first_line + index));
+        match named(&visible) {
+            Named::Id(number) => refs.named.push((number, first_line + index)),
+            Named::WithoutId => refs.without_id.push(first_line + index),
+            Named::Malformed(_) | Named::None => {}
         }
     }
-    found
 }
 
 /// Check the form of the ids `## Implementation context` names invariants by

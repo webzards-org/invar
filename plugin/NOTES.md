@@ -2407,6 +2407,11 @@ longer its own judgement; `pr-body` lists the named ids.
 - **The coder's input is unchanged.** `context show --conventions` still carries no business
   rule and no id (`gate_refusals.rs`).
 - **Ids only for invariants.** Terms and regional facts get none yet.
+- **Once the file has ids, the old form is refused (found in review).** A Plan with
+  `- BUSINESS_CONTEXT invariant: every query scoped.` and no citing criterion passed
+  `plan validate`, so the rule that a named invariant has a criterion was skipped, and
+  the gate listed `INV-1` as NOT NAMED while the Plan described it. The old form is now
+  valid only for a file without ids. Ids in prose are still not read (A-5).
 
 **The planner prompt.** It said the coder "receives the binding context in its session
 anyway". That was wrong since M1-23: the coder reads `AI_CONTEXT.md` through

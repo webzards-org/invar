@@ -437,10 +437,16 @@ no version information.
 ```
 
 `INV-<n>` is `INV-`, a positive integer with no leading zero, then `:`; one id per
-item. The old form, `- BUSINESS_CONTEXT invariant: <guidance>`, stays valid, and is
-the form for a file without ids. An item whose token after `BUSINESS_CONTEXT` is
+item. The old form, `- BUSINESS_CONTEXT invariant: <guidance>` (or any
+`BUSINESS_CONTEXT` item without an id), is valid **only when the file has no ids**:
+absent, empty, or with invariants that carry none. When the file has ids it is an
+error at its line (§6.6), because an invariant named without its id is one the core
+cannot see: the gate would list it as not named, and no criterion would have to cite
+it. An item whose token after `BUSINESS_CONTEXT` is
 meant as an id and is not one (`INV-0:`, `inv-2:`, `INV-2` without the colon) is an
-error. Which ids the file defines is checked by `plan validate` (§6.6).
+error. Which ids the file defines is checked by `plan validate` (§6.6). Only the ids in a
+criterion's parentheses and in `BUSINESS_CONTEXT INV-<n>:` items are checked; an id
+mentioned in prose is not, since the core does not read prose (A-5).
 
 The core does not parse the guidance text; it checks only that the section
 exists and is non-empty, and the ids above. The form is fixed anyway so a reviewer
@@ -608,6 +614,8 @@ other problem, each at its line:
 - an invariant named in `## Implementation context` that no criterion cites;
 - a criterion citing an invariant that `## Implementation context` does not name:
   the coder reads only the Plan, so an invariant it is held to must be stated there;
+- when the file has ids, an Implementation context item in the old form
+  (`- BUSINESS_CONTEXT invariant: …`), with the ids the file defines (§6.3);
 - the problems of the file itself (`business-context.md` §5.2), each at its line of
   `BUSINESS_CONTEXT.md`.
 
@@ -1286,7 +1294,8 @@ is example 9.13 in miniature.
 **1.9.0 — invariant ids (#158).**
 
 - §6.3: an invariant is named by its id, `- BUSINESS_CONTEXT INV-<n>: <guidance>`; the
-  old form stays valid for a file without ids.
+  old form is valid only when the file has no ids, and an error when it has them. Only
+  ids in those items and in a criterion's citation are checked, never one in prose.
 - §6.4: a criterion cites the invariants it covers, `- AC3 (INV-2): …`; a malformed
   citation is an error. The criterion id rules are unchanged. The planner guidance on
   a criterion per invariant becomes a check when there are ids.
@@ -1301,7 +1310,8 @@ that a named invariant has a criterion could not be checked without matching pro
 
 **Compatibility:** every approved Plan stays valid and keeps its digest: nothing is
 checked of it again. A draft that was valid stays valid, unless it names an invariant as
-`BUSINESS_CONTEXT INV-<n>:` that the file does not define or no criterion cites;
+`BUSINESS_CONTEXT INV-<n>:` that the file does not define or no criterion cites, or
+names an invariant in the old form once the file has ids;
 `AC1 (…):` was a malformed id before, so no valid draft had a citation. A project whose `BUSINESS_CONTEXT.md` has no ids sees one warning at the
 gate, and nothing else changes.
 

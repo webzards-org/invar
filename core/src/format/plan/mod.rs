@@ -250,9 +250,9 @@ impl Plan {
                 sections::ACCEPTANCE_CRITERIA => {
                     refs.cited = criteria::citations(content, section.line + 1);
                 }
-                sections::IMPLEMENTATION_CONTEXT => refs
-                    .named
-                    .extend(criteria::named_invariants(content, section.line + 1)),
+                sections::IMPLEMENTATION_CONTEXT => {
+                    criteria::named_invariants(content, section.line + 1, &mut refs);
+                }
                 _ => {}
             }
         }

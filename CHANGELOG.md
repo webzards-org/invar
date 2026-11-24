@@ -12,7 +12,8 @@
   after the criteria, marked named (with the criteria that cite it) or
   `NOT NAMED`, so approving says the unnamed ones do not apply. `invar plan
   validate` refuses an id the file does not define, a named invariant no
-  criterion cites, a criterion citing one the Plan does not name, and duplicate,
+  criterion cites, a criterion citing one the Plan does not name, an invariant named in the old
+  form (`- BUSINESS_CONTEXT invariant: …`) once the file has ids, and duplicate,
   malformed or partial ids in the file. `invar review-input` marks each invariant
   named or not named in the Plan, and `invar pr-body` lists the ids the Plan names.
   `invar init` shows the form in a comment under the heading. A file without ids
