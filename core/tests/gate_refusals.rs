@@ -47,6 +47,38 @@ impl Project {
     }
 }
 
+/// Invariant ids change nothing the coder reads (#158): an id is a business rule's
+/// name, and the coder meets business rules only through the approved Plan.
+#[test]
+fn the_coders_context_carries_no_invariant_id_either() {
+    let project = Project::new();
+    project.write(
+        "AI_CONTEXT.md",
+        &format!("{MARKER}\n## Layers\n- Controllers stay thin.\n"),
+    );
+    project.write(
+        "BUSINESS_CONTEXT.md",
+        &format!(
+            "{MARKER}\n## Invariants\n- INV-1: BUSINESS-RULE-7, every query is scoped.\n\
+             - INV-4: an operator action notifies the customer.\n"
+        ),
+    );
+    let binding = project.invar(&["context", "show", "--binding"]).success();
+    let binding = String::from_utf8(binding.get_output().stdout.clone()).unwrap();
+    assert!(binding.contains("INV-4"), "{binding}");
+
+    let coder = project
+        .invar(&["context", "show", "--conventions"])
+        .success();
+    let output = coder.get_output();
+    for stream in [&output.stdout, &output.stderr] {
+        let text = String::from_utf8(stream.clone()).unwrap();
+        for forbidden in ["BUSINESS-RULE-7", "INV-1", "INV-4", "BUSINESS_CONTEXT.md"] {
+            assert!(!text.contains(forbidden), "{forbidden:?} in:\n{text}");
+        }
+    }
+}
+
 /// The coder reads `invar context show --conventions` (DESIGN §5c, §13c; M1-23,
 /// M1-24). Business rules reach it only through the approved Plan, and the
 /// decision log never does.

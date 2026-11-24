@@ -17,9 +17,10 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use crate::diagnostics::Diagnostics;
-use crate::format::plan::{Mode, Plan, Status};
+use crate::format::plan::{InvariantRefs, Mode, Plan, Status};
 use crate::fs::ProjectRoot;
 use crate::fs::plans::{self, LookupError, SPEC_FILE};
+use crate::gate::invariants;
 
 #[cfg(test)]
 mod tests;
@@ -64,6 +65,13 @@ pub fn file(root: &ProjectRoot, spec: &Path, mode: Mode) -> Report {
             let checked = Plan::check(&text, mode);
             problems.extend(checked.problems);
             status = checked.status;
+            // A draft is held to BUSINESS_CONTEXT.md as it is now; an approved Plan was
+            // held to it when approved, and the file may have moved on since (#158).
+            if status != Some(Status::Approved)
+                && let Some(refs) = &checked.invariant_refs
+            {
+                problems.extend(invariant_problems(root, refs));
+            }
             if let (Some(name), Some(dir_ticket), Some((ticket, line))) =
                 (&dir_name, &dir_ticket, &checked.ticket)
                 && let Some(problem) = plans::ticket_mismatch(name, dir_ticket, ticket)
@@ -77,6 +85,19 @@ pub fn file(root: &ProjectRoot, spec: &Path, mode: Mode) -> Report {
         spec: spec.to_owned(),
         status,
         problems,
+    }
+}
+
+/// What [`invariants::check`] refuses of `refs`, against `BUSINESS_CONTEXT.md` as it
+/// is now. A file that cannot be read is a problem: "cannot tell" is not "no ids".
+pub fn invariant_problems(root: &ProjectRoot, refs: &InvariantRefs) -> Diagnostics {
+    match invariants::load(root) {
+        Ok(found) => invariants::check(&found, refs),
+        Err(err) => {
+            let mut problems = Diagnostics::new();
+            problems.general(err.to_string());
+            problems
+        }
     }
 }
 

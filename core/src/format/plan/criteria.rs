@@ -26,14 +26,25 @@ pub struct Criterion {
     /// `AC<n>`.
     pub id: String,
     pub text: String,
+    /// The invariants it cites after its id, `AC3 (INV-2, INV-4):`, by number, in
+    /// the order written (§6.4). Empty when it cites none.
+    pub invariants: Vec<u64>,
 }
 
 /// A list item's text, read for an id.
 enum Id<'a> {
-    /// `AC<n>: <rest>`. `rest` is empty when nothing follows the colon.
+    /// `AC<n>: <rest>` or `AC<n> (INV-<m>, …): <rest>`. `rest` is empty when
+    /// nothing follows the colon.
     Valid {
         number: u64,
+        invariants: Vec<u64>,
         rest: &'a str,
+    },
+    /// An id followed by a parenthesis that is not a list of invariant ids:
+    /// `AC3 (INV-0):`, `AC3 (inv-2):`, `AC3 (INV-2`.
+    BadCitation {
+        id: u64,
+        citation: &'a str,
     },
     /// Meant as an id, and not one: `AC01`, `ac1`, `AC1` without `:`.
     Malformed {
@@ -109,14 +120,54 @@ fn parse_id(text: &str) -> Id<'_> {
     let Ok(number) = text[start..end].parse() else {
         return malformed;
     };
-    match text[end..].strip_prefix(':') {
-        Some("") => Id::Valid { number, rest: "" },
+    // `AC3 (INV-2, INV-4): …`: the invariants it covers, between the id and the colon.
+    let (invariants, after) = match text[end..].strip_prefix(" (") {
+        Some(inside) => {
+            let close = inside.find(')');
+            let cited = close.and_then(|close| citation(&inside[..close]));
+            match (close, cited) {
+                (Some(close), Some(cited)) => (cited, &inside[close + 1..]),
+                _ => {
+                    // From the `(` to the `)`, or to the colon when it is never closed.
+                    let length = close.map_or_else(
+                        || inside.find(':').unwrap_or(inside.len()),
+                        |close| close + 1,
+                    );
+                    return Id::BadCitation {
+                        id: number,
+                        citation: text[end + 1..end + 2 + length].trim_end(),
+                    };
+                }
+            }
+        }
+        None => (Vec::new(), &text[end..]),
+    };
+    match after.strip_prefix(':') {
+        Some("") => Id::Valid {
+            number,
+            invariants,
+            rest: "",
+        },
         Some(rest) if rest.starts_with(' ') => Id::Valid {
             number,
+            invariants,
             rest: rest.trim_start(),
         },
         _ => malformed,
     }
+}
+
+/// `INV-2` or `INV-1, INV-4`: invariant ids separated by `, `, each a positive
+/// integer with no leading zero (§6.4). `None` for anything else.
+fn citation(inside: &str) -> Option<Vec<u64>> {
+    let mut numbers: Vec<u64> = Vec::new();
+    for part in inside.split(", ") {
+        let number = crate::context::invariants::number_of(part)?;
+        if !numbers.contains(&number) {
+            numbers.push(number);
+        }
+    }
+    Some(numbers)
 }
 
 /// The criterion's own words: a line's text without its id, so that `AC1: TBD`
@@ -151,9 +202,14 @@ pub(super) fn parse_criteria(content: &str) -> Vec<Criterion> {
         let visible = without_comments(raw, &mut in_comment);
         let (is_item, text) = read_line(&visible);
         match parse_id(text) {
-            Id::Valid { number, rest } if is_item => criteria.push(Criterion {
+            Id::Valid {
+                number,
+                invariants,
+                rest,
+            } if is_item => criteria.push(Criterion {
                 id: format!("AC{number}"),
                 text: rest.to_owned(),
+                invariants,
             }),
             _ => {
                 let wrapped = visible.trim();
@@ -204,7 +260,7 @@ pub(super) fn check_ids(
         let belongs_to_item = seen_item && is_indented(&visible);
 
         match parse_id(text) {
-            Id::Valid { number, rest } if is_item => {
+            Id::Valid { number, rest, .. } if is_item => {
                 ids.push((number, line));
                 seen_item = true;
                 if !rest.chars().any(char::is_alphanumeric) || is_placeholder(rest) {
@@ -221,6 +277,20 @@ pub(super) fn check_ids(
             Id::Valid { .. } => {
                 without_valid_id += 1;
                 problems.at(line, not_a_list_item());
+            }
+            Id::BadCitation { id, citation } if is_item => {
+                // The id is sound: it counts, so no gap is reported on top of this.
+                ids.push((id, line));
+                seen_item = true;
+                problems.at(
+                    line,
+                    format!(
+                        "`AC{id} {citation}` does not cite invariants in the form \
+                         `AC{id} (INV-<n>): …` or `AC{id} (INV-<n>, INV-<m>): …`: ids \
+                         `INV-` and a positive integer, separated by `, ` \
+                         (plan-header.md §6.4)"
+                    ),
+                );
             }
             Id::Malformed { token } if is_item => {
                 without_valid_id += 1;
@@ -245,8 +315,9 @@ pub(super) fn check_ids(
                     ),
                 );
             }
-            Id::Malformed { .. } | Id::Emphasised { .. } | Id::None if belongs_to_item => {}
-            Id::Malformed { .. } | Id::Emphasised { .. } => {
+            Id::Malformed { .. } | Id::Emphasised { .. } | Id::BadCitation { .. } | Id::None
+                if belongs_to_item => {}
+            Id::Malformed { .. } | Id::Emphasised { .. } | Id::BadCitation { .. } => {
                 problems.at(line, not_a_list_item());
             }
             Id::None if is_item => {
@@ -339,6 +410,119 @@ fn check_sequence(ids: &[(u64, usize)], without_valid_id: u64, problems: &mut Di
             );
         }
         previous = number;
+    }
+}
+
+/// Where a Plan names and cites the invariants of `BUSINESS_CONTEXT.md`, each with
+/// its line in the file (§6.3, §6.4). What the gate and the review compare with the
+/// file's own ids.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InvariantRefs {
+    /// `- BUSINESS_CONTEXT INV-<n>: …` in `## Implementation context`: the number
+    /// and the line, in file order.
+    pub named: Vec<(u64, usize)>,
+    /// A criterion that cites invariants: its id, the numbers and the line.
+    pub cited: Vec<(String, Vec<u64>, usize)>,
+}
+
+impl InvariantRefs {
+    /// Whether the Plan names `number` in Implementation context.
+    pub fn names(&self, number: u64) -> bool {
+        self.named.iter().any(|(named, _)| *named == number)
+    }
+
+    /// The criteria that cite `number`, in order.
+    pub fn citing(&self, number: u64) -> Vec<&str> {
+        self.cited
+            .iter()
+            .filter(|(_, numbers, _)| numbers.contains(&number))
+            .map(|(id, _, _)| id.as_str())
+            .collect()
+    }
+}
+
+/// The criteria of `## Acceptance criteria` that cite invariants, with their lines;
+/// `content` starts at line `first_line`.
+pub(super) fn citations(content: &str, first_line: usize) -> Vec<(String, Vec<u64>, usize)> {
+    let mut cited = Vec::new();
+    let mut in_comment = false;
+    for (index, (raw, _)) in super::split_lines(content).into_iter().enumerate() {
+        let visible = without_comments(raw, &mut in_comment);
+        let (is_item, text) = read_line(&visible);
+        if let Id::Valid {
+            number, invariants, ..
+        } = parse_id(text)
+            && is_item
+            && !invariants.is_empty()
+        {
+            cited.push((format!("AC{number}"), invariants, first_line + index));
+        }
+    }
+    cited
+}
+
+/// The source an Implementation context item names an invariant by (§6.3).
+const SOURCE: &str = "BUSINESS_CONTEXT ";
+
+/// What an item of `## Implementation context` says of an invariant id.
+enum Named<'a> {
+    /// `- BUSINESS_CONTEXT INV-<n>: …`.
+    Id(u64),
+    /// `- BUSINESS_CONTEXT <token>` where the token is meant as an id and is not one.
+    Malformed(&'a str),
+    None,
+}
+
+fn named(visible: &str) -> Named<'_> {
+    let (is_item, text) = read_line(visible);
+    let Some(rest) = text.strip_prefix(SOURCE).filter(|_| is_item) else {
+        return Named::None;
+    };
+    let token = rest.split_whitespace().next().unwrap_or("");
+    if let Some(number) = token
+        .strip_suffix(':')
+        .and_then(crate::context::invariants::number_of)
+    {
+        return Named::Id(number);
+    }
+    if crate::context::invariants::looks_like_id(token) {
+        Named::Malformed(token)
+    } else {
+        Named::None
+    }
+}
+
+/// The invariants `## Implementation context` names by id; `content` starts at line
+/// `first_line`.
+pub(super) fn named_invariants(content: &str, first_line: usize) -> Vec<(u64, usize)> {
+    let mut found = Vec::new();
+    let mut in_comment = false;
+    for (index, (raw, _)) in super::split_lines(content).into_iter().enumerate() {
+        let visible = without_comments(raw, &mut in_comment);
+        if let Named::Id(number) = named(&visible) {
+            found.push((number, first_line + index));
+        }
+    }
+    found
+}
+
+/// Check the form of the ids `## Implementation context` names invariants by
+/// (§6.3). Whether the file defines them is `plan validate`'s question, which knows
+/// the file.
+pub(super) fn check_named_invariants(content: &str, first_line: usize, found: &mut Diagnostics) {
+    let mut in_comment = false;
+    for (index, (raw, _)) in super::split_lines(content).into_iter().enumerate() {
+        let visible = without_comments(raw, &mut in_comment);
+        if let Named::Malformed(token) = named(&visible) {
+            found.at(
+                first_line + index,
+                format!(
+                    "`{token}` is not an invariant id; name an invariant as \
+                     `- BUSINESS_CONTEXT INV-<n>: <guidance>`, with the id \
+                     `BUSINESS_CONTEXT.md` gives it (plan-header.md §6.3)"
+                ),
+            );
+        }
     }
 }
 

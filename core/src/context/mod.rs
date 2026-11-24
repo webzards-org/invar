@@ -78,6 +78,8 @@ use crate::format::decision::{Entry, normalize_body};
 use crate::format::values::without_comments;
 use crate::fs::ProjectRoot;
 
+pub mod invariants;
+
 #[cfg(test)]
 mod tests;
 

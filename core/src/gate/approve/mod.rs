@@ -247,6 +247,16 @@ pub fn prepare(
                     problems,
                 }));
             }
+            // A new approval holds the Plan to BUSINESS_CONTEXT.md as it is now, as
+            // `plan validate` holds a draft (#158).
+            let problems = validate::invariant_problems(root, &plan.invariant_refs());
+            if !problems.is_empty() {
+                return Err(ApproveError::Invalid(Report {
+                    spec: spec.to_owned(),
+                    status: Some(Status::Approved),
+                    problems,
+                }));
+            }
             Some(prior)
         }
     };
@@ -316,6 +326,11 @@ impl Pending {
     /// The value on record in the approval being replaced.
     pub fn recorded_acceptance(&self) -> Acceptance {
         self.plan.header().recorded_acceptance()
+    }
+
+    /// Where the Plan names and cites invariants, for the list the gate shows (#158).
+    pub fn invariant_refs(&self) -> crate::format::plan::InvariantRefs {
+        self.plan.invariant_refs()
     }
 
     /// `## Acceptance criteria` without the blank lines around it — what the

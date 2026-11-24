@@ -46,7 +46,7 @@ use std::fs::{self, File};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
-pub use criteria::{Criterion, TestAction, TestToChange};
+pub use criteria::{Criterion, InvariantRefs, TestAction, TestToChange};
 pub use header::{APPROVAL_KEYS, Acceptance, Header, Status};
 pub use sections::{ACCEPTANCE_TESTS_TO_CHANGE, Section};
 
@@ -240,6 +240,25 @@ impl Plan {
             .map_or_else(Vec::new, criteria::parse_criteria)
     }
 
+    /// Where the Plan names and cites invariants by id (§6.3, §6.4), with the line
+    /// of each in the file.
+    pub fn invariant_refs(&self) -> InvariantRefs {
+        let mut refs = InvariantRefs::default();
+        for section in &self.sections {
+            let content = &self.rest[section.content.clone()];
+            match section.heading.as_str() {
+                sections::ACCEPTANCE_CRITERIA => {
+                    refs.cited = criteria::citations(content, section.line + 1);
+                }
+                sections::IMPLEMENTATION_CONTEXT => refs
+                    .named
+                    .extend(criteria::named_invariants(content, section.line + 1)),
+                _ => {}
+            }
+        }
+        refs
+    }
+
     /// `## Acceptance tests to change`, when this Plan declares any (§6.5):
     /// `None` when the section is absent or says `_none_`, and with
     /// `scenarios: true`, where it is an ordinary additional section (D-17).
@@ -347,6 +366,9 @@ pub struct Checked {
     /// The keys only `plan approve` fills that have a value, with it — even
     /// if that value, or another field, is wrong.
     pub approval_values: Vec<(&'static str, String)>,
+    /// Where the Plan names and cites invariants, when its header could be read:
+    /// for `plan validate`, which holds them to `BUSINESS_CONTEXT.md`.
+    pub invariant_refs: Option<InvariantRefs>,
 }
 
 struct Analysis {
@@ -367,6 +389,7 @@ fn analyze(text: &str, mode: Mode, unnumbered: Unnumbered) -> Analysis {
             status: None,
             module: None,
             approval_values: Vec::new(),
+            invariant_refs: None,
         },
     };
 
@@ -472,9 +495,11 @@ fn analyze(text: &str, mode: Mode, unnumbered: Unnumbered) -> Analysis {
         sections,
         mode,
     });
+    let invariant_refs = plan.as_ref().map(Plan::invariant_refs);
     Analysis {
         plan,
         checked: Checked {
+            invariant_refs,
             problems: found,
             ticket: parsed.ticket,
             status: parsed.status,

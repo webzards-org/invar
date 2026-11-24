@@ -198,11 +198,14 @@ fn the_context_files_hold_the_marker_and_headings_and_never_any_content() {
     ] {
         let text = read(&dir, name);
         assert_eq!(text.lines().next(), Some(MARKER), "{name}");
-        // Every line is the marker, blank, or a heading: nothing a team did
-        // not write itself.
+        // Every line is the marker, blank, a heading, or the comment that shows
+        // the form of an invariant id: nothing a team did not write itself.
         for line in text.lines() {
             assert!(
-                line.is_empty() || line == MARKER || line.starts_with('#'),
+                line.is_empty()
+                    || line == MARKER
+                    || line.starts_with('#')
+                    || line == super::INVARIANT_FORM,
                 "{name} holds content: {line:?}"
             );
         }

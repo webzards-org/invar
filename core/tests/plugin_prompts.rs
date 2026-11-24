@@ -235,6 +235,19 @@ fn the_planners_prompt_has_each_part_the_pilot_depends_on() {
 }
 
 /// The first complete Plan in the planner's prompt.
+/// The `BUSINESS_CONTEXT.md` the example Plan is written against: the ids it names
+/// and cites must be the file's, as `plan validate` requires (plan-header.md §6.6).
+/// `INV-3` is the account scope.
+fn example_business_context(dir: &std::path::Path) {
+    fs::write(
+        dir.join("BUSINESS_CONTEXT.md"),
+        "<!-- invar-context: v1 -->\n## Invariants (always true, no exceptions)\n\n\
+         - INV-1: an issued invoice is never edited; it is corrected by a credit note.\n\
+         - INV-3: every query on account data is filtered by `account_id`.\n",
+    )
+    .unwrap();
+}
+
 fn example_plan() -> String {
     let (_, body) = frontmatter("agents/planner.md");
     let after = body
@@ -360,6 +373,7 @@ fn the_example_plan_in_the_prompt_passes_plan_validate() {
     // where it is noticed — not in a planner that learned the old shape.
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("invar.yaml"), "").unwrap();
+    example_business_context(dir.path());
     let plan_dir = dir.path().join(".invar/plans/ACME-87-export-invoices-csv");
     fs::create_dir_all(&plan_dir).unwrap();
     fs::write(plan_dir.join("spec.md"), example_plan()).unwrap();
@@ -389,19 +403,48 @@ fn the_example_plan_shows_what_it_asks_of_the_planner() {
             "the example lacks `{line}`"
         );
     }
-    // A business invariant in Implementation context, and a criterion for the
-    // negative case: another account's customer is a 404.
-    assert!(plan.contains("BUSINESS_CONTEXT invariant:"));
-    assert!(plan.contains("belongs to another account"));
+    // A business invariant in Implementation context by its id, and a criterion for
+    // the negative case that cites it: another account's customer is a 404 (#158).
+    assert!(plan.contains("- BUSINESS_CONTEXT INV-3:"));
+    assert!(plan.contains("- AC4 (INV-3): Given a customer who belongs to another account"));
     assert!(plan.contains("the response is 404"));
     // Only the two sources the contract allows.
     let context = plan.split_once("## Implementation context\n").unwrap().1;
     for line in context.lines().filter(|l| l.starts_with("- ")) {
         assert!(
-            line.starts_with("- AI_CONTEXT:") || line.starts_with("- BUSINESS_CONTEXT invariant:"),
+            line.starts_with("- AI_CONTEXT:") || line.starts_with("- BUSINESS_CONTEXT INV-"),
             "{line}"
         );
     }
+}
+
+#[test]
+fn the_planner_names_invariants_by_id_and_knows_the_coder_never_reads_the_file() {
+    let (_, body) = frontmatter("agents/planner.md");
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    // #158: the stale sentence said the coder had the binding context anyway.
+    assert!(!flat.contains("it receives the binding context in its session anyway"));
+    assert!(flat.contains("It does **not** receive the binding context"));
+    assert!(flat.contains("`invar context show --conventions`"));
+    assert!(flat.contains("It never reads `BUSINESS_CONTEXT.md`."));
+    // Ids are asked for, in both places, with the old form for a file without them.
+    assert!(flat.contains("`- BUSINESS_CONTEXT INV-<n>: <guidance>`"));
+    assert!(flat.contains("`- BUSINESS_CONTEXT invariant: <guidance>`"));
+    assert!(flat.contains("`- AC3 (INV-2): Given …`"));
+    assert!(flat.contains(
+        "**A ticket that touches an invariant names it, and gets at least one criterion \
+         citing it.**"
+    ));
+    assert!(flat.contains("Never invent an id, and never add one to the file."));
+}
+
+#[test]
+fn the_reviewer_takes_named_or_not_from_the_marks_review_input_gives() {
+    let (_, body) = frontmatter("agents/reviewer.md");
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("`=== invariants of BUSINESS_CONTEXT.md, by id` block"));
+    assert!(flat.contains("use that mark, and do not judge it yourself"));
 }
 
 // --- the skill ---------------------------------------------------------------------------
@@ -643,6 +686,7 @@ fn the_acceptance_line_the_dispatch_reads_is_the_one_plan_check_prints() {
     fs::write(dir.path().join(".gitconfig"), "[user]\n\tname = rade\n").unwrap();
     let plan_dir = dir.path().join(".invar/plans/ACME-87-export-invoices-csv");
     fs::create_dir_all(&plan_dir).unwrap();
+    example_business_context(dir.path());
     fs::write(plan_dir.join("spec.md"), example_plan()).unwrap();
     let invar = |args: &[&str]| {
         Command::cargo_bin("invar")
@@ -1982,6 +2026,7 @@ fn the_line_approve_keys_on_is_the_line_the_cli_prints() {
     fs::write(dir.path().join(".gitconfig"), "[user]\n\tname = rade\n").unwrap();
     let plan_dir = dir.path().join(".invar/plans/ACME-87-export-invoices-csv");
     fs::create_dir_all(&plan_dir).unwrap();
+    example_business_context(dir.path());
     fs::write(plan_dir.join("spec.md"), example_plan()).unwrap();
 
     let assert = Command::cargo_bin("invar")

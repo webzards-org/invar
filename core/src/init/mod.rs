@@ -118,14 +118,20 @@ pub fn ai_context() -> String {
 
 /// `BUSINESS_CONTEXT.md`: business rules the application must obey (§5). The
 /// marker and its headings, nothing under them: `Terms`, the business's own
-/// words that the invariants use (#142), then the two headings of §5.
+/// words that the invariants use (#142), then the two headings of §5. Under
+/// `Invariants`, one comment showing the form of an id (`business-context.md` §4):
+/// a comment is not content, so the file stays empty until the team writes one.
 pub fn business_context() -> String {
     format!(
         "{MARKER}\n# BUSINESS_CONTEXT.md\n\n## Terms\n\n\
          ## Invariants (always true, no exceptions)\n\n\
+         {INVARIANT_FORM}\n\n\
          ## Regional / parameterized facts\n"
     )
 }
+
+/// The comment under `## Invariants`: the form, and no rule.
+pub const INVARIANT_FORM: &str = "<!-- - INV-1: ... -->";
 
 // --- the report -------------------------------------------------------------------
 

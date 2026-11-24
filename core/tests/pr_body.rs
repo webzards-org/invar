@@ -558,3 +558,71 @@ fn the_same_files_render_the_same_bytes() {
     let b = stdout_of(&project.pr_body(&["SHOP-214"]).success());
     assert_eq!(a, b);
 }
+
+// --- invariant ids (#158) ---------------------------------------------------------
+
+fn business_example(number: &str) -> String {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/business-context.md");
+    let text = fs::read_to_string(path).unwrap();
+    let after = text.split_once(&format!("### {number} ")).unwrap().1;
+    let body = after.split_once("```markdown\n").unwrap().1;
+    body.split_once("\n```\n").unwrap().0.to_owned() + "\n"
+}
+
+/// Example 9.13 under example 9.12's header with the checksum of its body.
+fn approved_with_invariant_ids() -> String {
+    let body = contract_example("9.13")
+        .split_once("\n---\n")
+        .unwrap()
+        .1
+        .to_owned();
+    let scratch = tempfile::tempdir().unwrap();
+    let file = scratch.path().join("body.md");
+    fs::write(&file, body.trim_start_matches('\n')).unwrap();
+    let output = Command::cargo_bin("invar")
+        .unwrap()
+        .arg("hash")
+        .arg(&file)
+        .output()
+        .unwrap();
+    let checksum = String::from_utf8(output.stdout).unwrap();
+    let header = contract_example("9.12")
+        .lines()
+        .map(|line| match line.strip_prefix("Approved-checksum:") {
+            Some(_) => format!("Approved-checksum: {}\n", checksum.trim()),
+            None => format!("{line}\n"),
+        })
+        .collect::<String>();
+    header + &body
+}
+
+#[test]
+fn the_ids_the_plan_names_and_the_count_it_does_not_are_one_line() {
+    let project = Project::new(&approved_with_invariant_ids());
+    fs::write(
+        project.root().join("BUSINESS_CONTEXT.md"),
+        business_example("7.1"),
+    )
+    .unwrap();
+    let stdout = stdout_of(&project.pr_body(&["SHOP-214"]).success());
+    assert!(
+        stdout.contains(
+            "\n**Invariants named in the Plan:** INV-3 (2 of 3 in BUSINESS_CONTEXT.md not named)\n"
+        ),
+        "{stdout}"
+    );
+    assert_snapshot("pr-body-shop-214-invariants.md", &stdout);
+}
+
+#[test]
+fn without_ids_the_description_is_as_before() {
+    let project = Project::new(&approved_plan());
+    let before = stdout_of(&project.pr_body(&["SHOP-214"]).success());
+    fs::write(
+        project.root().join("BUSINESS_CONTEXT.md"),
+        business_example("7.2"),
+    )
+    .unwrap();
+    assert_eq!(stdout_of(&project.pr_body(&["SHOP-214"]).success()), before);
+}

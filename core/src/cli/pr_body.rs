@@ -54,7 +54,8 @@ pub fn run(args: Args) -> Result<()> {
         eprintln!("warning: {warning}");
     }
 
-    let rendered = pr_body::render(&plan, &ticket, args.with_ticket, &tests);
+    let invariants = crate::context::invariants::load(&root)?;
+    let rendered = pr_body::render(&plan, &ticket, args.with_ticket, &tests, &invariants);
     match args.out {
         Some(path) => {
             // `.invar/out/` is the usual place, and `init` does not create

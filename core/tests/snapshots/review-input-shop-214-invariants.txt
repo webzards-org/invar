@@ -1,0 +1,71 @@
+=== invar review input: SHOP-214 ===
+The Plan below was approved by rade on 2026-10-05 and has not changed since. Judge the branch against it and the binding context, and nothing else: each acceptance criterion `met`, `not met` or `unclear`, with file:line evidence; every invariant of BUSINESS_CONTEXT.md the change appears to break, whether the Plan names it or not; changes outside Scope.
+
+=== Plan: Intent ===
+
+Let customers cancel their own unpaid orders from the order page.
+
+=== Plan: Scope ===
+
+`App\Actions\Orders\CancelOrder`, `OrderPolicy::cancel` and the route
+`POST /orders/{order}/cancel`.
+
+=== Plan: Acceptance criteria ===
+
+- AC1: Given a pending, unpaid order of mine, when I cancel it, then its status
+  is `cancelled`.
+- AC2: Given a paid order of mine, when I try to cancel it, then the request is
+  refused with 403 and the order is unchanged.
+- AC3 (INV-3): Given an order that belongs to another team, when I send a cancel
+  request with its id, then the response is 404 and the order is unchanged.
+
+=== Acceptance tests ===
+
+Acceptance: skipped
+
+The ticket was approved without acceptance tests, so no test is locked for it. Judge the coder's own tests, if any, as before, and list the criteria no test covers, as information, not as a defect.
+
+=== Plan: Implementation context ===
+
+- AI_CONTEXT: controllers stay thin — the change lives in
+  `App\Actions\Orders\CancelOrder`
+- BUSINESS_CONTEXT INV-3: the cancel route loads the order through the
+  `BelongsToTeam` scope and never calls `withoutGlobalScopes()`
+
+=== invar: binding context ===
+The team's own decisions for this project, delivered at the start of every session. Follow them: a Plan or a change that contradicts them is wrong.
+
+=== BUSINESS_CONTEXT.md — business rules the application must obey; binding ===
+
+# BUSINESS_CONTEXT.md
+
+## Terms
+
+- Available balance: the balance minus every pending reservation.
+
+## Invariants (always true, no exceptions)
+
+- INV-3: every query on team data is scoped to the current team by the
+  `BelongsToTeam` global scope.
+- INV-1: a paid order is never deleted; it is cancelled through the refund flow.
+- INV-4: an operator action on an order notifies its customer.
+
+## Regional / parameterized facts
+
+- VAT: 19% in DE, 20% in AT.
+
+=== end of BUSINESS_CONTEXT.md ===
+
+=== invariants of BUSINESS_CONTEXT.md, by id — whether the Plan's Implementation context names each ===
+
+- INV-3 (named in the Plan): every query on team data is scoped to the current team by the
+- INV-1 (not named in the Plan): a paid order is never deleted; it is cancelled through the refund flow.
+- INV-4 (not named in the Plan): an operator action on an order notifies its customer.
+
+=== end of invariants ===
+
+=== diff against main ===
+
+Nothing is committed on this branch since it left `main` (`.invar/` left out). There is nothing to review yet: commit the change first.
+
+=== end of diff ===

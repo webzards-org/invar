@@ -23,6 +23,7 @@ use anyhow::{Context as _, Result, bail};
 
 use crate::format::config::Config;
 use crate::format::plan::{Acceptance, Mode};
+use crate::gate;
 use crate::gate::approval::Prior;
 use crate::gate::approve::{self, ApproveError, Decision};
 use crate::git;
@@ -231,6 +232,14 @@ fn approve(args: Args) -> Result<()> {
         }
     }
     println!();
+    // Every invariant, named or not (#158): an absence is the hardest thing to see
+    // in a document, so the list shows it. It refuses nothing; validation did.
+    let invariants =
+        gate::invariants::gate_text(&gate::invariants::load(&root)?, &pending.invariant_refs());
+    if !invariants.is_empty() {
+        print!("{invariants}");
+        println!();
+    }
     println!("Acceptance: {}", pending.acceptance());
     if pending.required_without_section() {
         eprintln!(

@@ -523,3 +523,95 @@ fn with_locked_tests_the_decision_log_still_never_reaches_the_reviewer() {
     assert!(!out.contains("LOG-ENTRY-TEXT"), "{out}");
     assert!(out.contains("- AC4: named by no locked file"), "{out}");
 }
+
+// --- invariant ids (#158) ---------------------------------------------------------
+
+/// The first ```markdown block under `### <number> ` of `business-context.md`.
+fn business_example(number: &str) -> String {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/business-context.md");
+    let text = fs::read_to_string(path).unwrap();
+    let after = text.split_once(&format!("### {number} ")).unwrap().1;
+    let body = after.split_once("```markdown\n").unwrap().1;
+    body.split_once("\n```\n").unwrap().0.to_owned() + "\n"
+}
+
+/// Example 9.13, which names and cites `INV-3`, under example 9.12's header with the
+/// checksum of its body: approved, and current.
+fn approved_with_invariant_ids() -> String {
+    let body = contract_example("9.13")
+        .split_once("\n---\n")
+        .unwrap()
+        .1
+        .to_owned();
+    let scratch = tempfile::tempdir().unwrap();
+    let file = scratch.path().join("body.md");
+    fs::write(&file, body.trim_start_matches('\n')).unwrap();
+    let output = Command::cargo_bin("invar")
+        .unwrap()
+        .arg("hash")
+        .arg(&file)
+        .output()
+        .unwrap();
+    let checksum = String::from_utf8(output.stdout).unwrap();
+    let header = contract_example("9.12")
+        .lines()
+        .map(|line| match line.strip_prefix("Approved-checksum:") {
+            Some(_) => format!("Approved-checksum: {}\n", checksum.trim()),
+            None => format!("{line}\n"),
+        })
+        .collect::<String>();
+    header + &body
+}
+
+#[test]
+fn each_invariant_is_marked_named_or_not_named_from_its_id() {
+    let repo = Repo::new(&approved_with_invariant_ids());
+    // Not committed, so the snapshot holds no hash this machine's git could change;
+    // the file is read from the working tree all the same.
+    repo.write("BUSINESS_CONTEXT.md", &business_example("7.1"));
+    let out = stdout_of(&repo.review_input().success());
+
+    let binding = out.find("=== end of BUSINESS_CONTEXT.md ===").unwrap();
+    let marks = out
+        .find("=== invariants of BUSINESS_CONTEXT.md, by id")
+        .unwrap();
+    assert!(
+        binding < marks && marks < out.find("=== diff against").unwrap(),
+        "{out}"
+    );
+    assert!(
+        out.contains("- INV-3 (named in the Plan): every query on team data"),
+        "{out}"
+    );
+    assert!(
+        out.contains("- INV-1 (not named in the Plan): a paid order is never deleted"),
+        "{out}"
+    );
+    assert!(
+        out.contains("- INV-4 (not named in the Plan): an operator action"),
+        "{out}"
+    );
+    assert_snapshot("review-input-shop-214-invariants.txt", &out);
+}
+
+#[test]
+fn without_ids_nothing_is_marked() {
+    let repo = Repo::new(&approved_plan());
+    repo.write("BUSINESS_CONTEXT.md", &business_example("7.2"));
+    repo.commit("context");
+    let out = stdout_of(&repo.review_input().success().stderr(""));
+    assert!(out.contains("Every query on team data is scoped"), "{out}");
+    assert!(!out.contains("=== invariants of"), "{out}");
+}
+
+#[test]
+fn ids_with_problems_are_not_marked_and_stderr_says_why() {
+    let repo = Repo::new(&approved_with_invariant_ids());
+    repo.write("BUSINESS_CONTEXT.md", &business_example("7.3"));
+    repo.commit("context");
+    let assert = repo.review_input().success();
+    assert!(!stdout_of(&assert).contains("=== invariants of"));
+    let err = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(err.contains("`invar plan validate` lists them"), "{err}");
+}

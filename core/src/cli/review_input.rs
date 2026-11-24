@@ -55,6 +55,16 @@ pub fn run(args: Args) -> Result<()> {
         );
     }
 
+    let invariants = context::invariants::load(&root)?;
+    if let context::invariants::Invariants::Invalid(problems) = &invariants {
+        eprintln!(
+            "warning: the invariant ids of BUSINESS_CONTEXT.md have {} problem(s), so the \
+             review input does not mark which ones the Plan names; `invar plan validate` \
+             lists them",
+            problems.len()
+        );
+    }
+
     let base = git::base_branch(root.path(), config.git.base_branch.as_deref())?;
     let pending = git::uncommitted(root.path())?
         .into_iter()
@@ -76,7 +86,7 @@ pub fn run(args: Args) -> Result<()> {
     let diff = review_input::collect(&root, &base, review_input::DIFF_BUDGET)?;
     print!(
         "{}",
-        review_input::render(&plan, &binding, &base, &diff, &tests)
+        review_input::render(&plan, &binding, &invariants, &base, &diff, &tests)
     );
     Ok(())
 }

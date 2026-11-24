@@ -19,6 +19,7 @@
 use std::fmt::Write as _;
 
 use crate::acceptance::verify::no_section_warning;
+use crate::context::invariants::Invariants;
 use crate::digest;
 use crate::format::plan::{ACCEPTANCE_TESTS_TO_CHANGE, Plan};
 
@@ -46,14 +47,20 @@ const SECTIONS: [&str; 6] = [
 ];
 
 /// Render `plan` as a PR description for `ticket`, with what `tests` found of
-/// its acceptance tests.
+/// its acceptance tests, and which of `invariants` it names.
 ///
 /// Does not look at the approval: a caller decides whether a Plan may be
 /// rendered. Both callers — `invar done` and the standalone `pr-body` command
 /// — run `plan check` (M1-10) first, so only a Plan that is approved and
 /// unchanged since reaches this function, and the "Approved by …" line is
 /// true of the text rendered under it.
-pub fn render(plan: &Plan, ticket: &str, with_ticket: bool, tests: &Tests) -> String {
+pub fn render(
+    plan: &Plan,
+    ticket: &str,
+    with_ticket: bool,
+    tests: &Tests,
+    invariants: &Invariants,
+) -> String {
     let header = plan.header();
     let mut out = String::new();
     let _ = writeln!(out, "# {ticket}");
@@ -65,6 +72,7 @@ pub fn render(plan: &Plan, ticket: &str, with_ticket: bool, tests: &Tests) -> St
         header.approved_at.as_deref().unwrap_or("(not approved)"),
     );
     write_acceptance(&mut out, plan, ticket, tests);
+    write_invariants(&mut out, plan, invariants);
 
     if with_ticket {
         write_section(&mut out, "Ticket", plan.section("Ticket"));
@@ -169,6 +177,32 @@ fn write_acceptance(out: &mut String, plan: &Plan, ticket: &str, tests: &Tests) 
             let _ = writeln!(out, "- {line}");
         }
     }
+}
+
+/// One line: the invariant ids the Plan names, and how many of `BUSINESS_CONTEXT.md`'s
+/// it does not (#158). Nothing when the invariants have no ids.
+fn write_invariants(out: &mut String, plan: &Plan, invariants: &Invariants) {
+    let Some(list) = invariants.ids() else {
+        return;
+    };
+    let refs = plan.invariant_refs();
+    let named: Vec<String> = list
+        .iter()
+        .filter(|invariant| refs.names(invariant.number))
+        .map(|invariant| invariant.id())
+        .collect();
+    let unnamed = list.len() - named.len();
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "**Invariants named in the Plan:** {} ({unnamed} of {} in BUSINESS_CONTEXT.md not named)",
+        if named.is_empty() {
+            "none".to_owned()
+        } else {
+            named.join(", ")
+        },
+        list.len()
+    );
 }
 
 /// `## <heading>`, then its content — or `none` when the Plan has no such

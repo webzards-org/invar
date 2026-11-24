@@ -15,7 +15,7 @@ pub(super) const ACCEPTANCE_CRITERIA: &str = "Acceptance criteria";
 
 /// Optional, in light mode only (§6.5, D-17).
 pub const ACCEPTANCE_TESTS_TO_CHANGE: &str = "Acceptance tests to change";
-const IMPLEMENTATION_CONTEXT: &str = "Implementation context";
+pub(super) const IMPLEMENTATION_CONTEXT: &str = "Implementation context";
 
 /// Light mode, `scenarios: false` (§6).
 const LIGHT: [&str; 7] = [
@@ -193,6 +193,8 @@ fn check_required(
             found.at(first.line, empty_message(name, mode));
         } else if *name == ACCEPTANCE_CRITERIA {
             criteria::check_ids(content, first.line + 1, unnumbered_allowed, found);
+        } else if *name == IMPLEMENTATION_CONTEXT {
+            criteria::check_named_invariants(content, first.line + 1, found);
         }
     }
 

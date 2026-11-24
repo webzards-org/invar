@@ -29,14 +29,21 @@ pub enum Command {
     /// valid. Every problem is reported in one run, each as
     /// `path:line: what to change`. Exits non-zero when any Plan is invalid.
     ///
+    /// A Plan that is not approved is also held to the invariant ids of
+    /// `BUSINESS_CONTEXT.md`: an `INV-<n>` the file does not define, an invariant
+    /// named in Implementation context that no criterion cites, a criterion citing
+    /// one it does not name, and the file's own duplicate, malformed or partial ids.
+    /// A file without ids is not checked.
+    ///
     /// With `--all-drafts --hook` it answers a `SubagentStop` hook instead:
     /// see the flag.
     Validate(validate::Args),
 
     /// Approve a Plan: the human gate.
     ///
-    /// Validates the Plan, prints its acceptance criteria and whether the
-    /// ticket needs acceptance tests, then sets `Status: approved` and records
+    /// Validates the Plan, prints its acceptance criteria, every invariant of
+    /// `BUSINESS_CONTEXT.md` marked named or NOT NAMED when they have ids, and
+    /// whether the ticket needs acceptance tests, then sets `Status: approved` and records
     /// `Approved-by` (`git config user.name`), `Approved-at` (today),
     /// `Approved-checksum` (the digest of the body and that decision) and
     /// `Acceptance`. Only those five values change; the body stays
