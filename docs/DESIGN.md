@@ -486,7 +486,7 @@ overestimate is worse than one you know the limits of.
 | `plan guard` hook | Convenience | Saves the agent a wasted edit. It reads command lines, not a shell, so a script can get past it; the checksum still catches the result |
 | Separate agent contexts | Focus | Keeps each agent's view narrow. A determined agent could still read a file; nothing that reads it can change a verdict |
 | Deny rule on the decision log | Focus | Stops accidental reads. The log is advisory, so a leak costs focus, never correctness |
-| Required paths through a cycle (`cycle check` in CI) | **Boundary**, for the paths the team lists | A branch changing one passes with a closed cycle in its history, or with an `Invar-Skip:` trailer. The list is read from the base branch. Who wrote the trailer is not proven: the guard is a scan, and a signed skip comes with #154 |
+| Required paths through a cycle (`cycle check` in CI) | **Boundary**, for the paths the team lists | A branch changing one passes when every commit that touched it was made while a closed cycle's Plan was approved, or with an `Invar-Skip:` trailer. The list is read from the base branch. Who wrote the trailer is not proven: the guard is a scan, and a signed skip comes with #154 |
 | Review | Advisory | An LLM judgement with false positives and misses. Information for the developer, never a gate |
 
 Nothing enforced inside a repository can make forgery impossible: an agent

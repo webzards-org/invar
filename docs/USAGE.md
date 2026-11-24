@@ -55,8 +55,10 @@ disagree, say so.
 
 **When your project requires a cycle for some paths.** If `invar.yaml` lists
 `cycle.required_paths`, CI runs `invar cycle check`, and a pull request that
-changes one of those paths passes only with a cycle closed on it, by
-`/invar:done`, or with a skip you wrote. After a skipped change, the main
+changes one of those paths passes only when the change was made while a
+Plan was approved, and that cycle was closed with `/invar:done`, or with a
+skip you wrote. A change made after `done`, or before the approval, is not
+covered by the cycle. After a skipped change, the main
 session runs `invar cycle required` on the files it changed and tells you when
 one of them is required. If the change really needs no Plan, say why in a
 trailer on any commit of the branch:

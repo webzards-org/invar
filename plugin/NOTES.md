@@ -2287,6 +2287,18 @@ it runs `invar cycle required` on the files it changed, and on `cycle: required`
 developer the pull request needs a cycle or their trailer. The decision comes from the
 command's last line, not from the prompt reading globs (§13b).
 
+**What one closed cycle covers (found in review).** The first version passed a branch when
+any cycle had closed on it. A Plan whose Scope was documentation, approved, closed with
+`done`, and then a change to `app/Models/Order.php` with no Plan at all passed with `closed
+cycle(s): SHOP-214`. Now a required change is covered only when every commit of the branch
+that touched it was made while a closed cycle's Plan was approved at that commit's parent
+(`invar-yaml.md` D-17). The parent is the test because that is when the work of a cycle is
+made: the coder's commits and the deletion by `done` have the approved Plan at their parent,
+and a commit before the approval or after the deletion does not. It reads nothing but what
+`plan approve` and `done` write; matching paths against `## Scope` would mean reading prose.
+What it does not see: a change made while some Plan was approved that the Plan is not about.
+That is the review's to catch, as Scope is today.
+
 **Why a trailer, and not a signed commit.** §19 measured that `git rebase --signoff`, which
 this repository's own merge process runs, drops every commit signature, and that re-signing
 during the rebase launders a forgery. A trailer is part of the message, which a rebase keeps:

@@ -51,9 +51,11 @@
 - **A CI check that changes to declared paths went through a cycle, opt-in.**
   List them in `invar.yaml` as `cycle.required_paths` (globs: `*`, `**`, a
   trailing `/`). `invar cycle check --base <ref>` passes a branch that changes
-  one only with a cycle closed on it (a Plan approved, then deleted by
-  `/invar:done`, read from the history) or with an `Invar-Skip: <reason>`
-  commit trailer the developer writes, and fails naming each path and pattern.
+  one only when every commit that touched it was made while the Plan of a
+  cycle closed on the branch was approved (read from the history: approved
+  before, deleted by `/invar:done` after), or with an `Invar-Skip: <reason>`
+  commit trailer the developer writes. It fails naming each uncovered path, its
+  pattern and the commits that touched it.
   The list is read from the base branch, so a branch cannot switch off its own
   check. It needs the history from the merge base: `fetch-depth: 0` in CI. With
   no list on the base, it is off and exits 0 (#155). Contract `invar-yaml.md`

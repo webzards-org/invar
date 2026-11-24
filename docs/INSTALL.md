@@ -337,9 +337,12 @@ exits 0.
 
 A pull request that changes a required path passes when:
 
-- a cycle was closed on it: a Plan approved in one of its commits and deleted by
-  `/invar:done` in a later one. One pull request may close several tickets. A Plan still
-  there is an open cycle, named in the output, and does not count;
+- every commit of it that touched the path was made while the Plan of a cycle closed on the
+  branch was approved: approved in an earlier commit, and deleted by `/invar:done` in a later
+  one. A change made before the approval, or after `done`, is not covered, whatever other
+  cycle the branch closed. One pull request may close several tickets, and each covers the
+  commits made while its Plan was approved. A Plan still there is an open cycle, named in the
+  output, and covers nothing;
 - or a commit of the branch has an `Invar-Skip:` trailer with a reason, which the developer
   writes:
 
@@ -351,7 +354,8 @@ A pull request that changes a required path passes when:
   anywhere on the branch covers it, since the pull request is what is reviewed, and the
   reason is printed in the job's output.
 
-Otherwise it fails, listing each required path changed with the pattern it matched.
+Otherwise it fails, listing each required path that is not covered, the pattern it matched,
+and the commits that touched it outside a cycle.
 Changes under `.invar/` never count. The plugin's guard denies an agent's `git commit` that
 writes the trailer, but that is a scan of the command line: it is not yet proof that a
 person wrote it. A signed skip comes with signed approvals (#154).
