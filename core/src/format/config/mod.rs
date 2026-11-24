@@ -1,12 +1,11 @@
 //! `invar.yaml` — the project config (§6).
 //!
-//! Implements `contracts/formats/invar-yaml.md` v2.3.0. The contract is the
+//! Implements `contracts/formats/invar-yaml.md` v2.4.0. The contract is the
 //! authority; section numbers below (`§3.4`, `D-2`) point into it.
 //!
 //! Light mode reads `scenarios`, `review.offer`, `git.base_branch`,
 //! `context.binding_limit`, `done.commit`, `done.commit_message`, the `approval`
-//! section and the
-//! `acceptance` section. Everything else in a config
+//! section, the `acceptance` section and `cycle.required_paths`. Everything else in a config
 //! is either a key of a later milestone, ignored silently (contract §5), or an
 //! unknown key, which produces a [`Warning`] and never a failure (§6) — a
 //! config written by a newer `invar` must not break an older one.
@@ -27,6 +26,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde::de::{self, IgnoredAny};
 
+use crate::format::glob;
 use crate::fs::ProjectRoot;
 
 #[cfg(test)]
@@ -93,6 +93,15 @@ pub struct Config {
     /// The `acceptance` section (§3.6). `None`: absent, so no acceptance tests.
     pub acceptance: Option<AcceptanceConfig>,
     pub approval: Approval,
+    pub cycle: Cycle,
+}
+
+/// The `cycle` section (§3.8): which changes must go through a cycle, for `invar cycle
+/// check`. Absent, or an empty list, and nothing is required (D-14).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Cycle {
+    /// `cycle.required_paths`, as written, each a valid glob (`format::glob`).
+    pub required_paths: Vec<String>,
 }
 
 /// The `review` section (§3.2).
@@ -234,6 +243,7 @@ impl Default for Config {
             done: Done::default(),
             acceptance: None,
             approval: Approval::default(),
+            cycle: Cycle::default(),
         }
     }
 }
@@ -466,6 +476,28 @@ pub fn parse(text: &str, path: &Path) -> Result<Loaded, ConfigError> {
             acceptance_section(section, &mut problems)
         });
 
+    let cycle = raw.cycle.unwrap_or_default();
+    unknown_keys(&cycle.other, "cycle.", &[], &mut warnings);
+    let required_paths = match cycle.required_paths {
+        None => Vec::new(),
+        Some(RawPaths::Text) => {
+            problems.push(
+                "`cycle.required_paths` must be a list of patterns, such as \
+                 `[\"app/Models/**\", \"database/migrations/**\"]`; a single string is not one"
+                    .to_owned(),
+            );
+            Vec::new()
+        }
+        Some(RawPaths::List(paths)) => {
+            for pattern in &paths {
+                if let Some(problem) = glob::problem(pattern) {
+                    problems.push(format!("`cycle.required_paths`: {problem}"));
+                }
+            }
+            paths
+        }
+    };
+
     // Every value problem in one message, so one edit fixes the file (§7).
     if !problems.is_empty() {
         return Err(invalid(problems.join("; ")));
@@ -488,6 +520,7 @@ pub fn parse(text: &str, path: &Path) -> Result<Loaded, ConfigError> {
             },
             acceptance,
             approval,
+            cycle: Cycle { required_paths },
         },
         warnings,
     })
@@ -718,8 +751,33 @@ struct RawConfig {
     done: Option<RawDone>,
     acceptance: Option<RawAcceptance>,
     approval: Option<RawApproval>,
+    cycle: Option<RawCycle>,
     #[serde(flatten)]
     other: BTreeMap<String, IgnoredAny>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawCycle {
+    required_paths: Option<RawPaths>,
+    #[serde(flatten)]
+    other: BTreeMap<String, IgnoredAny>,
+}
+
+/// `cycle.required_paths` as written. A string is recognised so that it is refused by
+/// name, as `acceptance.run`'s is: one pattern written without brackets.
+#[derive(Debug)]
+enum RawPaths {
+    Text,
+    List(Vec<String>),
+}
+
+impl<'de> Deserialize<'de> for RawPaths {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match RawRun::deserialize(deserializer)? {
+            RawRun::Text => Ok(Self::Text),
+            RawRun::List(paths) => Ok(Self::List(paths)),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]

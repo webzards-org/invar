@@ -1100,3 +1100,39 @@ fn a_hook_started_with_arguments_this_binary_does_not_know_is_not_a_denial() {
             .stdout("");
     }
 }
+
+// --- the skip trailer (#155) ----------------------------------------------------------
+
+#[test]
+fn a_git_commit_writing_the_skip_trailer_is_denied() {
+    let project = Project::new(APPROVED);
+    for command in [
+        "git commit -m \"fix a typo\" -m \"Invar-Skip: a typo\"",
+        "git commit --trailer \"Invar-Skip: a typo\"",
+        "git -c user.name=x commit --amend --no-edit --trailer 'invar-skip: a typo'",
+        "cd app && git commit -F - <<'MSG'\nfix a typo\n\nInvar-Skip: a typo\nMSG",
+        "/usr/bin/git commit -m 'INVAR-SKIP: a typo'",
+    ] {
+        guard(bash(&project.root(), command))
+            .code(2)
+            .stderr(contains("trailer is the developer's decision, not yours"))
+            .stderr(contains("Invar-Skip: <reason>"));
+    }
+}
+
+#[test]
+fn other_commits_and_reading_the_trailer_pass() {
+    let project = Project::new(APPROVED);
+    for command in [
+        "git commit -m \"fix a typo\"",
+        "git commit --trailer \"Co-authored-by: A <a@example.com>\" -m x",
+        "git log --grep Invar-Skip",
+        "invar cycle check --base origin/main",
+        "invar cycle required app/Models/Order.php",
+    ] {
+        guard(bash(&project.root(), command))
+            .code(0)
+            .stdout("")
+            .stderr("");
+    }
+}

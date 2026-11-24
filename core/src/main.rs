@@ -13,6 +13,7 @@ mod acceptance;
 mod calendar;
 mod cli;
 mod context;
+mod cycle;
 mod decision;
 mod diagnostics;
 mod digest;

@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{
-    AcceptanceConfig, AcceptanceStyle, Approval, Config, ConfigError, Context,
+    AcceptanceConfig, AcceptanceStyle, Approval, Config, ConfigError, Context, Cycle,
     DEFAULT_APPROVAL_COMMIT_MESSAGE, DEFAULT_BINDING_LIMIT, DEFAULT_DONE_COMMIT_MESSAGE, Done,
     FILE_NAME, Git, Loaded, Review, Warning, load, load_for_command, parse, parse_bytes,
 };
@@ -79,6 +79,7 @@ fn contract_10_1_light_mode_project() {
             },
             acceptance: None,
             approval: Approval::default(),
+            cycle: Cycle::default(),
         }
     );
     assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
@@ -914,4 +915,61 @@ fn load_for_command_still_reports_a_missing_file_as_missing() {
     let root = tempfile::tempdir().unwrap();
     let err = load_for_command(&ProjectRoot::for_test(root.path())).unwrap_err();
     assert!(matches!(err, ConfigError::Missing { .. }), "{err:?}");
+}
+
+// --- the `cycle` section (§3.8) ------------------------------------------------
+
+#[test]
+fn contract_10_14_required_paths() {
+    let loaded = read(&contract_example("valid-cycle"));
+    assert_eq!(
+        loaded.config.cycle.required_paths,
+        vec![
+            "app/Models/**",
+            "app/Policies/**",
+            "database/migrations/",
+            "routes/*.php"
+        ]
+    );
+    assert!(loaded.warnings.is_empty());
+}
+
+#[test]
+fn contract_10_15_required_paths_with_dot_dot() {
+    let message = reject(&contract_example("invalid-cycle-dot-dot"));
+    assert!(message.contains("`cycle.required_paths`"), "{message}");
+    assert!(message.contains("`..`"), "{message}");
+}
+
+#[test]
+fn no_cycle_section_or_an_empty_list_requires_nothing() {
+    for text in [
+        "",
+        "cycle:\n",
+        "cycle:\n  required_paths:\n",
+        "cycle:\n  required_paths: []\n",
+    ] {
+        assert_eq!(read(text).config.cycle, Cycle::default(), "{text:?}");
+    }
+}
+
+#[test]
+fn required_paths_must_be_a_list_of_relative_patterns() {
+    let message = reject("cycle:\n  required_paths: app/Models/**\n");
+    assert!(message.contains("must be a list of patterns"), "{message}");
+    // Every bad pattern in one message.
+    let message = reject("cycle:\n  required_paths: [\"\", \"/app\", \"../x\"]\n");
+    for says in ["empty", "absolute", "`..`"] {
+        assert!(message.contains(says), "{says}: {message}");
+    }
+    // A number is quoted to be a pattern, as every string is (D-7).
+    let message = reject("cycle:\n  required_paths: [12]\n");
+    assert!(message.contains("must be quoted"), "{message}");
+}
+
+#[test]
+fn an_unknown_key_under_cycle_warns() {
+    let loaded = read("cycle:\n  required_path: [\"app/**\"]\n");
+    assert_eq!(warned_keys(&loaded), vec!["cycle.required_path"]);
+    assert_eq!(loaded.config.cycle, Cycle::default());
 }
