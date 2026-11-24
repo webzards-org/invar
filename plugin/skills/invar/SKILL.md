@@ -49,6 +49,18 @@ developer must be able to tell a decision from an oversight. Then you write the
 change yourself. Skipping does not suspend the binding context in your session:
 its rules still bind.
 
+**When you have written a skipped change**, run `invar cycle required <path>...` with
+every file you changed. Its last line decides:
+
+- **`cycle: required`** — the project's CI refuses a pull request that changes these
+  paths without a cycle. Tell the developer, in one message, the paths it named, and
+  that the pull request will need either this change run through the cycle and closed
+  with `/invar:done`, or an `Invar-Skip: <reason>` trailer that **they** write on a
+  commit of the branch: `git commit --amend --trailer "Invar-Skip: <reason>"`. Offer to
+  plan it instead. **Never write the trailer yourself**, in a message or a `--trailer`: a
+  hook denies it, and whether the skip stands is the developer's decision.
+- **`cycle: not required`**, with or without a reason after it — say nothing more.
+
 ## Phase 1 — plan
 
 1. Get the **ticket id** (`SHOP-214`) and the **ticket text** from the developer. If
@@ -337,7 +349,9 @@ implementing it.
   — the developer records it, with `/invar:log-approve`;
 - switch an agent's model without saying so;
 - read the decision log;
-- skip the cycle without saying so.
+- skip the cycle without saying so;
+- write an `Invar-Skip:` trailer, or any commit message that holds one: the developer
+  writes it.
 
 ## Commands
 
@@ -355,4 +369,5 @@ implementing it.
 | `/invar:log-approve` | the developer's: records the draft and removes it; a `failed` one returns the Plan to `draft` |
 | `invar pr-body <TICKET> --out .invar/out/<TICKET>-pr.md` | the PR description, before the Plan is deleted |
 | `/invar:done` | the developer's: runs `invar done`, which deletes the Plan and stages it; you tell them the cycle is ready to close |
+| `invar cycle required <path>...` | yours, after a change you made with the cycle skipped; `cycle: required` means the PR needs a cycle or the developer's `Invar-Skip:` trailer |
 | `invar context show --binding` | the binding context, which you already have |

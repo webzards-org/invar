@@ -2270,3 +2270,41 @@ signature yet, and the docs say so. Also not built: the `pr-body` signer line.
 **Not exercised:** a signed `/invar:approve` in a real session with a security
 key, and the 90 s deadline in a real session. The deadline is covered by a unit
 test of the wait.
+
+## 20. Required paths through a cycle (#155)
+
+**The gap.** Whether a change goes through the cycle is decided by the main session (L-9,
+"Is this a job for the cycle?" in the protocol skill). That is the agent the cycle
+constrains deciding whether it applies, and no prompt can be the check of it. A branch that
+skipped the cycle looked in CI like one whose Plan was closed by `done`.
+
+**What is built.** `cycle.required_paths` in `invar.yaml`, read from the base branch only
+(`invar-yaml.md` §3.8, D-14), and `invar cycle check` for CI. A branch that changes a listed
+path passes with a cycle closed on it, read from its history (a Plan whose approval holds in
+one commit and that a later commit deleted, D-16), or with an `Invar-Skip: <reason>` trailer
+on any of its commits (D-15). The protocol skill keeps L-9 as it was: after a skipped change
+it runs `invar cycle required` on the files it changed, and on `cycle: required` tells the
+developer the pull request needs a cycle or their trailer. The decision comes from the
+command's last line, not from the prompt reading globs (§13b).
+
+**Why a trailer, and not a signed commit.** §19 measured that `git rebase --signoff`, which
+this repository's own merge process runs, drops every commit signature, and that re-signing
+during the rebase launders a forgery. A trailer is part of the message, which a rebase keeps:
+`tests/cycle_check.rs` runs `git rebase --signoff` and checks that the skip still counts. The
+price is that a trailer proves nothing about who wrote it.
+
+**Who writes it.** `plan guard` denies an agent's Bash command line that runs `git commit` and
+holds the key `Invar-Skip`, in any case, and tells it to ask the developer. Like the rest of
+the guard it is a scan of words: a message written to a file and given with `-F` passes. So
+the trailer is visible and owned in review, not proven. **Follow-up in #154:** the
+`approval verify` PR binds a skip to an approver's key with a signed statement, as an
+approval is, so that a skip in CI is accepted only when someone in the base's
+`.invar/approvers` signed it.
+
+**Not exercised** (needs a real Claude Code session).
+
+- [ ] A session that skips the cycle on a model, runs `invar cycle required`, and tells the
+      developer without writing the trailer
+- [ ] The guard denying a real `git commit --trailer "Invar-Skip: …"` in a session
+- [ ] The check on a real pull request in GitHub Actions, with `fetch-depth: 0` and
+      `--base origin/${{ github.base_ref }}`
