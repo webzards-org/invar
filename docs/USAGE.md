@@ -53,6 +53,21 @@ dependency bump or a one-line fix with an obvious outcome. The main session
 decides this and says so in one line ("Skipping the invar cycle: …"). If you
 disagree, say so.
 
+**When your project requires a cycle for some paths.** If `invar.yaml` lists
+`cycle.required_paths`, CI runs `invar cycle check`, and a pull request that
+changes one of those paths passes only with a cycle closed on it, by
+`/invar:done`, or with a skip you wrote. After a skipped change, the main
+session runs `invar cycle required` on the files it changed and tells you when
+one of them is required. If the change really needs no Plan, say why in a
+trailer on any commit of the branch:
+
+```bash
+git commit --amend --trailer "Invar-Skip: a comment typo in Order, no behavior"
+```
+
+The reason is printed in CI and read in review. The main session never writes
+it: the decision is yours.
+
 ## 1. Plan
 
 Give Claude Code the ticket id and its text:

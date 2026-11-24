@@ -43,7 +43,7 @@ agents are replaceable; the method is what lasts.
 | **Test-first, red before green** | A locked test must fail on an assertion before the code exists |
 | **Design by contract** | Rules the application must never break are explicit, named and checked in review |
 | **Small batches** | A ticket too large for one cycle is split before it is planned |
-| **A human decides where it matters** | Approving, skipping tests, unlocking a test, recording a decision and closing a cycle are the developer's commands |
+| **A human decides where it matters** | Approving, skipping tests, unlocking a test, recording a decision and closing a cycle are the developer's commands. Skipping the cycle on a path the team requires one for is a commit trailer the developer writes, which CI prints and checks |
 | **Architecture decision records** | A decision log keeps *why* after the ticket is gone |
 | **Verification, not trust** | Every boundary is checked on disk and in CI |
 
@@ -486,6 +486,7 @@ overestimate is worse than one you know the limits of.
 | `plan guard` hook | Convenience | Saves the agent a wasted edit. It reads command lines, not a shell, so a script can get past it; the checksum still catches the result |
 | Separate agent contexts | Focus | Keeps each agent's view narrow. A determined agent could still read a file; nothing that reads it can change a verdict |
 | Deny rule on the decision log | Focus | Stops accidental reads. The log is advisory, so a leak costs focus, never correctness |
+| Required paths through a cycle (`cycle check` in CI) | **Boundary**, for the paths the team lists | A branch changing one passes with a closed cycle in its history, or with an `Invar-Skip:` trailer. The list is read from the base branch. Who wrote the trailer is not proven: the guard is a scan, and a signed skip comes with #154 |
 | Review | Advisory | An LLM judgement with false positives and misses. Information for the developer, never a gate |
 
 Nothing enforced inside a repository can make forgery impossible: an agent

@@ -48,6 +48,22 @@
   `done`: the check was asked for and cannot run. Without `--results`, a missing
   section still only warns (#156).
 
+- **A CI check that changes to declared paths went through a cycle, opt-in.**
+  List them in `invar.yaml` as `cycle.required_paths` (globs: `*`, `**`, a
+  trailing `/`). `invar cycle check --base <ref>` passes a branch that changes
+  one only with a cycle closed on it (a Plan approved, then deleted by
+  `/invar:done`, read from the history) or with an `Invar-Skip: <reason>`
+  commit trailer the developer writes, and fails naming each path and pattern.
+  The list is read from the base branch, so a branch cannot switch off its own
+  check. It needs the history from the merge base: `fetch-depth: 0` in CI. With
+  no list on the base, it is off and exits 0 (#155). Contract `invar-yaml.md`
+  2.4.0.
+- **`invar cycle required <path>...`** says which paths need a cycle. After a
+  change made with the cycle skipped, the main session runs it and tells you
+  when the pull request will need a cycle or your `Invar-Skip:` trailer. It
+  never writes the trailer: `plan guard` denies an agent's `git commit` that
+  does (#155).
+
 ### Changed
 
 - **The README no longer says the agent cannot move its target.** It says

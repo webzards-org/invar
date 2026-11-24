@@ -293,6 +293,69 @@ To close the cycle only when the ticket's locked tests passed, give `done` the s
 `invar done SHOP-214 --results junit.xml`, with `--report-root` as above when the tests ran in
 a container. On a red test it refuses and deletes nothing.
 
+## Optional: require a cycle for some paths
+
+The main session may skip the cycle for trivial work, and nothing in Claude Code can be the
+check of that decision, because the session is what the check would hold. CI can be. List
+the paths a change may only reach through a cycle:
+
+```yaml
+cycle:
+  required_paths:
+    - "app/Models/**"
+    - "app/Policies/**"
+    - "app/Actions/**"
+    - "database/migrations/"
+    - "routes/*.php"
+```
+
+Patterns are relative to the project root. `*` stays within one segment, `**` spans any
+number of them, a trailing `/` means everything under that directory, and a pattern also
+covers a directory's contents (`app/Models` is `app/Models/**`). Unlike `.gitignore`, a
+pattern is anchored at the root: `*.php` is only the top-level files. The full rules are in
+`contracts/formats/invar-yaml.md` §3.8.
+
+Then check every pull request:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+# Install the CLI as above, then:
+- name: Changes to required paths went through a cycle
+  run: invar cycle check --base origin/${{ github.base_ref }}
+```
+
+`fetch-depth: 0`, because the check reads the branch's history from its merge base, and a
+shallow checkout is refused with that advice. Give `--base` in CI: `git.base_branch` is read
+from the branch, which could point it elsewhere.
+
+The list is read from `invar.yaml` **on the base branch**, so a branch cannot switch off its
+own check. A branch that changes the list is checked against the base's, with a note; the
+change counts once it is merged. With no list on the base, the check says it is off and
+exits 0.
+
+A pull request that changes a required path passes when:
+
+- a cycle was closed on it: a Plan approved in one of its commits and deleted by
+  `/invar:done` in a later one. One pull request may close several tickets. A Plan still
+  there is an open cycle, named in the output, and does not count;
+- or a commit of the branch has an `Invar-Skip:` trailer with a reason, which the developer
+  writes:
+
+  ```bash
+  git commit --amend --trailer "Invar-Skip: a comment typo in Order, no behavior"
+  ```
+
+  A trailer survives `git rebase --signoff`, which drops commit signatures. One trailer
+  anywhere on the branch covers it, since the pull request is what is reviewed, and the
+  reason is printed in the job's output.
+
+Otherwise it fails, listing each required path changed with the pattern it matched.
+Changes under `.invar/` never count. The plugin's guard denies an agent's `git commit` that
+writes the trailer, but that is a scan of the command line: it is not yet proof that a
+person wrote it. A signed skip comes with signed approvals (#154).
+
 ## Optional: signed approvals
 
 The checksum shows that a Plan has not changed since it was approved. It does not
