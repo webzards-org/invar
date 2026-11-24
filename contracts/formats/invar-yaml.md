@@ -1,6 +1,6 @@
 # Contract: `invar.yaml`
 
-**Version:** 2.5.0 — weakening the checks: a closed list, refused in CI without a person's trailer; see §11
+**Version:** 2.6.0 — the CI commands never take their base from the branch they check; see §11
 **Status:** stable
 **Implements:** §6 (Config file), §13c (the review's base branch), §14.3; light
 mode L-2 and L-7 (`docs/TASKS-M1.md`); A-2, A-6 and A-7 (`docs/TASKS-AT.md`)
@@ -114,6 +114,26 @@ an `origin/HEAD` ref.
 Valid values: a non-empty string containing no whitespace. The reader does not
 check that the branch exists; the commands that use it do, at the point they
 call `git`, and fail loudly if it does not.
+
+#### 3.3.1 Which base a CI command uses
+
+**Nothing a branch changes chooses what that branch is checked against** (D-20). The
+commands CI runs — `invar config check`, `invar cycle check`, and `invar acceptance verify`
+with a ticket — find their base in this order:
+
+1. `--base <ref>`;
+2. `git symbolic-ref refs/remotes/origin/HEAD`, the remote's default branch;
+3. `main`.
+
+They never read `git.base_branch`, from the working tree or from `HEAD`. When no `--base`
+is given and `invar.yaml` at `HEAD` sets `git.base_branch` to another branch than the one
+found, they say so in a note naming both, and recommend `--base`: a team whose pull
+requests target `develop` gives `--base origin/develop`. `invar acceptance verify` without
+a ticket compares nothing with a base, and is unchanged.
+
+The local commands — `plan check`, `done`, `review-input`, `acceptance lock` — keep the
+order above with `git.base_branch` first. They run for the developer, and CI is the
+boundary.
 
 ### 3.4 `context.binding_limit`
 
@@ -294,9 +314,9 @@ the list applies to the branches after it is on the base. An invalid `invar.yaml
 base is an error. `invar cycle required` is the session's question about its own working
 tree, and reads the working tree's file.
 
-**`git.base_branch`** is read from the branch, as every command reads it. A branch could
-point it at another branch, so in CI give the pull request's target with `--base`
-(`--base origin/${{ github.base_ref }}`), and do not rely on the key there.
+**The base** is found by §3.3.1: `--base`, else the remote's default branch, else `main`,
+and never `git.base_branch`. In CI give the pull request's target
+(`--base origin/${{ github.base_ref }}`).
 
 **What `invar cycle check` decides.** The **commits of the branch** are `<base>..HEAD`: what
 the branch merged in from the base is the base's, not the branch's. It needs the history
@@ -371,12 +391,13 @@ the stronger value weakens nothing:
 | `review.offer` from `true` to `false` | The main session stops offering the review before a pull request |
 
 Adding a key or a pattern, or changing a value the other way, is never weakening, and every
-key not in the list stays free to change. A whole `invar.yaml` removed is every weakening its
+key not in the list stays free to change. `git.base_branch` is not on the list, since no CI
+command reads it (§3.3.1); `config check` notes a change of it all the same. A whole `invar.yaml` removed is every weakening its
 keys allow. A change of `dir` or `run` is any change of its text, even one that names the
 same thing (`./tests/Acceptance`).
 
 **The boundary is CI.** `invar config check [--base <ref>]` reads `invar.yaml` at the base
-and at `HEAD`, as `cycle check` reads the base (§3.8), and lists every weakening with its
+and at `HEAD`, with the base found by §3.3.1, as `cycle check` reads it (§3.8), and lists every weakening with its
 value at both. It passes with none. It passes a weakening when any commit of the branch
 (`<base>..HEAD`) has an **`Invar-Config: <reason>`** trailer with a reason that is not empty
 once trimmed, read as `Invar-Skip` is (D-15), and prints each reason and its commit.
@@ -633,6 +654,18 @@ it is not forbidden: it needs a reason a person wrote, which the pull request sh
 trailer, and not a signed commit, for the reason of D-15: it survives `git rebase
 --signoff`.
 
+**D-20 — A branch does not choose its base** (2.6.0). A check compares the branch with what it
+will be merged into. When the base came from `git.base_branch` in the branch's own
+`invar.yaml`, one commit could set it to the branch itself: the merge base was `HEAD`, nothing
+had changed, and `config check`, `cycle check` and the branch rule of `acceptance verify` all
+passed a branch that stopped signing, changed a required path and deleted another ticket's
+locked test (#165). The approvers list has the same answer for the same reason: it is read from
+the base, never the branch (`approval-signature.md` §6.1, D-3). So the CI commands take the base
+from their command line, where the CI configuration, not the branch, sets it, or from the
+remote, and only note the key. Putting `git.base_branch` on the weakening list instead would
+still let the branch name the base the list is read from. The local commands keep the key:
+there the developer runs them, and a wrong base costs them a wrong answer, not a check.
+
 ## 9. Open questions
 
 **OQ-1 — JSON Schema.** `contracts/README.md` lists a JSON Schema for
@@ -862,6 +895,20 @@ cycle:
 **Why:** a pattern names paths under the project root as they are.
 
 ## 11. Version history
+
+**2.6.0 — the CI commands do not take their base from the branch (#165).**
+
+- §3.3, new §3.3.1: `config check`, `cycle check` and `acceptance verify <TICKET>` use
+  `--base`, else `origin/HEAD`, else `main`, never `git.base_branch`, and note a key they did
+  not use. §3.8 and §3.9 point to it; `config check` notes a change of the key. New D-20.
+- `invar acceptance verify` takes `--base <ref>` for the branch rule.
+
+**Why:** a branch that set `git.base_branch` to itself was compared with itself, and passed
+every CI check (D-20).
+
+**Compatibility:** no key or value changes. A CI step without `--base`, in a repository whose
+`origin/HEAD` is not the branch pull requests target, now compares with the remote's default
+branch, and says so; give `--base`. Local commands behave as before.
 
 **2.5.0 — weakening the checks (#157).**
 
