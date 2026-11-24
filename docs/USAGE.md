@@ -70,6 +70,19 @@ git commit --amend --trailer "Invar-Skip: a comment typo in Order, no behavior"
 The reason is printed in CI and read in review. The main session never writes
 it: the decision is yours.
 
+**When you weaken a check on purpose.** If CI runs `invar config check`, a
+branch that removes the `acceptance:` section, changes `acceptance.dir` or
+`acceptance.run`, turns off `acceptance.required`, `approval.signed` or
+`review.offer`, or removes a pattern from `cycle.required_paths` fails until a
+commit says why:
+
+```bash
+git commit --amend --trailer "Invar-Config: the acceptance tests moved under tests/Feature"
+```
+
+Write it yourself. The agent cannot make those edits through its edit tools,
+and it does not write the trailer either.
+
 ## 1. Plan
 
 Give Claude Code the ticket id and its text:

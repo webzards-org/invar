@@ -195,6 +195,44 @@ done
 
 The code they were built from is the tagged commit in this repository.
 
+## CI: install the released CLI
+
+Every check below runs in CI, with a binary CI installs itself: **the release, checked with
+`gh attestation verify`**, never a binary committed to the repository or copied from a
+plugin cache. On a developer's machine the plugin's binary, its `hooks.json` and
+`.claude/settings.json` can all be changed from the agent's shell, and the guard lets a call
+through when it crashes or times out. CI's own binary, attested as built by invar's release
+workflow from a tagged commit, is the one an agent cannot have changed:
+
+```yaml
+permissions:
+  contents: read
+  attestations: read
+
+steps:
+  - uses: actions/checkout@v4
+    with:
+      fetch-depth: 0
+  - name: Install invar
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INVAR_VERSION: v0.2.0   # pin the release you checked
+    run: |
+      gh release download "$INVAR_VERSION" --repo webzards-org/invar --pattern invar-linux-x86_64
+      gh attestation verify invar-linux-x86_64 --repo webzards-org/invar
+      sudo install -m 755 invar-linux-x86_64 /usr/local/bin/invar
+      invar --version
+  - name: Verify acceptance locks
+    run: invar acceptance verify
+  - name: The configuration is not weakened
+    run: invar config check --base origin/${{ github.base_ref }}
+  - name: Changes to required paths went through a cycle
+    run: invar cycle check --base origin/${{ github.base_ref }}
+```
+
+`fetch-depth: 0` is for `config check` and `cycle check`, which read the branch's history
+from its merge base. `acceptance verify` needs none. Each is described below.
+
 ## Optional: verify the locks in CI
 
 A locked acceptance test is only worth something if CI notices when it changes. Run
@@ -359,6 +397,36 @@ and the commits that touched it outside a cycle.
 Changes under `.invar/` never count. The plugin's guard denies an agent's `git commit` that
 writes the trailer, but that is a scan of the command line: it is not yet proof that a
 person wrote it. A signed skip comes with signed approvals (#154).
+
+## Optional: refuse a weakened configuration
+
+Some keys of `invar.yaml` decide whether anything is checked: removing the `acceptance:`
+section makes `acceptance verify` warn and exit 0. `invar config check` compares
+`invar.yaml` on the branch with the base branch's, and fails a branch that weakens a check:
+
+- the `acceptance:` section removed, or `acceptance.dir` or `acceptance.run` changed, or
+  `acceptance.required` turned from `true` to `false`;
+- `approval.signed` turned from `true` to `false`;
+- a pattern removed from `cycle.required_paths`;
+- `review.offer` turned from `true` to `false`.
+
+```yaml
+- name: The configuration is not weakened
+  run: invar config check --base origin/${{ github.base_ref }}
+```
+
+It names each one with its value at the base and on the branch. Adding or strengthening
+a key, and every other key, pass. With no `invar.yaml` on the base it is off. A weakening
+you mean, such as a test suite that moved, passes with a trailer **you** write on any commit
+of the branch:
+
+```bash
+git commit --amend --trailer "Invar-Config: the acceptance tests moved under tests/Feature"
+```
+
+The reason is printed in the job. The plugin's guard denies an agent's edit that weakens
+`invar.yaml`, and its commit that writes the trailer; both are conveniences, and this check is
+the boundary.
 
 ## Optional: signed approvals
 
