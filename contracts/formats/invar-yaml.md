@@ -1,6 +1,6 @@
 # Contract: `invar.yaml`
 
-**Version:** 2.3.0 — the `approval` section: a signed approval, and its commit; see §11
+**Version:** 2.4.0 — `cycle.required_paths`: which changes need a cycle, checked in CI; see §11
 **Status:** stable
 **Implements:** §6 (Config file), §13c (the review's base branch), §14.3; light
 mode L-2 and L-7 (`docs/TASKS-M1.md`); A-2, A-6 and A-7 (`docs/TASKS-AT.md`)
@@ -62,6 +62,7 @@ later milestone is read by this one without failing and without noise.
 | `approval.signed` | bool | `false` | Whether `plan approve` signs the approval (`approval-signature.md`); see §3.7 |
 | `approval.commit` | bool | `false` | Whether `plan approve` commits the approval without being given `--commit` |
 | `approval.commit_message` | string | `Approve plan {ticket}` | The message of that commit; `{ticket}` is replaced by the Plan's ticket id |
+| `cycle.required_paths` | list of strings | empty: nothing required | The paths a branch may change only through a cycle, or with a skip a person wrote, as `invar cycle check` reads them **from the base branch**; see §3.8 |
 
 A dotted key is a key inside a section: `review.offer` is written as
 
@@ -70,7 +71,7 @@ review:
   offer: true
 ```
 
-The sections `review`, `git`, `context`, `done`, `acceptance` and `approval` must be mappings
+The sections `review`, `git`, `context`, `done`, `acceptance`, `approval` and `cycle` must be mappings
 when present. An empty section (`review:` with nothing under it) is the same as an
 absent one.
 
@@ -247,6 +248,99 @@ any commit (`approval-signature.md` D-1). `commit_message` follows the rules of
 `done.commit_message`: one line, non-empty once surrounding whitespace is removed,
 `{ticket}` any number of times or not at all.
 
+### 3.8 `cycle.required_paths`
+
+Read by `invar cycle check`, which CI runs on a pull request, and by `invar cycle required`,
+which the main session runs. Absent, empty, or an empty list, and no path needs a cycle:
+`cycle check` says the check is off and exits 0 (D-14).
+
+```yaml
+cycle:
+  required_paths:
+    - "app/Models/**"
+    - "app/Policies/**"
+    - "database/migrations/"
+```
+
+**The value** is a list of patterns, each a string. A single string is an error, not a
+list of one: it is how a pattern written without brackets looks. Each pattern is relative
+to the project root, with `/` between segments. **An error**, each reported with the
+others: an empty pattern, an absolute one (a leading `/` or a drive such as `C:`), a `\`,
+an empty segment (`app//Models`), and a `.` or `..` segment. A trailing `/` is allowed,
+below.
+
+**Matching**, a small and exact part of `.gitignore`'s rules, with none of its others (no
+`!`, no `?` or `[…]`, no matching at any depth):
+
+1. A pattern and a path are split at `/` into segments, and the pattern is **anchored at
+   the project root**: `*.php` matches `index.php` and not `app/User.php`.
+2. **`*`** matches any run of characters within one segment, the empty one included, and
+   never a `/`.
+3. **`**`** as a whole segment matches any number of segments, none included:
+   `app/**/Order.php` matches `app/Order.php` and `app/a/b/Order.php`. Inside a segment,
+   `**` is the same as `*`.
+4. Every other character matches itself, case included.
+5. A pattern matches a path when it matches **the whole path, or a directory the path is
+   in**: `app/Models` matches `app/Models/Order.php`.
+6. A pattern ending in **`/`** matches only a directory the path is in:
+   `database/migrations/` matches every file under it, and not a file of that name.
+
+**Read from the base branch, never from the branch checked** (D-14). `cycle check` reads
+`invar.yaml` from the commit the base names (`git show <base>:invar.yaml`), as a verifier of
+approvals reads `.invar/approvers` (`approval-signature.md` §6.1, D-3): a branch must not be
+able to switch off its own check. A branch that adds, removes or changes a pattern is
+checked against the base's list, and the output says how its own list differs. A change to
+the list applies to the branches after it is on the base. An invalid `invar.yaml` at the
+base is an error. `invar cycle required` is the session's question about its own working
+tree, and reads the working tree's file.
+
+**`git.base_branch`** is read from the branch, as every command reads it. A branch could
+point it at another branch, so in CI give the pull request's target with `--base`
+(`--base origin/${{ github.base_ref }}`), and do not rely on the key there.
+
+**What `invar cycle check` decides.** It needs the history from the merge base of the base
+and `HEAD` to `HEAD`: a shallow checkout that does not reach it is an error naming
+`fetch-depth: 0`. Then:
+
+- **The required changes**: every file that differs between the merge base and `HEAD`,
+  committed only, under the project root, with `.invar/` left out: added, changed, deleted,
+  and both names of a rename. Each one a pattern matches is a required change, named with
+  the first pattern that matches it.
+- **A closed cycle**: a Plan `.invar/plans/<TICKET>-<slug>/spec.md` that is absent at
+  `HEAD`, that some commit of the branch deleted, and whose text at some commit of the
+  branch is an **approval that holds**: `Status: approved`, every approval value present,
+  and `Approved-checksum` the digest of that text (`plan-header.md` §5.3). The ticket is the
+  Plan header's (D-16). A Plan the branch added or changed that is still at `HEAD` is an
+  **open cycle**: it is named, with `/invar:done`, and does not count.
+- **A skip**: a trailer `Invar-Skip: <reason>` on **any commit of the branch**, with a
+  reason that is not empty once trimmed. git matches the key without regard to case. A
+  trailer with no reason is named, and does not count (D-15).
+
+The branch **passes** when there is no required change, or at least one closed cycle, or
+at least one skip. One pull request may close several tickets: every required change is
+covered by any closed cycle, because which path belongs to which ticket is in a Plan's
+Scope, which is prose. Otherwise it **fails**, non-zero, with every required change and its
+pattern on stderr, and the two ways out: a cycle closed with `/invar:done`, or a trailer the
+developer writes.
+
+The output on stdout always says what was decided on: the base and the merge base, the
+patterns, the required changes, the closed cycles with the commit that deleted each Plan,
+the open cycles, the skips with their commits and reasons, and the note on a changed list.
+Its last line is one of `cycle check: off: <why>`, `cycle check: passed: <why>` and
+`cycle check: failed`. It writes nothing, and it is not a developer-only command.
+
+**Who writes the trailer.** A skip is a person's decision. `plan guard` denies an agent's
+Bash command line that runs `git commit` and holds the key `Invar-Skip`, in any case
+(`-m`, `--trailer`, a here-document), and tells the agent to ask the developer. That is a
+scan of words, like the rest of the guard: a message written to a file and given with `-F`
+gets past it. It makes a skip visible in CI and owned in review, not proven to be a
+person's: binding a skip to the developer's key is a signed statement, as an approval is,
+and comes with the verification of signed approvals (#154).
+
+**`invar cycle required <path>...`** prints `<path>: required (<pattern>)` for each path a
+pattern of the working tree's list matches, then `cycle: required` or `cycle: not
+required`, and exits 0.
+
 ## 4. Value rules
 
 These apply to every key in §3.
@@ -296,7 +390,7 @@ version of `invar` must not break an older one.
 
 - The warning names the key by its full dotted path (`review.ofer`,
   `senarios`), so a typo is easy to find.
-- Unknown keys are reported at the top level and inside the six sections
+- Unknown keys are reported at the top level and inside the seven sections
   this version reads. Keys inside an ignored subtree (`lint.rules.…`) are never reported;
   that subtree belongs to a later milestone as a whole.
 - The value of an unknown key is not validated. It may be any YAML.
@@ -312,7 +406,7 @@ Each of these is a distinct failure, so a caller can tell them apart:
 |---|---|---|
 | **Missing** | No `invar.yaml` in the project root | The path it looked for, and that `invar init` creates it |
 | **Unreadable** | The file exists but cannot be read (permissions, a directory of that name) | The path and the operating system's reason |
-| **Invalid** | Not UTF-8, not valid YAML, not a mapping, a duplicated key, a value outside §3 and §4, an `acceptance` section that breaks §3.6 | The path, the line and column where YAML reports one, and what is wrong |
+| **Invalid** | Not UTF-8, not valid YAML, not a mapping, a duplicated key, a value outside §3 and §4, an `acceptance` section that breaks §3.6, a `cycle.required_paths` that breaks §3.8 | The path, the line and column where YAML reports one, and what is wrong |
 | **Scenarios not supported** | `scenarios: true`, when a command runs | That `.feature` files arrive in a later milestone, and to set `scenarios: false` |
 
 An invalid file reports every problem with a known key's value in one message
@@ -432,6 +526,28 @@ edit away, and a project that does nothing keeps the behavior of an absent secti
 signing, and, to be worth more than the checksum, one that asks a person on each
 use (`approval-signature.md` §7). A project that has neither keeps working as
 before, and turns it on once it has.
+
+**D-14 — The required paths are opt-in, and read from the base** (2.4.0). Which paths need a
+Plan is the team's decision: Invar can recommend models, policies and migrations, and only the
+team knows its code. Absent, nothing changes, so every project keeps the behavior it had. The
+list is read from the base because the branch is what is checked: a list read from the branch
+could be emptied by the branch, and the check would pass a change it exists to catch.
+
+**D-15 — A skip is a commit trailer, and one anywhere on the branch is enough** (2.4.0). The
+main session may still skip the cycle for trivial work (L-9); what changes is that a skip on a
+required path is visible in CI and has to be explained. A trailer, because it is part of the
+commit message, and survives `git rebase --signoff` and every other rewrite that keeps
+messages, where a commit signature is dropped by any rebase (`plugin/NOTES.md` §19). One
+trailer on any commit, and not on every commit that touches a required path, because the pull
+request is what is reviewed: one reason a reviewer reads covers the branch, and asking for it
+on every commit would only teach people to paste it. That it is a person's is not proven here:
+the guard is a scan, and a signed statement for a skip belongs with #154.
+
+**D-16 — A closed cycle is read from the history, not from the branch name** (2.4.0). A branch
+name is the developer's text and proves nothing. The commits do: a Plan whose approval holds in
+one of them, deleted in a later one, is what `plan approve` and `invar done` leave behind. The
+approval must hold in that text, and not only say `Status: approved`, so that a header typed by
+hand is not a cycle. Whose approval it was is #154's to check.
 
 ## 9. Open questions
 
@@ -636,7 +752,49 @@ approval:
 
 **Why:** every approval is signed, and committed as `Approve plan <TICKET>`.
 
+### 10.14 Valid — required paths
+
+<!-- example: valid-cycle -->
+```yaml
+cycle:
+  required_paths:
+    - "app/Models/**"
+    - "app/Policies/**"
+    - "database/migrations/"
+    - "routes/*.php"
+```
+
+**Why:** a branch that changes a model, a policy, a migration or a route file passes `invar
+cycle check` only with a closed cycle or an `Invar-Skip:` trailer.
+
+### 10.15 Invalid — a `..` in a pattern
+
+<!-- example: invalid-cycle-dot-dot -->
+```yaml
+cycle:
+  required_paths: ["../shared/**"]
+```
+
+**Why:** a pattern names paths under the project root as they are.
+
 ## 11. Version history
+
+**2.4.0 — `cycle.required_paths` (#155).**
+
+- §3, new §3.8: the key, its glob rules, that `invar cycle check` reads it from the base
+  branch, what the check decides, and the `Invar-Skip:` trailer. New D-14, D-15 and D-16, and
+  examples 10.14 and 10.15.
+- §6: unknown keys are reported inside `cycle` too. §7: **Invalid** covers the key.
+- New commands read it: `invar cycle check` and `invar cycle required`. `plan guard` denies
+  an agent's `git commit` that writes the trailer.
+
+**Why:** whether a change goes through the cycle was decided only by the main session, the
+agent the cycle constrains, and a branch that skipped it looked in CI like one whose Plan was
+closed (#155).
+
+**Compatibility:** a new optional section. Absent, nothing is required and `cycle check`
+exits 0, so every valid file stays valid and every command behaves as before. A file written
+for 2.4.0 and read by an older core gets a warning for the unknown `cycle` key.
 
 **2.3.0 — the `approval` section (#154).**
 
