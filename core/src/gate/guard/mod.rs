@@ -49,6 +49,11 @@
 //! - the path is under `acceptance.dir` and the call would write a digest or an `ac=` list into a lock
 //!   line. Only `invar acceptance lock` writes one, after it has run the tests (A-4).
 //!
+//! - the path is the project's `invar.yaml`, and the file the call would leave weakens
+//!   the checks against the one there now, by the list of `invar-yaml.md` §3.9;
+//! - the path is the project's `.claude/settings.json`, and the call would take out the
+//!   deny rule `invar init` writes for `.invar/decisions/**`.
+//!
 //! Only files under `acceptance.dir` are judged for a lock line, because anywhere else
 //! `invar-lock:` is just text, such as in invar's own contract. Likewise only a Plan's
 //! header is judged for approval values: `Status: approved` in its body is just text.
@@ -160,6 +165,14 @@ fn judge(path: &Path, tool: &str, payload: &Value) -> Verdict {
             };
         }
     };
+    if matches!(tool, "Write" | "Edit") {
+        if relative == Path::new(config::FILE_NAME) {
+            return judge_config(path, &relative, payload);
+        }
+        if relative == Path::new(SETTINGS_FILE) {
+            return judge_settings(path, &relative, payload);
+        }
+    }
     if plan_dir_name(&relative, UNLOCK_FILE).is_some() {
         return Verdict::Deny {
             reason: format!(
@@ -484,6 +497,96 @@ fn text_after(payload: &Value, before: Option<&str>) -> Option<String> {
     })
 }
 
+/// The project's Claude Code settings, which hold the deny rule `invar init` writes.
+const SETTINGS_FILE: &str = ".claude/settings.json";
+
+/// The file as it is, as text. `None` when it is not there, or not text.
+fn read_text(path: &Path) -> Option<String> {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+}
+
+/// A `Write` or `Edit` of the project's `invar.yaml`: denied when the file it would leave
+/// weakens the checks against the file as it is (`invar-yaml.md` §3.9).
+///
+/// **Allowed whenever it cannot tell**: the result cannot be computed, or either side is
+/// not a valid config. The boundary is `invar config check` in CI, which compares the
+/// branch with the base and refuses a weakening there whatever tool made it; this only
+/// saves the agent an edit the developer has to undo.
+fn judge_config(path: &Path, relative: &Path, payload: &Value) -> Verdict {
+    let before = read_text(path);
+    let Some(after) = text_after(payload, before.as_deref()) else {
+        return Verdict::Pass;
+    };
+    let read = |text: &str| {
+        config::parse(text, relative)
+            .ok()
+            .map(|loaded| loaded.config)
+    };
+    let (Some(old), Some(new)) = (read(before.as_deref().unwrap_or_default()), read(&after)) else {
+        return Verdict::Pass;
+    };
+    let weakened = config::weakenings(&old, &new);
+    if weakened.is_empty() {
+        return Verdict::Pass;
+    }
+    let list: Vec<String> = weakened.iter().map(|w| format!("`{w}`")).collect();
+    Verdict::Deny {
+        reason: format!(
+            "this would weaken what invar checks, in {}: {}. These keys decide whether the \
+             Plans, the locked tests and the required paths are checked at all, so changing \
+             them that way is the developer's decision, not yours. Leave them as they are, and \
+             tell the developer what you would change and why: they edit invar.yaml \
+             themselves, and CI asks them for an `{trailer}: <reason>` trailer (`git commit \
+             --amend --trailer \"{trailer}: <reason>\"`). Other keys, and adding or \
+             strengthening any key, stay yours to edit",
+            relative.display(),
+            list.join(", "),
+            trailer = crate::config_check::CONFIG_TRAILER,
+        ),
+    }
+}
+
+/// A `Write` or `Edit` of the project's `.claude/settings.json`: denied when the file it
+/// would leave no longer has the deny rule `invar init` writes for the decision log, and
+/// the file as it is has it.
+///
+/// Allowed whenever it cannot tell, or when either side is not JSON: the rule is a speed
+/// bump for the log, not a boundary (`init`, NOTES D-17.3), and a settings file the guard
+/// cannot read is not one to block edits to.
+fn judge_settings(path: &Path, relative: &Path, payload: &Value) -> Verdict {
+    let has_rule = |text: &str| -> Option<bool> {
+        let value: Value = serde_json::from_str(text).ok()?;
+        Some(
+            value
+                .pointer("/permissions/deny")
+                .and_then(Value::as_array)
+                .is_some_and(|rules| {
+                    rules
+                        .iter()
+                        .any(|rule| rule.as_str() == Some(crate::init::DENY_RULE))
+                }),
+        )
+    };
+    let before = read_text(path);
+    let Some(after) = text_after(payload, before.as_deref()) else {
+        return Verdict::Pass;
+    };
+    if before.as_deref().and_then(has_rule) == Some(true) && has_rule(&after) == Some(false) {
+        return Verdict::Deny {
+            reason: format!(
+                "this would take the rule `{rule}` out of {}. It keeps agents from reading the \
+                 decision log, which only the planner reads, through `invar context show`. \
+                 Leave it in; if it is in your way, tell the developer, who changes it",
+                relative.display(),
+                rule = crate::init::DENY_RULE,
+            ),
+        };
+    }
+    Verdict::Pass
+}
+
 /// Whether `relative` is a path below `dir`, as `acceptance.dir` may write it (`./t`).
 fn is_under(relative: &Path, dir: &str) -> bool {
     let dir: Vec<Component> = Path::new(dir)
@@ -625,9 +728,14 @@ fn judge_command(payload: &Value) -> Verdict {
                 .into(),
         };
     };
-    if writes_skip_trailer(command) {
+    if writes_trailer(command, crate::cycle::SKIP_TRAILER) {
         return Verdict::Deny {
             reason: skip_trailer_reason(),
+        };
+    }
+    if writes_trailer(command, crate::config_check::CONFIG_TRAILER) {
+        return Verdict::Deny {
+            reason: config_trailer_reason(),
         };
     }
     match human_only(command) {
@@ -638,17 +746,17 @@ fn judge_command(payload: &Value) -> Verdict {
     }
 }
 
-/// Whether a command line writes the `Invar-Skip:` trailer into a commit: a `git commit`
-/// in one of its simple commands, and the trailer's key anywhere in the line, in any case,
-/// so that a message in `-m`, in `--trailer` or in a here-document is seen
-/// (`invar-yaml.md` §3.8).
+/// Whether a command line writes the trailer `key` into a commit: a `git commit` in one of
+/// its simple commands, and the key anywhere in the line, in any case, so that a message
+/// in `-m`, in `--trailer` or in a here-document is seen. For `Invar-Skip` and
+/// `Invar-Config` (`invar-yaml.md` §3.8, §3.9).
 ///
 /// **Words, not shell**, as [`human_only`]: a message written to a file first and given
 /// with `-F`, or a key a shell builds at run time, is not seen. It makes an honest agent
 /// stop and ask; the binding of a skip to a person comes with the verification of signed
 /// approvals (#154).
-fn writes_skip_trailer(command: &str) -> bool {
-    let key = crate::cycle::SKIP_TRAILER.to_ascii_lowercase();
+fn writes_trailer(command: &str, key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
     if !command.to_ascii_lowercase().contains(&key) {
         return false;
     }
@@ -665,6 +773,18 @@ fn writes_skip_trailer(command: &str) -> bool {
                 matches!(name, "git" | "git.exe") && words[at + 1..].contains(&"commit")
             })
         })
+}
+
+fn config_trailer_reason() -> String {
+    format!(
+        "an `{key}:` trailer is the developer's decision, not yours: it tells `invar config \
+         check` in CI that this branch weakens what invar checks, in invar.yaml, on purpose, \
+         and why. Do not write it, in a commit message, a `--trailer` or any other way. Tell \
+         the developer what the branch changes in invar.yaml and why; they write it \
+         themselves: `git commit --amend --trailer \"{key}: <reason>\"`. If you only meant \
+         to mention the trailer, leave the key out of a command that runs `git commit`.",
+        key = crate::config_check::CONFIG_TRAILER
+    )
 }
 
 fn skip_trailer_reason() -> String {

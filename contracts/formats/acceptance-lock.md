@@ -1,6 +1,6 @@
 # Contract: the `invar-lock:` line
 
-**Version:** 1.5.0 — a locked line records the criteria its file covers, under the digest; see §12
+**Version:** 1.6.0 — removing the `acceptance:` section is refused in CI without a person's trailer; see §12
 **Status:** stable
 **Implements:** §4d (Checksums); A-2, A-3, A-4, A-5 (`docs/TASKS-AT.md`)
 **Read by:** the core (`format/lock`; `invar hash --lock`; `invar acceptance lock` and
@@ -249,9 +249,13 @@ directory to look in, so `verify` warns that there is nothing to verify, and exi
 and `done` give one warning, in the same words, for a Plan that says `required`, because a person
 decided that this ticket needs tests and nothing will check them. For a Plan that says `skipped`
 they say nothing, as before this check existed. Pointing `acceptance.dir`
-somewhere else has the same effect on the files left behind. The change to `invar.yaml` is in
-the PR, so review and the decision log are what notice it. The core does not read an older
-config from git to second-guess the current one.
+somewhere else has the same effect on the files left behind. **That stays the rule for
+`verify`, `plan check` and `done`**: locally, removing the section is allowed, and warned. Since
+1.6.0 it is no longer only review that notices it: `invar config check` in CI compares
+`invar.yaml` with the base branch's, and refuses a removed section, a changed `dir` or `run`, or
+`required` turned to `false`, unless a commit of the branch has an `Invar-Config: <reason>`
+trailer the developer wrote (`invar-yaml.md` §3.9). `verify` itself still reads only the
+current config; the comparison is that command's.
 
 **D-22 — A change is read through the digest, and in all three places.** Comparing bytes would
 call a line-ending conversion by a checkout filter a change, and §4 already says what does not
@@ -797,6 +801,11 @@ unlocked by the developer: <path> (round <R>)
 or not it exists yet. A shell can still write it (D-30).
 
 ## 12. Version history
+
+**1.6.0** — D-21 (#157): removing the `acceptance:` section, or changing `acceptance.dir`, is
+still allowed and warned locally, and is now refused in CI by `invar config check` without an
+`Invar-Config:` trailer (`invar-yaml.md` 2.5.0, §3.9). No line, digest or command of this
+contract changes.
 
 **1.5.0** — §2 rules 6 and 7, the **Criteria** error of §3.1, §4 step 4, §9.4, §10.5, §11.2,
 examples 8.9 and 8.10, and D-38 to D-41 (#156, after review): a locked line records `ac=<ids>`, the

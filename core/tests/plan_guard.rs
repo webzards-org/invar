@@ -1136,3 +1136,211 @@ fn other_commits_and_reading_the_trailer_pass() {
             .stderr("");
     }
 }
+
+// --- invar.yaml and the settings (#157) --------------------------------------------------
+
+const CONFIG: &str = "review:\n  offer: true\napproval:\n  signed: true\n\
+    acceptance:\n  required: true\n  dir: tests/Acceptance\n  \
+    run: [\"pest\", \"{report}\", \"{files}\"]\n\
+    cycle:\n  required_paths: [\"app/Models/**\", \"database/migrations/\"]\n";
+
+/// A project whose invar.yaml is [`CONFIG`].
+fn with_config() -> Project {
+    let project = Project::new(APPROVED);
+    fs::write(project.root().join("invar.yaml"), CONFIG).unwrap();
+    project
+}
+
+fn denied_as_weakening(stdin: String, key: &str) {
+    guard(stdin)
+        .code(2)
+        .stderr(contains("this would weaken what invar checks"))
+        .stderr(contains(key))
+        .stderr(contains("the developer's decision, not yours"))
+        .stderr(contains("Invar-Config: <reason>"));
+}
+
+/// Every weakening on the list, as the text it replaces and the text it leaves.
+const WEAKENINGS: &[(&str, &str, &str)] = &[
+    (
+        "acceptance:\n  required: true\n  dir: tests/Acceptance\n  run: [\"pest\", \"{report}\", \"{files}\"]\n",
+        "",
+        "acceptance: present -> absent",
+    ),
+    (
+        "dir: tests/Acceptance",
+        "dir: tests/Elsewhere",
+        "acceptance.dir: tests/Acceptance -> tests/Elsewhere",
+    ),
+    ("run: [\"pest\",", "run: [\"true\",", "acceptance.run:"),
+    (
+        "required: true",
+        "required: false",
+        "acceptance.required: true -> false",
+    ),
+    (
+        "signed: true",
+        "signed: false",
+        "approval.signed: true -> false",
+    ),
+    (
+        "\"app/Models/**\", ",
+        "",
+        "cycle.required_paths: app/Models/** -> removed",
+    ),
+    ("offer: true", "offer: false", "review.offer: true -> false"),
+];
+
+#[test]
+fn each_weakening_of_invar_yaml_is_denied_through_write_and_through_edit() {
+    let project = with_config();
+    let path = project.path("invar.yaml");
+    for (old, new, key) in WEAKENINGS {
+        denied_as_weakening(
+            write_with(&project.root(), &path, &CONFIG.replace(old, new)),
+            key,
+        );
+        denied_as_weakening(edit_with(&project.root(), &path, old, new), key);
+    }
+    // The file was never changed by any of it.
+    assert_eq!(
+        fs::read_to_string(project.root().join("invar.yaml")).unwrap(),
+        CONFIG
+    );
+}
+
+#[test]
+fn adding_strengthening_and_other_keys_of_invar_yaml_pass() {
+    let project = Project::new(APPROVED);
+    let weak = "approval:\n  signed: false\ncycle:\n  required_paths: [\"app/Models/**\"]\n";
+    fs::write(project.root().join("invar.yaml"), weak).unwrap();
+    let path = project.path("invar.yaml");
+    passes_silently(edit_with(
+        &project.root(),
+        &path,
+        "[\"app/Models/**\"]",
+        "[\"app/Models/**\", \"app/Policies/**\"]",
+    ));
+    passes_silently(edit_with(
+        &project.root(),
+        &path,
+        "signed: false",
+        "signed: true",
+    ));
+    passes_silently(write_with(
+        &project.root(),
+        &path,
+        &format!("{weak}git:\n  base_branch: develop\ndone:\n  commit: true\n"),
+    ));
+    let project = with_config();
+    passes_silently(edit_with(
+        &project.root(),
+        &project.path("invar.yaml"),
+        "review:\n",
+        "context:\n  binding_limit: 5000\nreview:\n",
+    ));
+}
+
+#[test]
+fn an_invar_yaml_that_would_not_parse_passes_for_ci_to_refuse() {
+    let project = with_config();
+    let path = project.path("invar.yaml");
+    passes_silently(write_with(&project.root(), &path, "review: [unclosed\n"));
+    passes_silently(edit_with(
+        &project.root(),
+        &path,
+        "signed: true",
+        "signed: maybe",
+    ));
+}
+
+#[test]
+fn an_invar_yaml_that_is_not_the_projects_is_not_judged() {
+    let project = with_config();
+    // In a subdirectory with no project of its own: just a file.
+    fs::create_dir_all(project.root().join("docs")).unwrap();
+    passes_silently(write_with(
+        &project.root(),
+        &project.path("docs/invar.yaml"),
+        "",
+    ));
+}
+
+const SETTINGS: &str = "{\n  \"permissions\": {\n    \"deny\": [\n      \"Read(./.env)\",\n      \
+    \"Read(/.invar/decisions/**)\"\n    ]\n  }\n}\n";
+
+#[test]
+fn taking_the_decisions_deny_rule_out_of_the_settings_is_denied() {
+    let project = Project::new(APPROVED);
+    fs::create_dir_all(project.root().join(".claude")).unwrap();
+    fs::write(project.root().join(".claude/settings.json"), SETTINGS).unwrap();
+    let path = project.path(".claude/settings.json");
+    for stdin in [
+        edit_with(
+            &project.root(),
+            &path,
+            ",\n      \"Read(/.invar/decisions/**)\"",
+            "",
+        ),
+        write_with(&project.root(), &path, "{}\n"),
+        write_with(
+            &project.root(),
+            &path,
+            "{\"permissions\": {\"deny\": [\"Read(./.env)\"]}}\n",
+        ),
+    ] {
+        guard(stdin)
+            .code(2)
+            .stderr(contains("Read(/.invar/decisions/**)"))
+            .stderr(contains("tell the developer, who changes it"));
+    }
+}
+
+#[test]
+fn other_changes_to_the_settings_pass() {
+    let project = Project::new(APPROVED);
+    fs::create_dir_all(project.root().join(".claude")).unwrap();
+    fs::write(project.root().join(".claude/settings.json"), SETTINGS).unwrap();
+    let path = project.path(".claude/settings.json");
+    passes_silently(edit_with(
+        &project.root(),
+        &path,
+        "Read(./.env)",
+        "Read(./.env.local)",
+    ));
+    passes_silently(write_with(
+        &project.root(),
+        &path,
+        "{\"model\": \"opus\", \"permissions\": {\"deny\": [\"Read(/.invar/decisions/**)\"]}}\n",
+    ));
+    // Not JSON: not the guard's to judge.
+    passes_silently(write_with(&project.root(), &path, "{ not json\n"));
+    // A project whose settings never had the rule can edit them freely.
+    fs::write(project.root().join(".claude/settings.json"), "{}\n").unwrap();
+    passes_silently(write_with(
+        &project.root(),
+        &path,
+        "{\"model\": \"opus\"}\n",
+    ));
+}
+
+#[test]
+fn a_git_commit_writing_the_config_trailer_is_denied() {
+    let project = Project::new(APPROVED);
+    for command in [
+        "git commit --trailer \"Invar-Config: x\"",
+        "git commit -m \"relax\" -m \"invar-config: the suite moved\"",
+    ] {
+        guard(bash(&project.root(), command))
+            .code(2)
+            .stderr(contains(
+                "`Invar-Config:` trailer is the developer's decision, not yours",
+            ))
+            .stderr(contains("Invar-Config: <reason>"));
+    }
+    passes_silently(bash(
+        &project.root(),
+        "invar config check --base origin/main",
+    ));
+    passes_silently(bash(&project.root(), "git log --grep Invar-Config"));
+}

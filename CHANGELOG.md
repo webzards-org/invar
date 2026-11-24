@@ -66,7 +66,33 @@
   never writes the trailer: `plan guard` denies an agent's `git commit` that
   does (#155).
 
+- **`invar config check --base <ref>`** fails a branch that weakens what invar
+  checks, comparing `invar.yaml` with the base branch's: the `acceptance:`
+  section removed, `acceptance.dir` or `acceptance.run` changed,
+  `acceptance.required`, `approval.signed` or `review.offer` turned off, or a
+  pattern removed from `cycle.required_paths`. It names each one with both
+  values, and passes a weakening with an `Invar-Config: <reason>` trailer the
+  developer writes. With no `invar.yaml` on the base it is off (#157). Contracts
+  `invar-yaml.md` 2.5.0 and `acceptance-lock.md` 1.6.0.
+- **`plan guard` protects the configuration.** It denies an agent's `Write` or
+  `Edit` that weakens `invar.yaml` by the same list, or that takes the
+  `.invar/decisions/**` deny rule out of `.claude/settings.json`, and a
+  `git commit` that writes the `Invar-Config` key (#157).
+- **The CI example installs the released CLI and checks its attestation**, and
+  runs `acceptance verify`, `config check` and `cycle check` (#157).
+
+- **`invar acceptance verify <TICKET> --base <ref>`** sets what the branch rule
+  compares with (#165).
+
 ### Changed
+
+- **The CI commands no longer take their base from the branch.**
+  `config check`, `cycle check` and `acceptance verify <TICKET>` use `--base`,
+  else `origin/HEAD`, else `main`, and never `git.base_branch`: a branch that set
+  it to itself was compared with itself and passed. They print a note when the
+  branch's `git.base_branch` names another branch, and `config check` notes a
+  change of the key. `plan check`, `done` and `review-input` keep using it.
+  Give `--base` in CI (#165). Contract `invar-yaml.md` 2.6.0.
 
 - **The README no longer says the agent cannot move its target.** It says
   what holds: a change after approval is detected, and an approval written by

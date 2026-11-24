@@ -18,6 +18,7 @@ fn order(covered_by: &[&str], uncovered: &[(&str, &str)]) -> Required {
 fn report() -> Report {
     Report {
         base: "main".to_owned(),
+        notes: Vec::new(),
         patterns: vec!["app/Models/**".to_owned()],
         off: None,
         list_change: None,

@@ -1,6 +1,6 @@
 # Contract: `invar.yaml`
 
-**Version:** 2.4.0 — `cycle.required_paths`: which changes need a cycle, checked in CI; see §11
+**Version:** 2.6.0 — the CI commands never take their base from the branch they check; see §11
 **Status:** stable
 **Implements:** §6 (Config file), §13c (the review's base branch), §14.3; light
 mode L-2 and L-7 (`docs/TASKS-M1.md`); A-2, A-6 and A-7 (`docs/TASKS-AT.md`)
@@ -114,6 +114,26 @@ an `origin/HEAD` ref.
 Valid values: a non-empty string containing no whitespace. The reader does not
 check that the branch exists; the commands that use it do, at the point they
 call `git`, and fail loudly if it does not.
+
+#### 3.3.1 Which base a CI command uses
+
+**Nothing a branch changes chooses what that branch is checked against** (D-20). The
+commands CI runs — `invar config check`, `invar cycle check`, and `invar acceptance verify`
+with a ticket — find their base in this order:
+
+1. `--base <ref>`;
+2. `git symbolic-ref refs/remotes/origin/HEAD`, the remote's default branch;
+3. `main`.
+
+They never read `git.base_branch`, from the working tree or from `HEAD`. When no `--base`
+is given and `invar.yaml` at `HEAD` sets `git.base_branch` to another branch than the one
+found, they say so in a note naming both, and recommend `--base`: a team whose pull
+requests target `develop` gives `--base origin/develop`. `invar acceptance verify` without
+a ticket compares nothing with a base, and is unchanged.
+
+The local commands — `plan check`, `done`, `review-input`, `acceptance lock` — keep the
+order above with `git.base_branch` first. They run for the developer, and CI is the
+boundary.
 
 ### 3.4 `context.binding_limit`
 
@@ -294,9 +314,9 @@ the list applies to the branches after it is on the base. An invalid `invar.yaml
 base is an error. `invar cycle required` is the session's question about its own working
 tree, and reads the working tree's file.
 
-**`git.base_branch`** is read from the branch, as every command reads it. A branch could
-point it at another branch, so in CI give the pull request's target with `--base`
-(`--base origin/${{ github.base_ref }}`), and do not rely on the key there.
+**The base** is found by §3.3.1: `--base`, else the remote's default branch, else `main`,
+and never `git.base_branch`. In CI give the pull request's target
+(`--base origin/${{ github.base_ref }}`).
 
 **What `invar cycle check` decides.** The **commits of the branch** are `<base>..HEAD`: what
 the branch merged in from the base is the base's, not the branch's. It needs the history
@@ -351,6 +371,51 @@ and comes with the verification of signed approvals (#154).
 **`invar cycle required <path>...`** prints `<path>: required (<pattern>)` for each path a
 pattern of the working tree's list matches, then `cycle: required` or `cycle: not
 required`, and exits 0.
+
+### 3.9 Weakening the checks
+
+Some keys decide whether the Plans, the locked tests and the required paths are checked at
+all. Changing them in one direction switches a check off, and an agent with an edit tool
+could do that with one edit (#157). **Weakening** is this closed list, and nothing else
+(D-18). Values are compared as read, with their defaults, so removing a key whose default is
+the stronger value weakens nothing:
+
+| A change from the base to the branch | Why it weakens |
+|---|---|
+| The `acceptance:` section removed | `acceptance verify` then warns and exits 0, and `plan check` and `done` no longer look at any lock (`acceptance-lock.md` D-21) |
+| `acceptance.dir` changed | The locked files at the old path are no longer looked at |
+| `acceptance.run` changed | `lock` and `acceptance run` would run something else, which could pass anything |
+| `acceptance.required` from `true` to `false` | New tickets are approved without acceptance tests by default |
+| `approval.signed` from `true` to `false` | Approvals are no longer signed, so an approval written by an agent looks like a person's |
+| A pattern removed from `cycle.required_paths`, the key or the section with it | Changes to those paths no longer need a cycle; `cycle check` reads the base's list, and this keeps the change from landing quietly |
+| `review.offer` from `true` to `false` | The main session stops offering the review before a pull request |
+
+Adding a key or a pattern, or changing a value the other way, is never weakening, and every
+key not in the list stays free to change. `git.base_branch` is not on the list, since no CI
+command reads it (§3.3.1); `config check` notes a change of it all the same. A whole `invar.yaml` removed is every weakening its
+keys allow. A change of `dir` or `run` is any change of its text, even one that names the
+same thing (`./tests/Acceptance`).
+
+**The boundary is CI.** `invar config check [--base <ref>]` reads `invar.yaml` at the base
+and at `HEAD`, with the base found by §3.3.1, as `cycle check` reads it (§3.8), and lists every weakening with its
+value at both. It passes with none. It passes a weakening when any commit of the branch
+(`<base>..HEAD`) has an **`Invar-Config: <reason>`** trailer with a reason that is not empty
+once trimmed, read as `Invar-Skip` is (D-15), and prints each reason and its commit.
+Otherwise it fails, non-zero, naming each weakening and the way out: `git commit --amend
+--trailer "Invar-Config: <reason>"`. No `invar.yaml` at the base: the check is off, and
+exits 0. One at the base or at `HEAD` that is not a valid config: an error. A shallow
+checkout that does not reach the merge base: the error of §3.8. Its last line is one of
+`config check: off: <why>`, `config check: passed: <why>` and `config check: failed`. It
+writes nothing, and it is not a developer-only command.
+
+**The guard is a convenience** (D-19). `plan guard` denies a `Write` or `Edit` of the
+project's `invar.yaml` when the file it would leave weakens the one there now, and names
+each weakened key; it allows the call whenever it cannot tell, or either side is not a valid
+config, because CI refuses what it lets through. An `invar.yaml` that is not the project's
+own, such as one in a subdirectory with no project of its own, is not judged. It denies an
+agent's `git commit` that writes the `Invar-Config` key, as it does `Invar-Skip`: a scan of
+words, which a message given with `-F` gets past. Binding the trailer to the developer's key
+comes with the verification of signed approvals (#154), as for a skip.
 
 ## 4. Value rules
 
@@ -572,6 +637,34 @@ deletes the Plan is the cycle's and has no Plan of its own, and the commit that 
 Plan was made before it was approved. A `failed` reset and a later approval need no rule of
 their own: a commit is covered only while some approval holds. The rule is deterministic and
 reads only what `plan approve` and `invar done` write.
+
+**D-18 — Weakening is a closed list** (2.5.0). Which keys switch a check off is a fact about
+the checks, and the same list has to be used by the guard and by CI, so it is stated once,
+here. A list that grew by judgement ("anything that looks like a relaxation") could not be
+checked by a program and would block ordinary edits; keys outside it, such as
+`context.binding_limit` or `done.commit`, change what a command does and not whether
+something is checked. Comparing values with their defaults keeps removing a key that only
+restated its default from being reported.
+
+**D-19 — CI is the boundary, the guard a convenience, and a trailer the way out** (2.5.0).
+The guard sees only the edit tools: a shell, or a branch rewritten elsewhere, never reaches
+it. CI compares what will be merged with what is there, with its own binary, which the agent
+cannot change. A weakening is sometimes right (a suite moved, a key dropped for a while), so
+it is not forbidden: it needs a reason a person wrote, which the pull request shows. The
+trailer, and not a signed commit, for the reason of D-15: it survives `git rebase
+--signoff`.
+
+**D-20 — A branch does not choose its base** (2.6.0). A check compares the branch with what it
+will be merged into. When the base came from `git.base_branch` in the branch's own
+`invar.yaml`, one commit could set it to the branch itself: the merge base was `HEAD`, nothing
+had changed, and `config check`, `cycle check` and the branch rule of `acceptance verify` all
+passed a branch that stopped signing, changed a required path and deleted another ticket's
+locked test (#165). The approvers list has the same answer for the same reason: it is read from
+the base, never the branch (`approval-signature.md` §6.1, D-3). So the CI commands take the base
+from their command line, where the CI configuration, not the branch, sets it, or from the
+remote, and only note the key. Putting `git.base_branch` on the weakening list instead would
+still let the branch name the base the list is read from. The local commands keep the key:
+there the developer runs them, and a wrong base costs them a wrong answer, not a check.
 
 ## 9. Open questions
 
@@ -802,6 +895,33 @@ cycle:
 **Why:** a pattern names paths under the project root as they are.
 
 ## 11. Version history
+
+**2.6.0 — the CI commands do not take their base from the branch (#165).**
+
+- §3.3, new §3.3.1: `config check`, `cycle check` and `acceptance verify <TICKET>` use
+  `--base`, else `origin/HEAD`, else `main`, never `git.base_branch`, and note a key they did
+  not use. §3.8 and §3.9 point to it; `config check` notes a change of the key. New D-20.
+- `invar acceptance verify` takes `--base <ref>` for the branch rule.
+
+**Why:** a branch that set `git.base_branch` to itself was compared with itself, and passed
+every CI check (D-20).
+
+**Compatibility:** no key or value changes. A CI step without `--base`, in a repository whose
+`origin/HEAD` is not the branch pull requests target, now compares with the remote's default
+branch, and says so; give `--base`. Local commands behave as before.
+
+**2.5.0 — weakening the checks (#157).**
+
+- §3, new §3.9: the closed list of weakenings, `invar config check`, the `Invar-Config:`
+  trailer, and the guard on `invar.yaml`. New D-18 and D-19.
+- `plan guard` reads the list for `invar.yaml`; `invar config check` reads it in CI.
+
+**Why:** removing the `acceptance:` section, or changing `acceptance.dir`, switched the lock
+check off in one edit, and CI stayed green (#157). The keys added since, `approval.signed`
+and `cycle.required_paths`, can switch off a check the same way.
+
+**Compatibility:** no key, value or default changes, so every valid file stays valid and
+reads as it did. What is new is a command and a guard that compare two files.
 
 **2.4.0 — `cycle.required_paths` (#155).**
 

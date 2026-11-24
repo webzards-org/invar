@@ -13,6 +13,7 @@ use crate::acceptance::verify::{self, Report, Stage};
 use crate::cli::plan::require_approved;
 use crate::cli::plan::target;
 use crate::cli::results::ResultsArgs;
+use crate::cycle;
 use crate::format::plan::Mode;
 use crate::fs;
 use crate::gate::check::{self, CheckError};
@@ -25,6 +26,13 @@ pub struct Args {
     /// Anything containing `/`, ending in `.md`, or `.`/`..` is a path;
     /// everything else is looked up as a ticket under `.invar/plans/`.
     pub target: Option<String>,
+
+    /// With a ticket: the branch or commit the branch rule compares with, in CI the pull
+    /// request's target, such as `origin/main`. Without it, the branch `origin/HEAD` points
+    /// to, else `main`; never `git.base_branch`, which the branch being checked could set
+    /// to itself. Without a ticket nothing is compared, and it is not read.
+    #[arg(long, value_name = "REF")]
+    pub base: Option<String>,
 
     #[command(flatten)]
     pub results: ResultsArgs,
@@ -60,7 +68,21 @@ pub fn run(args: Args) -> Result<()> {
             match check::check(&root, &spec, Mode::of(&config)) {
                 Ok(approved) => {
                     ticket = Some(approved.ticket.clone());
-                    verify::for_ticket(&root, &config, &approved, Stage::Closing)
+                    // A CI command: the base is `--base`, or found, never the branch's own
+                    // `git.base_branch` (invar-yaml.md §3.3.1).
+                    if let Ok(found) = cycle::ci_base(root.path(), args.base.as_deref())
+                        && let Some(note) =
+                            cycle::base_note(root.path(), args.base.as_deref(), &found)
+                    {
+                        eprintln!("note: {note}");
+                    }
+                    verify::for_ticket(
+                        &root,
+                        &config,
+                        &approved,
+                        Stage::Closing,
+                        args.base.as_deref(),
+                    )
                 }
                 Err(CheckError::Invalid(report)) => {
                     require_approved::print_problems(&report, &cwd);

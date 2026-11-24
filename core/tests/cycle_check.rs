@@ -568,13 +568,29 @@ fn the_trailer_survives_rebase_signoff() {
 }
 
 #[test]
-fn without_base_it_uses_git_base_branch() {
-    let project = Project::new(&format!("git:\n  base_branch: main\n{REQUIRED}"));
+fn without_base_it_uses_the_remotes_default_branch_and_not_git_base_branch() {
+    // `develop` holds the list; `origin/HEAD` points at it. The branch names `main`.
+    let project = Project::new(REQUIRED);
+    project.git(&["branch", "develop", "main"]);
+    project.git(&["update-ref", "refs/remotes/origin/develop", "develop"]);
+    project.git(&[
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/develop",
+    ]);
+    project.write(
+        "invar.yaml",
+        &format!("git:\n  base_branch: main\n{REQUIRED}"),
+    );
+    project.commit("name main");
     project.closed_cycle();
-    project
-        .invar(&["cycle", "check"])
-        .success()
-        .stdout(contains("base: main\n"));
+    let assert = project.invar(&["cycle", "check"]).success();
+    let out = stdout_of(&assert);
+    assert!(out.starts_with("base: origin/develop\n"), "{out}");
+    assert!(
+        out.contains("sets `git.base_branch: main`, and the base used is `origin/develop`"),
+        "{out}"
+    );
 }
 
 // --- cycle required -----------------------------------------------------------------------

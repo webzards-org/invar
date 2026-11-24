@@ -89,6 +89,20 @@ pub enum Command {
     /// nothing about a Plan; passing `plan check` does. A shell write (`sed
     /// -i`, a heredoc, `python3`) of approval values into a draft gets past
     /// the guard too, as it does for a lock line (acceptance-lock.md D-20).
+    ///
+    /// The project's `invar.yaml` is denied an edit that would weaken what invar checks
+    /// (invar-yaml.md §3.9), and `.claude/settings.json` one that takes out the deny rule
+    /// for `.invar/decisions/**`. A `git commit` that writes an `Invar-Skip:` or
+    /// `Invar-Config:` trailer is denied: those are the developer's. `invar config check`
+    /// and `invar cycle check` in CI are the boundaries there.
+    ///
+    /// Known limits, which no guard closes. The plugin's binary, its `hooks.json` and the
+    /// project's `.claude/settings.json` can be changed from the agent's shell, and the
+    /// guard fails open: a crash, a missing binary or the hook's timeout lets the call
+    /// through. The command guard reads words: a copied or renamed binary (`cp … /tmp/x
+    /// && /tmp/x plan approve`), a name built at run time, or `cargo run -- plan approve`
+    /// is not seen. The boundary is CI, running its own released binary, and for
+    /// approvals the signature of #154.
     Guard(guard::Args),
 }
 

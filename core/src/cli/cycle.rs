@@ -38,7 +38,8 @@ pub enum Command {
     /// the verification of signed approvals (#154).
     Check {
         /// The branch or commit to compare with: in CI, the pull request's target, such as
-        /// `origin/main`. Without it, `git.base_branch`, else `origin/HEAD`, else `main`.
+        /// `origin/main`. Without it, the branch `origin/HEAD` points to, else `main`; never
+        /// `git.base_branch`, which the branch being checked could set to itself.
         #[arg(long, value_name = "REF")]
         base: Option<String>,
     },
@@ -60,7 +61,7 @@ pub fn run(command: Command) -> Result<()> {
     let config = super::config(&root)?;
     match command {
         Command::Check { base } => {
-            let report = cycle::check(&root, base.as_deref(), config.git.base_branch.as_deref())?;
+            let report = cycle::check(&root, base.as_deref())?;
             print!("{}", report.render());
             if report.passes() {
                 Ok(())

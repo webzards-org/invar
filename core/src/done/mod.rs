@@ -118,7 +118,14 @@ pub fn close(
     }
 
     // 3. The locks hold, and none is half done.
-    let mut report = verify::for_ticket(root, config, &approved, Stage::Closing);
+    // A local command: `git.base_branch` is the developer's to set (§3.3.1).
+    let mut report = verify::for_ticket(
+        root,
+        config,
+        &approved,
+        Stage::Closing,
+        config.git.base_branch.as_deref(),
+    );
     if !report.holds() {
         return Err(DoneError::Locks(report));
     }

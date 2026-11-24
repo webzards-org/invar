@@ -38,6 +38,8 @@ const INVAR_DIR: &str = ".invar";
 pub struct Report {
     /// The base, as given or found.
     pub base: String,
+    /// What was said about the base: a `git.base_branch` the check did not use.
+    pub notes: Vec<String>,
     /// The base's `cycle.required_paths`. Empty: the check is off.
     pub patterns: Vec<String>,
     /// Why the check is off, when it is.
@@ -95,6 +97,7 @@ pub struct Open {
     pub spec: String,
 }
 
+/// A trailer with a reason, and the commit it is on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Skip {
     pub commit: String,
@@ -139,6 +142,9 @@ impl Report {
     pub fn render(&self) -> String {
         let mut out = String::new();
         let _ = writeln!(out, "base: {}", self.base);
+        for note in &self.notes {
+            let _ = writeln!(out, "note: {note}");
+        }
         if let Some(change) = &self.list_change {
             let _ = writeln!(
                 out,
@@ -244,7 +250,7 @@ fn commits(required: &Required) -> String {
 }
 
 /// The first 12 characters of a commit's name.
-fn short(commit: &str) -> String {
+pub fn short(commit: &str) -> String {
     commit.chars().take(12).collect()
 }
 
@@ -299,28 +305,11 @@ impl fmt::Display for NotCovered {
 
 impl std::error::Error for NotCovered {}
 
-/// Run the check against `base`, or `git.base_branch`, or the base `git` finds.
-pub fn check(
-    root: &ProjectRoot,
-    base: Option<&str>,
-    configured: Option<&str>,
-) -> Result<Report, CycleError> {
+/// Run the check against `base`, or the remote's default branch, or `main` (§3.3.1).
+pub fn check(root: &ProjectRoot, base: Option<&str>) -> Result<Report, CycleError> {
     let dir = root.path();
-    let base = match base {
-        Some(base) => base.to_owned(),
-        None => git::base_branch(dir, configured).map_err(CycleError::Git)?,
-    };
-    let shallow_or = |err: GitError, base: &str| {
-        if matches!(git::is_shallow(dir), Ok(true)) {
-            CycleError::Shallow {
-                base: base.to_owned(),
-                said: err.to_string(),
-            }
-        } else {
-            CycleError::Git(err)
-        }
-    };
-    let base_commit = git::commit_of(dir, &base).map_err(|err| shallow_or(err, &base))?;
+    let given = base;
+    let (base, base_commit) = resolve_base(dir, given)?;
 
     let base_list = match git::file_at(dir, &base_commit, FILE_NAME).map_err(CycleError::Git)? {
         None => None,
@@ -355,6 +344,7 @@ pub fn check(
 
     let mut report = Report {
         base: base.clone(),
+        notes: base_note(dir, given, &base).into_iter().collect(),
         patterns: patterns.clone(),
         off: None,
         list_change,
@@ -379,7 +369,7 @@ pub fn check(
         Some(_) => {}
     }
 
-    let fork = git::merge_base(dir, &base).map_err(|err| shallow_or(err, &base))?;
+    let fork = merge_base(dir, &base)?;
 
     // The branch's commits are `<base>..HEAD`: what it merged in from the base is the
     // base's, not the branch's (D-17). The net change is still taken from the merge base.
@@ -413,15 +403,79 @@ pub fn check(
         report.required.push(required);
     }
 
-    for (commit, values) in
-        git::trailers(dir, &base_commit, SKIP_TRAILER).map_err(CycleError::Git)?
-    {
+    (report.skips, report.empty_skips) = trailers(dir, &base_commit, SKIP_TRAILER)?;
+    report.fork = Some(fork);
+    Ok(report)
+}
+
+/// The base a CI command compares a branch with, and its commit: `--base`, else the
+/// remote's default branch (`origin/HEAD`), else `main` (`invar-yaml.md` §3.3.1, D-20).
+/// Never `git.base_branch`, which the branch being checked could set to itself. In a
+/// shallow clone that does not have it, the error says how to fetch it.
+pub fn resolve_base(dir: &Path, base: Option<&str>) -> Result<(String, String), CycleError> {
+    let base = ci_base(dir, base).map_err(CycleError::Git)?;
+    let commit = git::commit_of(dir, &base).map_err(|err| shallow_or(dir, err, &base))?;
+    Ok((base, commit))
+}
+
+/// The base of [`resolve_base`], without its commit: for `acceptance verify`, whose branch
+/// rule resolves the commit itself.
+pub fn ci_base(dir: &Path, base: Option<&str>) -> Result<String, GitError> {
+    match base {
+        Some(base) => Ok(base.to_owned()),
+        None => git::base_branch(dir, None),
+    }
+}
+
+/// What to say when no `--base` was given and `invar.yaml` at `HEAD` names another
+/// `git.base_branch` than the base that was used: it was not used, and why (D-20).
+pub fn base_note(dir: &Path, given: Option<&str>, used: &str) -> Option<String> {
+    if given.is_some() {
+        return None;
+    }
+    let bytes = git::file_at(dir, "HEAD", FILE_NAME).ok().flatten()?;
+    let named = config::parse_bytes(&bytes, Path::new(FILE_NAME))
+        .ok()?
+        .config
+        .git
+        .base_branch?;
+    (named != used).then(|| {
+        format!(
+            "{FILE_NAME} on this branch sets `git.base_branch: {named}`, and the base used is \
+             `{used}`, the remote's default branch or `main`: a branch does not choose what it \
+             is checked against. If pull requests target `{named}`, give `--base origin/{named}`"
+        )
+    })
+}
+
+/// The merge base of `base` and `HEAD`, with the advice of [`resolve_base`].
+pub fn merge_base(dir: &Path, base: &str) -> Result<String, CycleError> {
+    git::merge_base(dir, base).map_err(|err| shallow_or(dir, err, base))
+}
+
+fn shallow_or(dir: &Path, err: GitError, base: &str) -> CycleError {
+    if matches!(git::is_shallow(dir), Ok(true)) {
+        CycleError::Shallow {
+            base: base.to_owned(),
+            said: err.to_string(),
+        }
+    } else {
+        CycleError::Git(err)
+    }
+}
+
+/// The trailers `key` on the commits `from..HEAD`: each one with a reason, and the commits
+/// whose trailer had none, which count for nothing. For `Invar-Skip` and `Invar-Config`.
+pub fn trailers(dir: &Path, from: &str, key: &str) -> Result<(Vec<Skip>, Vec<String>), CycleError> {
+    let mut with_reason = Vec::new();
+    let mut empty = Vec::new();
+    for (commit, values) in git::trailers(dir, from, key).map_err(CycleError::Git)? {
         let had_trailer = !values.is_empty();
         let mut counted = false;
         for value in values {
             let reason = value.trim();
             if !reason.is_empty() {
-                report.skips.push(Skip {
+                with_reason.push(Skip {
                     commit: commit.clone(),
                     reason: reason.to_owned(),
                 });
@@ -429,11 +483,10 @@ pub fn check(
             }
         }
         if !counted && had_trailer {
-            report.empty_skips.push(commit);
+            empty.push(commit);
         }
     }
-    report.fork = Some(fork);
-    Ok(report)
+    Ok((with_reason, empty))
 }
 
 /// Which closed cycles cover each commit, asked once per commit.
@@ -543,6 +596,7 @@ pub enum CycleError {
         source: ConfigError,
     },
     /// A shallow checkout that does not reach the merge base.
+    /// The same for `invar config check`.
     Shallow {
         base: String,
         said: String,
