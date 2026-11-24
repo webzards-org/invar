@@ -2365,3 +2365,60 @@ CI commands now take `--base`, else `origin/HEAD`, else `main`, never the key, a
 they ignored (`invar-yaml.md` §3.3.1, D-20). It is the base-branch rule the approvers list
 already follows: what the branch is checked against is read from outside the branch. The local
 commands keep the key, because there the developer runs them.
+
+## 22. Invariant ids at the gate (#158)
+
+**The gap.** The coder never reads `BUSINESS_CONTEXT.md` (DESIGN §5c): it meets the
+invariants a ticket touches only as the planner's distillate in `## Implementation
+context`. The cost the design names is an invariant the planner leaves out. At the gate the
+developer had to notice what the Plan did *not* say; in review the reviewer (M1-26) runs on
+the same model as the planner, so its misses are likely to fall where the planner's did.
+And the plan-header.md rule that every named invariant has a criterion was guidance, because
+checking it meant matching a criterion's prose to an invariant's.
+
+**Why ids, and not prose matching.** The same reasoning as criterion ids (A-5): an id is
+the join key, and the core never compares prose with prose. A check on shared words would
+teach the planner to repeat the invariant's words in a criterion without covering anything,
+and a passing check would then mean less than no check. With ids, "the Plan names `INV-2`"
+and "`AC3` cites `INV-2`" are facts the core can state, and what is left — does `AC3` really
+fail when `INV-2` is broken? — stays the developer's judgement at the gate, which is where
+the design wants it.
+
+**What is built.** `business-context.md` 1.0.0 writes down what the core already relied on
+(the marker, the empty-file rule, the scaffold, the binding limit) and adds `INV-<n>:` on
+each item under `## Invariants`: unique, never reused, gaps and any order allowed, since a
+Plan or a PR may cite an id after the file changed. `plan-header.md` 1.9.0:
+`- BUSINESS_CONTEXT INV-2: …` in Implementation context, `- AC3 (INV-2): …` on a criterion.
+`plan validate` refuses an id the file does not define, a named invariant no criterion cites,
+and a criterion citing one Implementation context does not name: the coder sees only what is
+named. The gate lists every invariant, named (with its criteria) or `NOT NAMED`, and one line
+says that approving means none of the unnamed ones applies. `review-input` marks each
+invariant named or not from the ids, so the reviewer's "not named by the Plan" heading is no
+longer its own judgement; `pr-body` lists the named ids.
+
+**Decided, and why.**
+- **No flag for unnamed invariants at approval.** A flag typed every cycle becomes a habit,
+  not a review (§3). The list is shown; the developer's approval is the decision.
+- **A file with some ids and not others is refused.** The list would show fewer invariants
+  than the file holds and look complete. No ids at all is today's behavior, with one
+  warning.
+- **An approved Plan is not held to the file again.** Its body is frozen, and the file is
+  the team's to change; the references are checked when the Plan is written and approved.
+- **The coder's input is unchanged.** `context show --conventions` still carries no business
+  rule and no id (`gate_refusals.rs`).
+- **Ids only for invariants.** Terms and regional facts get none yet.
+- **Once the file has ids, the old form is refused (found in review).** A Plan with
+  `- BUSINESS_CONTEXT invariant: every query scoped.` and no citing criterion passed
+  `plan validate`, so the rule that a named invariant has a criterion was skipped, and
+  the gate listed `INV-1` as NOT NAMED while the Plan described it. The old form is now
+  valid only for a file without ids. Ids in prose are still not read (A-5).
+
+**The planner prompt.** It said the coder "receives the binding context in its session
+anyway". That was wrong since M1-23: the coder reads `AI_CONTEXT.md` through
+`--conventions` and business rules only from the Plan. Fixed, and the prompt now asks for
+ids in both places; its example Plan names and cites `INV-3`, and `plugin_prompts.rs`
+validates it against a `BUSINESS_CONTEXT.md` that defines it.
+
+**Not yet tried on real tickets.** Whether the planner names the right ids, and whether a
+developer reads the `NOT NAMED` lines rather than scrolling past them, is learned by running
+it. Record what changes here.

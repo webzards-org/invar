@@ -51,6 +51,7 @@ fn criteria(ids: &[&str]) -> Vec<Criterion> {
         .map(|id| Criterion {
             id: (*id).to_owned(),
             text: format!("the text of {id}"),
+            invariants: Vec::new(),
         })
         .collect()
 }

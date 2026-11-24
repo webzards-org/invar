@@ -1,10 +1,11 @@
 # Contract: Plan header and required sections
 
-**Version:** 1.8.0 — a signed approval, `approval.sig`, and the approval's commit; see §10 for what changed and why
+**Version:** 1.9.0 — invariant ids: a criterion cites them, Implementation context names them, the gate lists them; see §10 for what changed and why
 **Status:** stable
 **Implements:** §4a (Plan document structure), §4d (Checksums), §5c (Context
 delivery), §12 (Plan lifecycle); light mode L-1, L-2, L-5
-(`docs/TASKS-M1.md`); A-3, A-5, A-6 (`docs/TASKS-AT.md`)
+(`docs/TASKS-M1.md`); A-3, A-5, A-6 (`docs/TASKS-AT.md`); #158 (invariant ids, with
+`business-context.md`)
 **Read by:** the core (`format/`), the planner and coder agents (as prose),
 `/invar:review` (M1-20), any later reimplementation
 
@@ -200,7 +201,9 @@ In order:
 1. **Validate.** A Plan that `plan validate` rejects is refused, with the same
    list of problems. A new approval must have numbered criteria (§6.4), so
    `--reapprove` also refuses, listing each one, criteria that `plan validate`
-   accepts only because an earlier approval stands (D-16).
+   accepts only because an earlier approval stands (D-16). It holds the Plan's
+   invariant ids to `BUSINESS_CONTEXT.md` as it is now (§6.6), as `plan validate`
+   holds a draft, so `--reapprove` checks them too.
 2. **Compare with any earlier approval** (D-12):
    - `Status: draft` — approve. Any values already in the approval keys are
      overwritten.
@@ -252,6 +255,24 @@ In order:
    not cover, the line says so:
    ``Acceptance: skipped (default; the `required` in the header was not part of the approval)``,
    and the same after `from invar.yaml`.
+
+   **Between the criteria and that line, the invariants** (§6.6, D-22), when
+   `BUSINESS_CONTEXT.md` gives them ids: one line per invariant, in file order, with
+   its id, whether this Plan names it and the criteria that cite it, and its first
+   line cut to 60 characters:
+
+   ```
+   Invariants in BUSINESS_CONTEXT.md:
+     INV-1  named, covered by AC2   - every tenant-scoped query is filtered by acc…
+     INV-2  NOT NAMED in this Plan  - an operator action notifies the customer
+   
+   1 invariant is not named: approving says none of them applies to this ticket.
+   ```
+
+   The summary line is printed only when some are not named. When the invariants
+   have no ids, one warning instead says that coverage cannot be shown, and how to
+   add ids. No file, an empty one, or no invariant: nothing. It refuses nothing
+   that step 1 did not; it only shows. The same text appears with `--skill`.
 5. **Sign**, only when `approval.signed` is on in `invar.yaml`: the statement
    of `approval-signature.md` §3, built from `Ticket` and the `Approved-checksum`
    about to be written, is signed with the developer's SSH signing key, within 90
@@ -408,9 +429,28 @@ the installed version, the published version and the match class exactly as
 in light mode every item names `AI_CONTEXT` or `BUSINESS_CONTEXT` and carries
 no version information.
 
+**An invariant is named by its id** when `BUSINESS_CONTEXT.md` gives it one
+(`business-context.md` §5). *New in 1.9.0.*
+
+```
+- BUSINESS_CONTEXT INV-2: <guidance>
+```
+
+`INV-<n>` is `INV-`, a positive integer with no leading zero, then `:`; one id per
+item. The old form, `- BUSINESS_CONTEXT invariant: <guidance>` (or any
+`BUSINESS_CONTEXT` item without an id), is valid **only when the file has no ids**:
+absent, empty, or with invariants that carry none. When the file has ids it is an
+error at its line (§6.6), because an invariant named without its id is one the core
+cannot see: the gate would list it as not named, and no criterion would have to cite
+it. An item whose token after `BUSINESS_CONTEXT` is
+meant as an id and is not one (`INV-0:`, `inv-2:`, `INV-2` without the colon) is an
+error. Which ids the file defines is checked by `plan validate` (§6.6). Only the ids in a
+criterion's parentheses and in `BUSINESS_CONTEXT INV-<n>:` items are checked; an id
+mentioned in prose is not, since the core does not read prose (A-5).
+
 The core does not parse the guidance text; it checks only that the section
-exists and is non-empty. The form is fixed anyway so a reviewer can see at a
-glance where a rule came from.
+exists and is non-empty, and the ids above. The form is fixed anyway so a reviewer
+can see at a glance where a rule came from.
 
 **A distillate, never a copy.** Only what this ticket needs. A Plan that pastes
 whole context files in defeats both purposes of the section: it spends the token
@@ -446,6 +486,22 @@ since 1.6.0.*
 - AC2: Given <the starting state>,
   when <the action>, then <the observable outcome>.
 ```
+
+A criterion that covers invariants cites them after its id, before the colon
+(*new in 1.9.0*):
+
+```markdown
+- AC3 (INV-2): Given <the starting state>, when <the action>, then <the outcome>.
+- AC4 (INV-1, INV-4): Given …, when …, then ….
+```
+
+The ids are `INV-<n>` as in §6.3, separated by a comma and a space, between `(` and
+`)`, with one space between the criterion's id and the `(`. Anything else in that
+place (`(INV-0)`, `(inv-2)`, `(INV-2,INV-3)`, an unclosed `(`) is an error; the
+criterion's id still counts, so no gap is reported on top of it. The rules for the
+criterion id itself, below, are unchanged, and so is what the id is to every reader:
+`acceptance spec`, `acceptance lock` and a test's name in JUnit (`test-results.md` §4)
+know the criterion as `AC3`, never by its citation.
 
 The number is the criterion's **id**, and these rules are checked (D-18):
 
@@ -494,11 +550,14 @@ heading is present, in order, that the section is non-empty, and the rules above
 `BUSINESS_CONTEXT` invariant named in `## Implementation context` should have
 at least one acceptance criterion that would fail if the invariant were broken
 — the criterion that would have caught the incident the invariant exists to
-prevent. **This is guidance to the planner, not a rule the core checks.**
-Matching prose criteria to prose invariants is a judgement; a mechanical check
-could only look for shared words, which a planner would learn to satisfy
-without covering anything. Where a criterion is missing, `/invar:review` is
-where it surfaces: it reports invariants the diff appears to break (M1-20).
+prevent. **With ids, the core checks that such a criterion exists by its
+citation** (§6.6): an invariant named by id that no criterion cites is refused.
+It never checks that the criterion's words would catch the violation: matching
+prose criteria to prose invariants is a judgement, and a mechanical check on shared
+words would teach a planner to repeat them without covering anything (D-22). That
+judgement is the developer's at the gate, and `/invar:review` reports the invariants
+the diff appears to break (M1-20). Without ids, this is guidance to the planner, as
+before 1.9.0.
 
 Because the section is part of the body, `Approved-checksum` covers it: the
 criteria are frozen at approval exactly as a confirmed scenario would be (L-1).
@@ -542,6 +601,34 @@ let a change through: the declaration matches nothing, and the change is still r
 The PR description and `invar review-input` show it right after the criteria,
 when it lists something: the point of the section is that a person sees the
 change. Absent or `_none_`, they show nothing, not even the heading.
+
+### 6.6 Invariant ids against `BUSINESS_CONTEXT.md`
+
+*New in 1.9.0.* `plan validate` holds a Plan that is not approved, and
+`plan approve` every approval it is about to record, to `BUSINESS_CONTEXT.md` as it
+is at that moment (`business-context.md` §5). It refuses, in the same run as every
+other problem, each at its line:
+
+- an `INV-<n>` in the Plan, in `## Implementation context` or in a criterion's
+  citation, that the file does not define (a file without ids defines none);
+- an invariant named in `## Implementation context` that no criterion cites;
+- a criterion citing an invariant that `## Implementation context` does not name:
+  the coder reads only the Plan, so an invariant it is held to must be stated there;
+- when the file has ids, an Implementation context item in the old form
+  (`- BUSINESS_CONTEXT invariant: …`), with the ids the file defines (§6.3);
+- the problems of the file itself (`business-context.md` §5.2), each at its line of
+  `BUSINESS_CONTEXT.md`.
+
+A Plan with no ids, against a file without ids, is checked for none of this, as
+before 1.9.0. A Plan with no ids against a file with ids is valid: the gate lists
+every invariant as not named (§5.3 step 4), and approving says none of them applies.
+
+**An approved Plan is not held to the file again** (D-22): `plan check`, `done`,
+`review-input` and `pr-body` do not refuse a Plan whose ids the file no longer
+defines. The body is frozen, and the file may move on after approval. `review-input`
+marks each invariant of the file `(named in the Plan)` or `(not named in the Plan)`,
+and `pr-body` lists the ids the Plan names and how many it does not, both read from
+the file as it is.
 
 ## 7. Decisions and their reasons
 
@@ -763,6 +850,18 @@ signature is several lines and the header is one line per key, and because the
 header's fields must stay readable by every reader that knows nothing of
 signatures. Optional and opt-in (`invar-yaml.md` D-13): an absent file means what
 an approval meant before.
+
+**D-22 — Invariant ids, and the gate shows what a Plan leaves out** (1.9.0, #158).
+The coder never reads `BUSINESS_CONTEXT.md` (§5c): it gets the invariants a ticket
+touches as the planner's distillate. The cost the design names is an invariant the
+planner fails to carry into the Plan, and an absence is the hardest thing to see in a
+document. With ids the core can list every invariant of the file against the Plan, and
+the developer no longer has to notice what is missing: approving with an invariant
+marked `NOT NAMED` is a conscious "this does not apply". It follows criterion ids
+(D-18): the id is the join key, and the core never matches prose to prose. No flag is
+asked for unnamed invariants; a flag typed every cycle becomes a habit, not a review.
+The references are checked when the Plan is written and approved, not afterwards,
+because the approved body is frozen and the file is the team's to change.
 
 ## 8. Open questions
 
@@ -1103,7 +1202,118 @@ Approved-checksum: sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece8
 **Why valid:** the approval keeps its digest and stands, and `plan check` prints
 `acceptance: skipped` (§5.1, D-19). Adding `Acceptance: required` by hand stales it.
 
+### 9.13 Valid — example 9.1 with invariant ids
+
+`BUSINESS_CONTEXT.md` is example 7.1 of `business-context.md`, where `INV-3` is the
+team scope. Only the two sections that change are shown in full.
+
+```markdown
+---
+Ticket: SHOP-214
+Module: orders
+Status: draft
+Approved-by:
+Approved-at:
+Approved-checksum:
+---
+
+## Ticket
+SHOP-214 — As a customer I want to cancel an order that has not been paid yet.
+
+## Intent
+Let customers cancel their own unpaid orders from the order page.
+
+## Scope
+`App\Actions\Orders\CancelOrder`, `OrderPolicy::cancel` and the route
+`POST /orders/{order}/cancel`.
+
+## Open questions / answers
+- Q: Can a paid order be cancelled? A: No; it goes through the refund flow.
+
+## Rejected alternatives
+- Soft-deleting the order: removes it from the customer's history.
+
+## Acceptance criteria
+- AC1: Given a pending, unpaid order of mine, when I cancel it, then its status
+  is `cancelled`.
+- AC2: Given a paid order of mine, when I try to cancel it, then the request is
+  refused with 403 and the order is unchanged.
+- AC3 (INV-3): Given an order that belongs to another team, when I send a cancel
+  request with its id, then the response is 404 and the order is unchanged.
+
+## Implementation context
+- AI_CONTEXT: controllers stay thin — the change lives in
+  `App\Actions\Orders\CancelOrder`
+- BUSINESS_CONTEXT INV-3: the cancel route loads the order through the
+  `BelongsToTeam` scope and never calls `withoutGlobalScopes()`
+```
+
+At the gate, `INV-3` is `named, covered by AC3`, and `INV-1` and `INV-4` are
+`NOT NAMED in this Plan`: approving says neither applies to cancelling an unpaid
+order.
+
+### 9.14 Invalid — a citation that is not a list of ids
+
+```markdown
+---
+Ticket: SHOP-214
+Module: orders
+Status: draft
+Approved-by:
+Approved-at:
+Approved-checksum:
+---
+
+## Ticket
+SHOP-214 — Cancel an unpaid order.
+
+## Intent
+Let customers cancel their own unpaid orders.
+
+## Scope
+`App\Actions\Orders\CancelOrder`.
+
+## Open questions / answers
+- Q: Paid orders? A: Refund flow.
+
+## Rejected alternatives
+- Soft-deleting the order.
+
+## Acceptance criteria
+- AC1 (inv-3): Given another team's order, when I cancel it, then 404.
+
+## Implementation context
+- BUSINESS_CONTEXT INV-3: load the order through the team scope.
+```
+
+**Why invalid:** `(inv-3)` is not `(INV-3)` (§6.4). With the citation fixed, the Plan
+is example 9.13 in miniature.
+
 ## 10. Version history
+
+**1.9.0 — invariant ids (#158).**
+
+- §6.3: an invariant is named by its id, `- BUSINESS_CONTEXT INV-<n>: <guidance>`; the
+  old form is valid only when the file has no ids, and an error when it has them. Only
+  ids in those items and in a criterion's citation are checked, never one in prose.
+- §6.4: a criterion cites the invariants it covers, `- AC3 (INV-2): …`; a malformed
+  citation is an error. The criterion id rules are unchanged. The planner guidance on
+  a criterion per invariant becomes a check when there are ids.
+- New §6.6: `plan validate` and `plan approve` hold the ids to `BUSINESS_CONTEXT.md`;
+  an approved Plan is not held to it again.
+- §5.3: step 1 checks the ids on `--reapprove` too; step 4 prints every invariant,
+  named or not, before the `Acceptance` line. New D-22, examples 9.13 and 9.14.
+
+**Why:** an invariant the planner leaves out was invisible at the gate, and the rule
+that a named invariant has a criterion could not be checked without matching prose
+(#158).
+
+**Compatibility:** every approved Plan stays valid and keeps its digest: nothing is
+checked of it again. A draft that was valid stays valid, unless it names an invariant as
+`BUSINESS_CONTEXT INV-<n>:` that the file does not define or no criterion cites, or
+names an invariant in the old form once the file has ids;
+`AC1 (…):` was a malformed id before, so no valid draft had a citation. A project whose `BUSINESS_CONTEXT.md` has no ids sees one warning at the
+gate, and nothing else changes.
 
 **1.8.0 — a signed approval (#154).**
 

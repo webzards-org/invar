@@ -1943,3 +1943,122 @@ fn the_contracts_example_has_the_criteria_it_shows() {
         assert!(!criterion.text.is_empty());
     }
 }
+
+// --- invariant ids: citations and names (§6.3, §6.4, #158) -------------------------
+
+fn with_context(content: &str) -> String {
+    let context = parse(&valid())
+        .section("Implementation context")
+        .unwrap()
+        .to_owned();
+    replace(&valid(), &context, &format!("{content}\n"))
+}
+
+#[test]
+fn a_criterion_cites_invariants_between_its_id_and_the_colon() {
+    let plan = parse_criteria_of(
+        "- AC1: Given a team, when I list, then I see its members.\n\
+         - AC2 (INV-2): Given another team's member, when I open it, then 404.\n\
+         - AC3 (INV-1, INV-4): Given an operator, when they cancel,\n  then the customer is notified.",
+    );
+    let criteria = plan.criteria();
+    assert_eq!(
+        ids_and_texts(&plan),
+        pairs(&[
+            ("AC1", "Given a team, when I list, then I see its members."),
+            (
+                "AC2",
+                "Given another team's member, when I open it, then 404."
+            ),
+            (
+                "AC3",
+                "Given an operator, when they cancel, then the customer is notified."
+            ),
+        ])
+    );
+    assert_eq!(criteria[0].invariants, Vec::<u64>::new());
+    assert_eq!(criteria[1].invariants, vec![2]);
+    assert_eq!(criteria[2].invariants, vec![1, 4]);
+    let refs = plan.invariant_refs();
+    let lines: Vec<usize> = refs.cited.iter().map(|(_, _, line)| *line).collect();
+    assert_eq!(refs.cited.len(), 2);
+    assert_eq!(lines[1], lines[0] + 1);
+}
+
+#[test]
+fn a_citation_that_is_not_a_list_of_ids_is_refused_and_the_id_still_counts() {
+    for citation in [
+        "(INV-0)",
+        "(inv-2)",
+        "(INV-2,INV-3)",
+        "(INV-x)",
+        "(2)",
+        "()",
+    ] {
+        let found = messages(
+            &with_criteria(&format!(
+                "- AC1: Given a, when b, then c.\n- AC2 {citation}: Given a, when b, then c."
+            )),
+            Mode::Light,
+        );
+        assert_eq!(found.len(), 1, "{citation}: {found:#?}");
+        assert!(
+            found[0].contains(&format!("`AC2 {citation}` does not cite invariants")),
+            "{citation}: {found:#?}"
+        );
+    }
+}
+
+#[test]
+fn an_unclosed_citation_is_refused() {
+    let found = messages(
+        &with_criteria("- AC1 (INV-2: Given a, when b, then c."),
+        Mode::Light,
+    );
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(
+        found[0].contains("`AC1 (INV-2` does not cite invariants"),
+        "{found:#?}"
+    );
+}
+
+#[test]
+fn implementation_context_names_an_invariant_by_its_id() {
+    let plan = parse(&with_context(
+        "- AI_CONTEXT: thin controllers.\n\
+         - BUSINESS_CONTEXT INV-2: the export loads the customer through the scoped model.\n\
+         - BUSINESS_CONTEXT invariant: the old form, for a file without ids.",
+    ));
+    let refs = plan.invariant_refs();
+    assert_eq!(refs.named.len(), 1);
+    assert_eq!(refs.named[0].0, 2);
+    assert!(refs.names(2) && !refs.names(1));
+}
+
+#[test]
+fn a_malformed_id_in_implementation_context_is_refused_at_its_line() {
+    for token in ["INV-0:", "inv-2:", "INV-2", "INV-x:"] {
+        let text = with_context(&format!("- BUSINESS_CONTEXT {token} scoped."));
+        let found = messages(&text, Mode::Light);
+        assert_eq!(found.len(), 1, "{token}: {found:#?}");
+        assert!(
+            found[0].contains(&format!("`{token}` is not an invariant id")),
+            "{token}: {found:#?}"
+        );
+    }
+}
+
+#[test]
+fn the_contracts_example_with_invariant_ids_is_valid() {
+    let plan = parse(&contract_example("9.13"));
+    let refs = plan.invariant_refs();
+    assert!(refs.names(3), "{refs:?}");
+    assert_eq!(refs.citing(3), vec!["AC3"]);
+}
+
+#[test]
+fn the_contracts_invalid_citation_example_is_refused() {
+    let found = messages(&contract_example("9.14"), Mode::Light);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found[0].contains("does not cite invariants"), "{found:#?}");
+}

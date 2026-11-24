@@ -3,7 +3,13 @@
 use crate::format::plan::{Mode, Plan};
 
 use super::acceptance::{Locked, LockedFile, Tests};
-use super::render;
+use super::render as render_with;
+use crate::context::invariants::Invariants;
+
+/// [`render_with`] for a project whose invariants have no ids: as before #158.
+fn render(plan: &Plan, ticket: &str, with_ticket: bool, tests: &Tests) -> String {
+    render_with(plan, ticket, with_ticket, tests, &Invariants::None)
+}
 
 /// What `gather` finds for the fixtures, which have no `Acceptance` value.
 const NONE: Tests = Tests::NotRecorded;

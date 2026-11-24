@@ -4,6 +4,21 @@
 
 ### Added
 
+- **Invariant ids: the gate shows which invariants a Plan leaves out.** Start
+  each item under `## Invariants` in `BUSINESS_CONTEXT.md` with an id,
+  `- INV-1: …`. A Plan then names an invariant in Implementation context as
+  `- BUSINESS_CONTEXT INV-2: …`, and a criterion that covers it cites it,
+  `- AC3 (INV-2): Given …`. `invar plan approve` lists every invariant of the file
+  after the criteria, marked named (with the criteria that cite it) or
+  `NOT NAMED`, so approving says the unnamed ones do not apply. `invar plan
+  validate` refuses an id the file does not define, a named invariant no
+  criterion cites, a criterion citing one the Plan does not name, an invariant named in the old
+  form (`- BUSINESS_CONTEXT invariant: …`) once the file has ids, and duplicate,
+  malformed or partial ids in the file. `invar review-input` marks each invariant
+  named or not named in the Plan, and `invar pr-body` lists the ids the Plan names.
+  `invar init` shows the form in a comment under the heading. A file without ids
+  behaves as before, with one warning at the gate (#158). New contract
+  `business-context.md` 1.0.0; `plan-header.md` 1.9.0.
 - **Signed approvals, opt-in.** With `approval.signed: true` in `invar.yaml`,
   `invar plan approve` (and `/invar:approve`) signs the approval with your SSH
   signing key, the one git uses for signed commits, and writes the signature

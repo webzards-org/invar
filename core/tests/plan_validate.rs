@@ -395,3 +395,216 @@ fn a_valid_tests_to_change_section_passes() {
     project.plan("PROJ-412-reserve-stock", &text);
     project.validate(&["PROJ-412"]).success();
 }
+
+// --- invariant ids against BUSINESS_CONTEXT.md (plan-header.md §6.6, #158) ----------
+
+const MARKER: &str = "<!-- invar-context: v1 -->";
+const NAME: &str = "SHOP-214-cancel-unpaid-order";
+
+impl Project {
+    fn business(&self, invariants: &str) {
+        fs::write(
+            self.root().join("BUSINESS_CONTEXT.md"),
+            format!("{MARKER}\n# BUSINESS_CONTEXT.md\n\n## Invariants\n\n{invariants}"),
+        )
+        .unwrap();
+    }
+}
+
+/// `plan_text` with `criteria` and `context` in place of its own: the criteria are
+/// on line 26 onwards, the context items after them.
+fn plan_with(criteria: &str, context: &str) -> String {
+    plan_text("SHOP-214")
+        .replace(
+            "- AC1: Given an unpaid order, when I cancel it, then it is cancelled.\n",
+            criteria,
+        )
+        .replace("- AI_CONTEXT: controllers stay thin\n", context)
+}
+
+fn out_of(assert: &assert_cmd::assert::Assert) -> String {
+    String::from_utf8(assert.get_output().stdout.clone()).unwrap()
+}
+
+const CITED: &str = "- AC1: Given an unpaid order, when I cancel it, then it is cancelled.\n\
+                     - AC2 (INV-2): Given another team's order, when I cancel it, then 404.\n";
+const NAMED: &str = "- AI_CONTEXT: controllers stay thin\n\
+                     - BUSINESS_CONTEXT INV-2: the order is loaded through the team scope\n";
+
+#[test]
+fn a_plan_whose_ids_the_file_defines_and_cites_is_valid() {
+    let project = Project::new("");
+    project.business("- INV-1: paid orders are never deleted.\n- INV-2: team scope.\n");
+    project.plan(NAME, &plan_with(CITED, NAMED));
+    project
+        .validate(&["SHOP-214"])
+        .success()
+        .stdout(contains("ok: "));
+}
+
+#[test]
+fn an_id_the_file_does_not_define_is_refused_at_each_line_it_is_written() {
+    let project = Project::new("");
+    project.business("- INV-1: paid orders are never deleted.\n");
+    project.plan(NAME, &plan_with(CITED, NAMED));
+    let out = out_of(&project.validate(&["SHOP-214"]).failure());
+    let lines: Vec<&str> = out
+        .lines()
+        .filter(|line| line.contains("`INV-2` is not an invariant of BUSINESS_CONTEXT.md"))
+        .collect();
+    assert_eq!(lines.len(), 2, "{out}");
+    assert!(lines[0].contains("spec.md:27: "), "{out}");
+    assert!(lines[1].contains("spec.md:31: "), "{out}");
+    assert!(
+        lines[0].contains("BUSINESS_CONTEXT.md defines INV-1"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_named_invariant_that_no_criterion_cites_is_refused() {
+    let project = Project::new("");
+    project.business("- INV-2: team scope.\n");
+    project.plan(
+        NAME,
+        &plan_with(
+            "- AC1: Given an unpaid order, when I cancel it, then it is cancelled.\n",
+            NAMED,
+        ),
+    );
+    let out = out_of(&project.validate(&["SHOP-214"]).failure());
+    assert!(
+        out.contains("spec.md:30: `INV-2` is named here and no criterion cites it"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_criterion_citing_an_invariant_the_context_does_not_name_is_refused() {
+    let project = Project::new("");
+    project.business("- INV-2: team scope.\n");
+    project.plan(
+        NAME,
+        &plan_with(CITED, "- AI_CONTEXT: controllers stay thin\n"),
+    );
+    let out = out_of(&project.validate(&["SHOP-214"]).failure());
+    assert!(
+        out.contains(
+            "spec.md:27: `AC2` cites `INV-2`, which `## Implementation context` does not name"
+        ),
+        "{out}"
+    );
+}
+
+#[test]
+fn the_files_own_problems_are_reported_with_its_lines_in_the_same_run() {
+    let project = Project::new("");
+    project.business("- INV-2: team scope.\n- INV-2: again.\n- inv-3: malformed.\n- no id.\n");
+    project.plan(NAME, &plan_with(CITED, NAMED));
+    let out = out_of(&project.validate(&["SHOP-214"]).failure());
+    for expected in [
+        "BUSINESS_CONTEXT.md:7: `INV-2` appears again (first on line 6)",
+        "BUSINESS_CONTEXT.md:8: `inv-3:` is not an invariant id",
+        "BUSINESS_CONTEXT.md:9: this invariant has no id",
+    ] {
+        assert!(out.contains(expected), "{expected}:\n{out}");
+    }
+}
+
+#[test]
+fn a_file_without_ids_changes_nothing() {
+    let project = Project::new("");
+    project.business("- paid orders are never deleted.\n- every query is team-scoped.\n");
+    project.plan(
+        NAME,
+        &plan_with(
+            "- AC1: Given an unpaid order, when I cancel it, then it is cancelled.\n",
+            "- BUSINESS_CONTEXT invariant: every query is team-scoped\n",
+        ),
+    );
+    project
+        .validate(&["SHOP-214"])
+        .success()
+        .stdout(contains("ok: "));
+}
+
+#[test]
+fn an_approved_plan_is_not_held_to_the_file_again() {
+    // Valid in form, whatever the file says now (§6.6): `plan check` decides the rest.
+    let project = Project::new("");
+    project.business("- INV-1: paid orders are never deleted.\n");
+    let approved = plan_with(CITED, NAMED).replace("Status: draft", "Status: approved");
+    project.plan(NAME, &approved);
+    project.validate(&["SHOP-214"]).success();
+}
+
+#[test]
+fn the_stop_hook_holds_a_draft_to_the_same_rules() {
+    let project = Project::new("");
+    project.business("- INV-1: paid orders are never deleted.\n");
+    project.plan(NAME, &plan_with(CITED, NAMED));
+    let out = out_of(&project.validate(&["--all-drafts"]).failure());
+    assert!(
+        out.contains("`INV-2` is not an invariant of BUSINESS_CONTEXT.md"),
+        "{out}"
+    );
+}
+
+// --- the old form, when the file has ids (review of #166) ---------------------------
+
+const OLD_FORM: &str = "- AI_CONTEXT: controllers stay thin\n\
+                        - BUSINESS_CONTEXT invariant: every query scoped.\n";
+const AC1_ONLY: &str = "- AC1: Given a, when b, then c.\n";
+
+#[test]
+fn the_old_form_is_refused_when_the_file_has_ids_naming_the_line_and_the_ids() {
+    let project = Project::new("");
+    project.business("- INV-1: every query is team-scoped.\n- INV-2: paid orders stay.\n");
+    project.plan(NAME, &plan_with(AC1_ONLY, OLD_FORM));
+    let out = out_of(&project.validate(&["SHOP-214"]).failure());
+    assert!(
+        out.contains(
+            "spec.md:30: name the invariant by its id: `- BUSINESS_CONTEXT INV-<n>: <guidance>`; \
+             BUSINESS_CONTEXT.md defines INV-1, INV-2"
+        ),
+        "{out}"
+    );
+    assert_eq!(out.lines().count(), 1, "{out}");
+}
+
+#[test]
+fn the_old_form_is_the_form_without_ids_or_without_a_file() {
+    let without_ids = Project::new("");
+    without_ids.business("- every query is team-scoped.\n");
+    without_ids.plan(NAME, &plan_with(AC1_ONLY, OLD_FORM));
+    without_ids.validate(&["SHOP-214"]).success();
+
+    let empty = Project::new("");
+    empty.business("<!-- - INV-1: ... -->\n");
+    empty.plan(NAME, &plan_with(AC1_ONLY, OLD_FORM));
+    empty.validate(&["SHOP-214"]).success();
+
+    let absent = Project::new("");
+    absent.plan(NAME, &plan_with(AC1_ONLY, OLD_FORM));
+    absent.validate(&["SHOP-214"]).success();
+}
+
+#[test]
+fn a_plan_mixing_an_id_and_the_old_form_is_refused_for_the_old_form_only() {
+    let project = Project::new("");
+    project.business("- INV-1: every query is team-scoped.\n- INV-2: paid orders stay.\n");
+    project.plan(
+        NAME,
+        &plan_with(
+            "- AC1 (INV-1): Given a, when b, then c.\n",
+            "- BUSINESS_CONTEXT INV-1: the order is loaded through the team scope\n\
+             - BUSINESS_CONTEXT invariant: paid orders stay.\n",
+        ),
+    );
+    let out = out_of(&project.validate(&["SHOP-214"]).failure());
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert!(
+        out.contains("spec.md:30: name the invariant by its id"),
+        "{out}"
+    );
+}

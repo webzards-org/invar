@@ -5,7 +5,13 @@
 use crate::context::{Binding, File, State};
 use crate::format::plan::{Mode, Plan};
 
-use super::{Diff, FileStat, choose, parse_numstat, render};
+use super::{Diff, FileStat, choose, parse_numstat};
+use crate::context::invariants::Invariants;
+
+/// [`super::render`] for a project whose invariants have no ids: as before #158.
+fn render(plan: &Plan, binding: &Binding, base: &str, diff: &Diff, tests: &Tests) -> String {
+    super::render(plan, binding, &Invariants::None, base, diff, tests)
+}
 use crate::pr_body::acceptance::{Locked, LockedFile, Tests};
 
 /// The fixture has no `Acceptance` value.

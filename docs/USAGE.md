@@ -41,6 +41,26 @@ Under *Terms*, write the business's own words, one line each, such as
 the invariants, and the planner uses them in every Plan. Leave the heading
 empty if you don't need it.
 
+Under *Invariants*, give each rule an id, so the gate can show which ones a Plan
+leaves out:
+
+```markdown
+## Invariants (always true, no exceptions)
+
+- INV-1: a paid order is never deleted; it is cancelled through the refund flow.
+- INV-3: every query on team data is scoped to the current team by the
+  `BelongsToTeam` global scope.
+```
+
+An id is `INV-` and a number, then a colon, at the start of each item. Numbers
+are names, like ADR numbers: never reuse one for another rule, and leave the
+number of a removed invariant unused, since a Plan or a PR may cite it. Gaps and
+any order are fine. Number all of them or none: `invar plan validate` refuses a
+list where some have ids and some don't, as well as a duplicate or a malformed id
+(`INV-0`, `inv-1`). Without ids everything works as before, and `plan approve`
+warns once that it cannot show which invariants a Plan leaves out. The full rule
+is in [`contracts/formats/business-context.md`](../contracts/formats/business-context.md).
+
 Keep both short. They are loaded into every session, and anything over the
 limit (`context.binding_limit`, 9000 characters by default) is refused.
 
@@ -161,7 +181,23 @@ else edits it.
 ```
 
 This prints the criteria once more, records your name, the date and a
-checksum of the Plan, and starts the next phase at once. It also records
+checksum of the Plan, and starts the next phase at once.
+
+When your invariants have ids, it lists every one of them after the criteria:
+
+```
+Invariants in BUSINESS_CONTEXT.md:
+  INV-1  NOT NAMED in this Plan  - a paid order is never deleted; it is cancelled…
+  INV-3  named, covered by AC3   - every query on team data is scoped to the curr…
+
+1 invariant is not named: approving says none of them applies to this ticket.
+```
+
+Read the `NOT NAMED` lines. Approving says that none of those invariants applies
+to this ticket. If one does, don't approve: tell the planner, which names it in
+the Plan's *Implementation context* and gives it a criterion that cites it
+(`- AC3 (INV-3): Given …`). `plan validate` already makes sure that every
+invariant the Plan names has such a criterion. It also records
 whether this ticket gets **locked acceptance tests**:
 
 | You run | Acceptance tests |

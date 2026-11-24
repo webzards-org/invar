@@ -25,7 +25,9 @@
 //! 3. the **binding context**, `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`, as
 //!    `context show --binding` prints it — the invariants a change can break,
 //!    all of them: the reviewer checks every one, including those the Plan
-//!    does not name (M1-26);
+//!    does not name (M1-26). When the invariants have ids, a list right after it
+//!    marks each `(named in the Plan)` or `(not named in the Plan)`, read from the
+//!    ids, so which heading a planner's miss goes under is not a judgement (#158);
 //! 4. the **diff** of the branch against the base branch (`git::branch_diff`).
 //!    Above [`DIFF_BUDGET`] characters the patch is left out and the changed
 //!    files are listed with their line counts instead; the reviewer reads what
@@ -39,6 +41,7 @@ use std::fmt::Write as _;
 
 use crate::acceptance::verify::no_section_warning;
 use crate::context::Binding;
+use crate::context::invariants::Invariants;
 use crate::format::plan::{ACCEPTANCE_TESTS_TO_CHANGE, Plan};
 use crate::fs::ProjectRoot;
 use crate::git::{self, GitError};
@@ -134,7 +137,14 @@ pub fn parse_numstat(text: &str) -> Vec<FileStat> {
 ///
 /// The caller decides that the Plan may be reviewed against — approved, and
 /// unchanged since (`plan check`) — exactly as for `pr-body`.
-pub fn render(plan: &Plan, binding: &Binding, base: &str, diff: &Diff, tests: &Tests) -> String {
+pub fn render(
+    plan: &Plan,
+    binding: &Binding,
+    invariants: &Invariants,
+    base: &str,
+    diff: &Diff,
+    tests: &Tests,
+) -> String {
     let header = plan.header();
     let mut out = String::new();
 
@@ -164,6 +174,7 @@ pub fn render(plan: &Plan, binding: &Binding, base: &str, diff: &Diff, tests: &T
     if !binding.is_empty() {
         out.push('\n');
         out.push_str(&binding);
+        write_invariants(&mut out, plan, invariants);
     }
 
     out.push('\n');
@@ -218,6 +229,32 @@ pub fn render(plan: &Plan, binding: &Binding, base: &str, diff: &Diff, tests: &T
         }
     }
     out
+}
+
+/// Each invariant of `BUSINESS_CONTEXT.md` by id, marked by whether the Plan's
+/// Implementation context names it (#158). Nothing when the invariants have no ids.
+fn write_invariants(out: &mut String, plan: &Plan, invariants: &Invariants) {
+    let Some(list) = invariants.ids() else {
+        return;
+    };
+    let refs = plan.invariant_refs();
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "=== invariants of BUSINESS_CONTEXT.md, by id — whether the Plan's Implementation \
+         context names each ==="
+    );
+    let _ = writeln!(out);
+    for invariant in list {
+        let mark = if refs.names(invariant.number) {
+            "named in the Plan"
+        } else {
+            "not named in the Plan"
+        };
+        let _ = writeln!(out, "- {} ({mark}): {}", invariant.id(), invariant.text);
+    }
+    let _ = writeln!(out);
+    let _ = writeln!(out, "=== end of invariants ===");
 }
 
 /// `=== Acceptance tests ===`: what the reviewer judges the locked tests by.

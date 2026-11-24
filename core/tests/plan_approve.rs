@@ -1424,3 +1424,181 @@ fn an_invalid_section_stops_the_approval() {
         .stderr(contains("`acceptance.run` is required"));
     assert_eq!(project.read_spec(), before);
 }
+
+// --- the invariants at the gate (#158) ----------------------------------------------
+
+const MARKER: &str = "<!-- invar-context: v1 -->";
+
+/// `PROJ-412` with `INV-1` named and cited by `AC2`.
+fn plan_with_ids() -> String {
+    plan_text("PROJ-412")
+        .replace(
+            "- AC2: Given 1 in stock,",
+            "- AC2 (INV-1): Given 1 in stock,",
+        )
+        .replace(
+            "- AI_CONTEXT: controllers stay thin\n",
+            "- AI_CONTEXT: controllers stay thin\n\
+             - BUSINESS_CONTEXT INV-1: a reservation never takes stock below zero\n",
+        )
+}
+
+fn invariants(items: &str) -> String {
+    format!(
+        "{MARKER}\n# BUSINESS_CONTEXT.md\n\n## Invariants (always true, no exceptions)\n\n{items}"
+    )
+}
+
+const TWO: &str = "- INV-1: stock is never negative, whatever the order of concurrent reservations says\n\
+                   - INV-2: an operator action notifies the customer\n";
+
+fn stdout(assert: &assert_cmd::assert::Assert) -> String {
+    String::from_utf8_lossy(&assert.get_output().stdout).into_owned()
+}
+
+#[test]
+fn the_gate_lists_every_invariant_named_or_not_after_the_criteria() {
+    let project = Project::new(Some("Rade"));
+    project.write_spec(&plan_with_ids());
+    fs::write(project.root().join("BUSINESS_CONTEXT.md"), invariants(TWO)).unwrap();
+    let out = stdout(&project.approve(&["PROJ-412"]).success().stderr(""));
+
+    let list = "Invariants in BUSINESS_CONTEXT.md:\n\
+        \x20 INV-1  named, covered by AC2   - stock is never negative, whatever the order of concurrent r…\n\
+        \x20 INV-2  NOT NAMED in this Plan  - an operator action notifies the customer\n\
+        \n\
+        1 invariant is not named: approving says none of them applies to this ticket.\n\
+        \n\
+        Acceptance: ";
+    let at = out
+        .find(list)
+        .unwrap_or_else(|| panic!("no list in:\n{out}"));
+    assert!(
+        out.find("- AC2 (INV-1): Given 1 in stock").unwrap() < at,
+        "{out}"
+    );
+    assert!(at < out.find("approved: ").unwrap(), "{out}");
+}
+
+#[test]
+fn the_list_is_the_same_bytes_every_time_and_with_skill() {
+    let run = |args: &[&str]| {
+        let project = Project::new(Some("Rade"));
+        project.write_spec(&plan_with_ids());
+        fs::write(project.root().join("BUSINESS_CONTEXT.md"), invariants(TWO)).unwrap();
+        stdout(&project.approve(args).success())
+    };
+    let first = run(&["PROJ-412"]);
+    assert_eq!(first, run(&["PROJ-412"]));
+    assert_eq!(first, run(&["PROJ-412", "--skill"]));
+}
+
+#[test]
+fn every_invariant_named_prints_no_summary_line() {
+    let project = Project::new(Some("Rade"));
+    project.write_spec(&plan_with_ids());
+    fs::write(
+        project.root().join("BUSINESS_CONTEXT.md"),
+        invariants("- INV-1: stock is never negative\n"),
+    )
+    .unwrap();
+    let out = stdout(&project.approve(&["PROJ-412"]).success());
+    assert!(
+        out.contains("  INV-1  named, covered by AC2  - stock is never negative\n"),
+        "{out}"
+    );
+    assert!(!out.contains("not named"), "{out}");
+}
+
+#[test]
+fn a_plan_without_ids_against_a_file_with_ids_lists_them_all_as_not_named() {
+    let project = Project::new(Some("Rade"));
+    fs::write(project.root().join("BUSINESS_CONTEXT.md"), invariants(TWO)).unwrap();
+    let out = stdout(&project.approve(&["PROJ-412"]).success());
+    assert!(out.contains("INV-1  NOT NAMED in this Plan"), "{out}");
+    assert!(
+        out.contains("2 invariants are not named: approving says none of them applies"),
+        "{out}"
+    );
+}
+
+#[test]
+fn without_ids_one_warning_and_the_approval_as_before() {
+    let project = Project::new(Some("Rade"));
+    fs::write(
+        project.root().join("BUSINESS_CONTEXT.md"),
+        invariants("- stock is never negative\n- an operator action notifies the customer\n"),
+    )
+    .unwrap();
+    let out = stdout(&project.approve(&["PROJ-412"]).success());
+    let warnings: Vec<&str> = out
+        .lines()
+        .filter(|line| line.starts_with("warning:"))
+        .collect();
+    assert_eq!(warnings.len(), 1, "{out}");
+    assert!(
+        warnings[0].contains("the 2 invariants in BUSINESS_CONTEXT.md have no id"),
+        "{out}"
+    );
+    assert!(warnings[0].contains("`- INV-1: …`"), "{out}");
+    assert!(!out.contains("Invariants in BUSINESS_CONTEXT.md"), "{out}");
+}
+
+#[test]
+fn no_file_or_an_empty_one_prints_nothing_about_invariants() {
+    let absent = Project::new(Some("Rade"));
+    let without = stdout(&absent.approve(&["PROJ-412"]).success());
+    let empty = Project::new(Some("Rade"));
+    fs::write(
+        empty.root().join("BUSINESS_CONTEXT.md"),
+        invariants("<!-- - INV-1: ... -->\n"),
+    )
+    .unwrap();
+    let with_empty = stdout(&empty.approve(&["PROJ-412"]).success());
+    assert_eq!(without, with_empty);
+    assert!(!without.contains("nvariant"), "{without}");
+}
+
+#[test]
+fn a_plan_whose_ids_the_file_does_not_hold_is_refused_before_the_criteria() {
+    let project = Project::new(Some("Rade"));
+    project.write_spec(&plan_with_ids());
+    fs::write(
+        project.root().join("BUSINESS_CONTEXT.md"),
+        invariants("- INV-2: an operator action notifies the customer\n"),
+    )
+    .unwrap();
+    let assert = project.approve(&["PROJ-412"]).failure();
+    let out = stdout(&assert);
+    assert!(
+        out.contains("`INV-1` is not an invariant of BUSINESS_CONTEXT.md"),
+        "{out}"
+    );
+    assert!(!out.contains("Acceptance criteria of"), "{out}");
+    assert_eq!(header_value(&project.read_spec(), "Status"), "draft");
+}
+
+#[test]
+fn reapprove_holds_the_ids_to_the_file_as_it_is_now() {
+    let project = Project::new(Some("Rade"));
+    project.write_spec(&plan_with_ids());
+    fs::write(project.root().join("BUSINESS_CONTEXT.md"), invariants(TWO)).unwrap();
+    project.approve(&["PROJ-412"]).success();
+    // The file moves on: an approved Plan still holds, and is not checked again.
+    fs::write(
+        project.root().join("BUSINESS_CONTEXT.md"),
+        invariants("- INV-2: an operator action notifies the customer\n"),
+    )
+    .unwrap();
+    project.check().success();
+    // A new approval is: the body changed, and `INV-1` is gone from the file.
+    let changed = project
+        .read_spec()
+        .replace("1 remains available", "one remains available");
+    project.write_spec(&changed);
+    let out = stdout(&project.approve(&["PROJ-412", "--reapprove"]).failure());
+    assert!(
+        out.contains("`INV-1` is not an invariant of BUSINESS_CONTEXT.md"),
+        "{out}"
+    );
+}

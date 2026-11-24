@@ -581,3 +581,51 @@ fn the_help_describes_both_outputs() {
         .success()
         .stdout(contains("context"));
 }
+
+// --- invariant ids (business-context.md §6, #158) ------------------------------------
+
+/// Thirty invariants of a realistic length, with ids or without.
+fn thirty_invariants(ids: bool) -> String {
+    let mut body =
+        String::from("# BUSINESS_CONTEXT.md\n\n## Invariants (always true, no exceptions)\n\n");
+    for n in 1..=30 {
+        let id = if ids {
+            format!("INV-{n}: ")
+        } else {
+            String::new()
+        };
+        body.push_str(&format!(
+            "- {id}rule {n}: every query on team data is scoped to the current team, and \
+             nothing in request handling calls withoutGlobalScopes().\n"
+        ));
+    }
+    body
+}
+
+#[test]
+fn with_ids_the_binding_context_stays_within_the_default_limit_and_ids_count_in_it() {
+    let project = Project::new("");
+    project.context("BUSINESS_CONTEXT.md", &thirty_invariants(false));
+    let without = stdout_of(&project.show(&["--binding"]).success())
+        .chars()
+        .count();
+
+    project.context("BUSINESS_CONTEXT.md", &thirty_invariants(true));
+    let printed = stdout_of(&project.show(&["--binding"]).success());
+    assert!(printed.contains("- INV-30: rule 30"), "{printed}");
+    let with = printed.chars().count();
+    // "INV-1: " to "INV-9: " are 7 characters, "INV-10: " to "INV-30: " are 8.
+    assert_eq!(with - without, 9 * 7 + 21 * 8);
+    assert!(with <= 9_000, "{with} characters");
+
+    // The ids are counted like any other text: one character under is refused.
+    fs::write(
+        project.root().join("invar.yaml"),
+        format!("context:\n  binding_limit: {}\n", with - 1),
+    )
+    .unwrap();
+    project
+        .show(&["--binding"])
+        .failure()
+        .stderr(contains(format!("binding context is {with} characters")));
+}

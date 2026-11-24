@@ -192,3 +192,22 @@ fn a_plan_with_no_tests_to_change_prints_no_such_part() {
     assert!(!out.contains("=== Acceptance tests to change ==="), "{out}");
     assert!(!out.contains("=== Unlocked tests ==="), "{out}");
 }
+
+#[test]
+fn a_criterion_that_cites_an_invariant_is_known_by_its_id_alone() {
+    // #158: `AC3 (INV-3):` is still `AC3` to the test-writer and to every test name.
+    let contract =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/plan-header.md");
+    let contract = fs::read_to_string(contract).unwrap();
+    let after = contract.split_once("### 9.13 ").unwrap().1;
+    let body = after.split_once("```markdown\n").unwrap().1;
+    let text = body.split_once("\n```\n").unwrap().0.to_owned() + "\n";
+    let plan = Plan::parse(&text, Mode::Light).unwrap();
+
+    let out = render(&plan, &config(), &[]);
+    assert!(
+        out.contains("\nAC3: Given an order that belongs to another team, when I send a cancel"),
+        "{out}"
+    );
+    assert!(!out.contains("AC3 (INV-3)"), "{out}");
+}

@@ -53,7 +53,9 @@ git commit -m "chore: set up invar"
 **4. Fill in the context files.** `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`
 hold your team's conventions and business rules. Invar never writes their
 content. Until they hold something under their headings, they are treated as
-absent. [`USAGE.md`](USAGE.md) says what goes in each.
+absent. Start each invariant in `BUSINESS_CONTEXT.md` with an id, `- INV-1: …`,
+as the comment under its heading shows: the gate then lists which invariants
+a Plan leaves out. [`USAGE.md`](USAGE.md) says what goes in each.
 
 **5. Optional: turn on locked acceptance tests.** See
 [Acceptance tests](#acceptance-tests) below. Without them, the cycle works as

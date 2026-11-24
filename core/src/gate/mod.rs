@@ -9,5 +9,6 @@ pub mod approval;
 pub mod approve;
 pub mod check;
 pub mod guard;
+pub mod invariants;
 pub mod stop;
 pub mod validate;
