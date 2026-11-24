@@ -81,7 +81,18 @@
 - **The CI example installs the released CLI and checks its attestation**, and
   runs `acceptance verify`, `config check` and `cycle check` (#157).
 
+- **`invar acceptance verify <TICKET> --base <ref>`** sets what the branch rule
+  compares with (#165).
+
 ### Changed
+
+- **The CI commands no longer take their base from the branch.**
+  `config check`, `cycle check` and `acceptance verify <TICKET>` use `--base`,
+  else `origin/HEAD`, else `main`, and never `git.base_branch`: a branch that set
+  it to itself was compared with itself and passed. They print a note when the
+  branch's `git.base_branch` names another branch, and `config check` notes a
+  change of the key. `plan check`, `done` and `review-input` keep using it.
+  Give `--base` in CI (#165). Contract `invar-yaml.md` 2.6.0.
 
 - **The README no longer says the agent cannot move its target.** It says
   what holds: a change after approval is detected, and an approval written by

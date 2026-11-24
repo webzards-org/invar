@@ -233,6 +233,13 @@ steps:
 `fetch-depth: 0` is for `config check` and `cycle check`, which read the branch's history
 from its merge base. `acceptance verify` needs none. Each is described below.
 
+**Every step that compares the branch with a base passes `--base`**, the pull request's target.
+Without it, these commands use the branch `origin/HEAD` points to, else `main`, and never
+`git.base_branch` from `invar.yaml`: that file is on the branch being checked, and a branch that
+set the key to itself would be compared with itself and pass. If your pull requests target
+`develop`, `--base origin/${{ github.base_ref }}` already says so. `git.base_branch` stays for the
+commands you run yourself (`plan check`, `done`, `review-input`).
+
 ## Optional: verify the locks in CI
 
 A locked acceptance test is only worth something if CI notices when it changes. Run
@@ -365,8 +372,8 @@ Then check every pull request:
 ```
 
 `fetch-depth: 0`, because the check reads the branch's history from its merge base, and a
-shallow checkout is refused with that advice. Give `--base` in CI: `git.base_branch` is read
-from the branch, which could point it elsewhere.
+shallow checkout is refused with that advice. Give `--base` in CI; without it the check uses
+`origin/HEAD` or `main`, never `git.base_branch`, which the branch could point at itself.
 
 The list is read from `invar.yaml` **on the base branch**, so a branch cannot switch off its
 own check. A branch that changes the list is checked against the base's, with a note; the

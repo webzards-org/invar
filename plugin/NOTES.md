@@ -2355,3 +2355,13 @@ Both are in `invar plan guard --help`.
 
 - [ ] An agent asked to drop the `acceptance:` section, denied, and telling the developer
 - [ ] A real pull request in GitHub Actions running the three checks on the attested binary
+
+**A branch that chose its own base (found in review, #165).** Without `--base`, `config check`
+and `cycle check` took the base from `git.base_branch` in the branch's own `invar.yaml`, and so
+did the branch rule of `acceptance verify <TICKET>`. One commit on `feat/x` that removed
+`approval.signed`, set `git.base_branch: feat/x` and changed a required model passed both
+checks: the merge base was `HEAD`, so nothing had changed. With `--base main` both failed. The
+CI commands now take `--base`, else `origin/HEAD`, else `main`, never the key, and note a key
+they ignored (`invar-yaml.md` §3.3.1, D-20). It is the base-branch rule the approvers list
+already follows: what the branch is checked against is read from outside the branch. The local
+commands keep the key, because there the developer runs them.
