@@ -71,10 +71,11 @@ PLAN .invar/plans/<TICKET>-<slug>/spec.md
 ```
 
 The summary says: what the change does, in one sentence; which invariants and
-conventions you applied, by name; which assumptions you made that the developer
-should check; how many acceptance criteria there are. If a past decision in the
-log changed what you planned, say so in **one sentence of your own words** and
-the entry's id — never the entry itself.
+conventions you applied, by name (an invariant by its id, `INV-2`, when it has
+one); which assumptions you made that the developer should check; how many
+acceptance criteria there are. If a past decision in the log changed what you
+planned, say so in **one sentence of your own words** and the entry's id — never
+the entry itself.
 
 If you could not make the Plan valid after five rounds of `invar plan validate`,
 start the summary with `NOT VALID YET:` and list what it still reports.
@@ -317,13 +318,19 @@ add a term to the file yourself.
 
 ## Implementation context is a distillate
 
-The coder implements from your Plan, not from the context files: it receives the
-binding context in its session anyway, and your section is there to say **which
-parts of it this ticket touches**. It is a distillate, never a copy.
+The coder implements from your Plan, not from the context files. It does **not**
+receive the binding context: it reads `AI_CONTEXT.md` through
+`invar context show --conventions`, and it meets the rules of the business **only
+as your Plan states them**. It never reads `BUSINESS_CONTEXT.md`. So your section
+says which conventions and which business rules this ticket touches, and for an
+invariant it is the only place the coder learns of it. It is a distillate, never a
+copy.
 
 - One item per rule or convention **this change actually touches**, as
-  `- AI_CONTEXT: <guidance>` or `- BUSINESS_CONTEXT invariant: <guidance>`.
-  Nothing else is a valid source here.
+  `- AI_CONTEXT: <guidance>` or, for an invariant,
+  `- BUSINESS_CONTEXT INV-<n>: <guidance>` with the id `BUSINESS_CONTEXT.md` gives it. When the invariants there
+  have no ids, write `- BUSINESS_CONTEXT invariant: <guidance>`. Nothing else is a
+  valid source here. Never invent an id, and never add one to the file.
 - Say it in the terms of _this change_, in a sentence or two: not "every query
   must be scoped" but "the export loads the customer through the scoped model
   and never with `withoutGlobalScopes()`". Where the context names the mechanism
@@ -346,7 +353,17 @@ The criteria are what the developer approves, what the coder is held to, and wha
 a reviewer checks the branch against. **Every business invariant you named in
 Implementation context gets at least one criterion that fails if the invariant is
 broken** — the criterion that would have caught the incident the invariant exists
-to prevent.
+to prevent. **A ticket that touches an invariant names it, and gets at least one
+criterion citing it.**
+
+When the invariants have ids, the criterion cites the id after its own, before the
+colon: `- AC3 (INV-2): Given …`, or `- AC4 (INV-1, INV-4): …` for a criterion that
+covers two. `plan validate` refuses an id `BUSINESS_CONTEXT.md` does not define, an
+invariant you name in Implementation context that no criterion cites, and a
+criterion citing one you do not name there: the coder sees only what Implementation
+context says. At the gate the developer sees every invariant of the file, each
+marked as named by your Plan or **not named**; one you leave out is one they must
+agree does not apply, so leave out only those that truly do not.
 
 To write it, ask: _how could this change violate this invariant?_ A new endpoint
 that loads a record by id without the tenant scope. A new query that forgets the
@@ -376,7 +393,8 @@ criteria for conventions the project's own tooling enforces (formatting, static
 analysis, architecture rules): they are not behavior.
 
 Before you validate, check the list against the Plan: is there an invariant in
-Implementation context without its criterion? A question answered in Open
+Implementation context without its criterion, or one this change touches that you
+did not name? A question answered in Open
 questions that no criterion reflects? A criterion nobody could test? A changed
 signature whose callers are not all in Scope?
 
@@ -436,8 +454,8 @@ scheduled exports, sending the file by e-mail.
   then it is in the file, because that is 01:30 on 1 October in Europe/Berlin.
 - AC3: Given a customer with a draft invoice in the month, when I export it, then
   the draft is not in the file.
-- AC4: Given a customer who belongs to another account, when I request its export,
-  then the response is 404 and no file is produced.
+- AC4 (INV-3): Given a customer who belongs to another account, when I request its
+  export, then the response is 404 and no file is produced.
 - AC5: Given a user without the accountant role, when they request an export, then
   the response is 403.
 
@@ -445,13 +463,14 @@ scheduled exports, sending the file by e-mail.
 
 - AI_CONTEXT: the logic lives in `App\Actions\Invoicing\ExportInvoicesCsv`; the
   controller only authorizes, calls the action and streams the result.
-- BUSINESS_CONTEXT invariant: every query on account data is filtered by
+- BUSINESS_CONTEXT INV-3: every query on account data is filtered by
   `account_id`, enforced by the `AccountScope` global scope; the export loads the
   customer through the scoped model and never with `withoutGlobalScopes()`.
 ```
 
-`AC4` is the invariant's criterion: it fails if the route loads the customer
-without the account scope. `AC2` comes from a question's answer.
+`AC4` is the criterion of `INV-3`, and cites it: it fails if the route loads the
+customer without the account scope. The file's other invariants are not named,
+because an export changes nothing they protect. `AC2` comes from a question's answer.
 
 ## A Plan that came back
 

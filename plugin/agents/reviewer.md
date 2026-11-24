@@ -111,7 +111,11 @@ never read `BUSINESS_CONTEXT.md`: it met only the invariants the Plan carries in
 Implementation context, so one the planner left out was invisible to it.
 
 List every invariant in the `BUSINESS_CONTEXT.md` block of the review input, and
-for each, note whether the Plan's Implementation context names it (in any words).
+for each, note whether the Plan's Implementation context names it. When the review
+input has an `=== invariants of BUSINESS_CONTEXT.md, by id` block, it has already
+marked each invariant `(named in the Plan)` or `(not named in the Plan)` from the
+ids: use that mark, and do not judge it yourself. Without that block, judge from
+Implementation context, in any words.
 Then, for **each one**, named or not, ask how *this diff* could break it: a query
 that leaves the scope (`withoutGlobalScopes()`, a raw query, a lookup by id without
 the tenant), a state change that skips its side effect, a permission check that is
@@ -195,10 +199,10 @@ Unlocked: <file> (round <R>) — still asserts AC<n> | no longer asserts AC<n> �
 - AC<n> — <the criterion, in a few words>
 
 ## Invariants the Plan names that the change appears to break
-- <the invariant, in a few words> — <file:line> — <how>
+- <the invariant: its id if it has one, then a few words> — <file:line> — <how>
 
 ## Invariants the Plan does not name that the change appears to break
-- <the invariant, in a few words> — <file:line> — <how>
+- <the invariant: its id if it has one, then a few words> — <file:line> — <how>
 
 ## Conventions in AI_CONTEXT.md the change appears to break
 - "<the convention, quoted from AI_CONTEXT.md>" — <file:line> — <how>
