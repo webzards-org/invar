@@ -2320,3 +2320,38 @@ approval is, so that a skip in CI is accepted only when someone in the base's
 - [ ] The guard denying a real `git commit --trailer "Invar-Skip: …"` in a session
 - [ ] The check on a real pull request in GitHub Actions, with `fetch-depth: 0` and
       `--base origin/${{ github.base_ref }}`
+
+## 21. The configuration, and what the guard cannot close (#157)
+
+**What is built.** The keys that decide whether something is checked are a closed list in
+`invar-yaml.md` §3.9: the `acceptance:` section, its `dir`, `run` and `required`,
+`approval.signed`, the patterns of `cycle.required_paths`, and `review.offer`. `plan guard`
+denies a `Write` or `Edit` of the project's `invar.yaml` that weakens one of them, and one of
+`.claude/settings.json` that takes out the deny rule `invar init` writes for
+`.invar/decisions/**`. It denies an agent's `git commit` that writes the `Invar-Config` key, as
+for `Invar-Skip`. `invar config check` compares `invar.yaml` at `HEAD` with the base's in CI,
+and passes a weakening only with an `Invar-Config: <reason>` trailer.
+
+**Known limits, and why the boundary is CI.**
+
+- **B2: the local pieces are writable.** The plugin's binary in
+  `~/.claude/plugins/cache/…/bin/`, its `hooks.json` and the project's
+  `.claude/settings.json` can all be changed from the agent's shell, which no hook on
+  `Write|Edit` sees. And the guard fails open: a crash, a missing binary or the hook's
+  timeout lets the call through, on purpose, so that a broken guard never halts a session.
+  So the guard is a convenience. The checks that count run in CI with a binary CI installs
+  from the release and checks with `gh attestation verify` (`docs/INSTALL.md`), never the
+  repository's or a plugin cache's.
+- **B3: the command guard reads words.** It recognises `invar`, or a path ending in it,
+  followed by a developer's command. A copied or renamed binary
+  (`cp …/invar /tmp/x && /tmp/x plan approve …`), a name built at run time, or
+  `cargo run -- plan approve` is not seen, and no scan can see them all. The fix is not a
+  better scan: an approval is made the developer's by the signature of #154, and its
+  verification in CI. The same goes for the two trailers.
+
+Both are in `invar plan guard --help`.
+
+**Not exercised** (needs a real Claude Code session).
+
+- [ ] An agent asked to drop the `acceptance:` section, denied, and telling the developer
+- [ ] A real pull request in GitHub Actions running the three checks on the attested binary
