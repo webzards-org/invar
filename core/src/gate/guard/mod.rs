@@ -625,12 +625,60 @@ fn judge_command(payload: &Value) -> Verdict {
                 .into(),
         };
     };
+    if writes_skip_trailer(command) {
+        return Verdict::Deny {
+            reason: skip_trailer_reason(),
+        };
+    }
     match human_only(command) {
         Some((entry, target)) => Verdict::Deny {
             reason: (entry.reason)(target.as_deref().unwrap_or("<ticket>")),
         },
         None => Verdict::Pass,
     }
+}
+
+/// Whether a command line writes the `Invar-Skip:` trailer into a commit: a `git commit`
+/// in one of its simple commands, and the trailer's key anywhere in the line, in any case,
+/// so that a message in `-m`, in `--trailer` or in a here-document is seen
+/// (`invar-yaml.md` §3.8).
+///
+/// **Words, not shell**, as [`human_only`]: a message written to a file first and given
+/// with `-F`, or a key a shell builds at run time, is not seen. It makes an honest agent
+/// stop and ask; the binding of a skip to a person comes with the verification of signed
+/// approvals (#154).
+fn writes_skip_trailer(command: &str) -> bool {
+    let key = crate::cycle::SKIP_TRAILER.to_ascii_lowercase();
+    if !command.to_ascii_lowercase().contains(&key) {
+        return false;
+    }
+    let command = command.replace("\\\n", " ");
+    command
+        .split([';', '&', '|', '\n', '(', ')', '`'])
+        .any(|segment| {
+            let words: Vec<&str> = segment
+                .split(|c: char| c.is_whitespace() || matches!(c, '"' | '\''))
+                .filter(|word| !word.is_empty())
+                .collect();
+            words.iter().enumerate().any(|(at, word)| {
+                let name = word.rsplit(['/', '\\']).next().unwrap_or(word);
+                matches!(name, "git" | "git.exe") && words[at + 1..].contains(&"commit")
+            })
+        })
+}
+
+fn skip_trailer_reason() -> String {
+    format!(
+        "an `{key}:` trailer is the developer's decision, not yours: it tells `invar cycle \
+         check` in CI that this branch changes a path that needs a cycle and goes without one, \
+         and why. Do not write it, in a commit message, a `--trailer` or any other way. Commit \
+         without it, tell the developer that the change touches a path `cycle.required_paths` \
+         names, and that the pull request needs either a cycle closed with /invar:done or an \
+         `{key}: <reason>` trailer they write themselves: `git commit --amend --trailer \
+         \"{key}: <reason>\"`. If you only meant to mention the trailer, leave the key out of \
+         a command that runs `git commit`.",
+        key = crate::cycle::SKIP_TRAILER
+    )
 }
 
 /// The human-only command a shell command line runs, and its ticket: the value

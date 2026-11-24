@@ -26,6 +26,7 @@
 
 pub mod config;
 pub mod decision;
+pub mod glob;
 pub mod junit;
 pub mod lock;
 pub mod plan;

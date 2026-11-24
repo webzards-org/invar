@@ -88,29 +88,12 @@ fn merge_base(root: &Path, configured: Option<&str>) -> Result<String, String> {
     })
 }
 
-/// The commands are the ones that work. `git fetch origin <base>` alone only sets
-/// `FETCH_HEAD` in a shallow clone, whose fetch refspec names one branch, and a checkout
-/// with `fetch-depth: 0` makes `origin/<base>` but no `<base>`: neither gives git the name
-/// that `base` is, so each has to create it. `--deepen` is not offered: it counts from
-/// the existing shallow boundary, a ref fetched for the first time has none, and the
-/// result differs between versions of git.
 fn shallow_clone(base: &str, said: &str) -> String {
-    let (refspec, full_history) = match base.strip_prefix("origin/") {
-        Some(branch) => (
-            format!("+refs/heads/{branch}:refs/remotes/origin/{branch}"),
-            "check out with `fetch-depth: 0`".to_owned(),
-        ),
-        None => (
-            format!("{base}:{base}"),
-            format!("check out with `fetch-depth: 0` and run `git branch {base} origin/{base}`"),
-        ),
-    };
     format!(
         "this is a shallow clone, and it does not have the base branch `{base}` or its merge base \
          with this branch, so changes to other tickets' locked tests cannot be checked: {said}. \
-         Fetch the base branch with its history, with `git fetch --unshallow origin {refspec}`, \
-         or in CI {full_history}. If `{base}` is not the base branch, set `git.base_branch` in \
-         invar.yaml"
+         {}",
+        git::shallow_advice(base)
     )
 }
 

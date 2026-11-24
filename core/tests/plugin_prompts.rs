@@ -2530,3 +2530,74 @@ fn the_lines_the_prompts_key_on_are_the_ones_acceptance_run_prints() {
     );
     // `tests/acceptance_results.rs` holds the line itself to the bytes the command prints.
 }
+
+// --- a skipped change on a required path (#155) -----------------------------------------
+
+#[test]
+fn a_skipped_change_is_checked_by_the_command_and_the_trailer_is_the_developers() {
+    let flat = one_line(&skill().1);
+    let section = flat
+        .split_once("**When you have written a skipped change**")
+        .expect("the step")
+        .1
+        .split_once("## Phase 1")
+        .unwrap()
+        .0;
+    assert!(section.contains("run `invar cycle required <path>...` with every file you changed"));
+    // The command decides; the prompt has no branch on configuration (§13b).
+    assert!(!section.contains("invar.yaml"), "{section}");
+    let required = section.find("**`cycle: required`**").unwrap();
+    let not_required = section.find("**`cycle: not required`**").unwrap();
+    assert!(required < not_required);
+    for part in [
+        "closed with `/invar:done`",
+        "an `Invar-Skip: <reason>` trailer that **they** write",
+        "`git commit --amend --trailer \"Invar-Skip: <reason>\"`",
+        "**Never write the trailer yourself**",
+        "a hook denies it",
+    ] {
+        assert!(section.contains(part), "{part}: {section}");
+    }
+    let never = flat.split_once("## Never").unwrap().1;
+    assert!(never.contains("write an `Invar-Skip:` trailer, or any commit message that holds one"));
+    assert!(flat.contains("| `invar cycle required <path>...` | yours, after a change you made"));
+}
+
+#[test]
+fn the_lines_the_skill_keys_on_are_the_ones_cycle_required_prints() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("invar.yaml"),
+        "cycle:\n  required_paths: [\"app/Models/**\"]\n",
+    )
+    .unwrap();
+    let run = |path: &str| {
+        let assert = Command::cargo_bin("invar")
+            .unwrap()
+            .current_dir(dir.path())
+            .args(["cycle", "required", path])
+            .assert()
+            .success();
+        String::from_utf8(assert.get_output().stdout.clone()).unwrap()
+    };
+    assert!(run("app/Models/Order.php").ends_with("\ncycle: required\n"));
+    assert_eq!(run("routes/web.php"), "cycle: not required\n");
+}
+
+#[test]
+fn no_prompt_tells_an_agent_to_write_the_skip_trailer() {
+    // Every mention of the trailer outside the protocol skill's own step is a prohibition
+    // or the developer's.
+    for file in prompt_files() {
+        for line in read(&file).lines() {
+            if !line.contains("Invar-Skip") {
+                continue;
+            }
+            let ok = ["Never", "never", "they", "developer", "**they**"]
+                .iter()
+                .any(|word| line.contains(word))
+                || line.contains("git commit --amend --trailer");
+            assert!(ok, "{file}: {line}");
+        }
+    }
+}

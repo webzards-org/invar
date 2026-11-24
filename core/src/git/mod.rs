@@ -413,6 +413,239 @@ pub fn changed_since(dir: &Path, fork: &str, path: &str) -> Result<Vec<String>, 
     Ok(changed)
 }
 
+/// The files that differ between `fork` and `HEAD`, committed only, under `dir` and
+/// relative to it, sorted: added, changed, deleted, and both names of a rename, since
+/// with `--no-renames` a rename is one path deleted and another added.
+pub fn committed_changes(dir: &Path, fork: &str) -> Result<Vec<String>, GitError> {
+    nul_paths(
+        dir,
+        "git diff --name-only",
+        &[
+            "--literal-pathspecs",
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--no-ext-diff",
+            "--relative",
+            fork,
+            "HEAD",
+            "--",
+            ".",
+        ],
+    )
+}
+
+/// The files under `path` (relative to `dir`) that any commit in `fork..HEAD` added,
+/// changed or deleted, relative to `dir`, sorted.
+pub fn touched_on_branch(dir: &Path, fork: &str, path: &str) -> Result<Vec<String>, GitError> {
+    let range = format!("{fork}..HEAD");
+    nul_paths(
+        dir,
+        "git log --name-only",
+        &[
+            "--literal-pathspecs",
+            "-c",
+            "log.showSignature=false",
+            "log",
+            "--format=",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--relative",
+            &range,
+            "--",
+            path,
+        ],
+    )
+}
+
+/// The commits in `from..HEAD` that changed `path` (relative to `dir`), newest first. A
+/// merge appears only when it is not the same as one of its parents for `path`, which is
+/// git's default history simplification: a merge that brought in a change made elsewhere
+/// is not one.
+pub fn commits_touching(dir: &Path, fork: &str, path: &str) -> Result<Vec<String>, GitError> {
+    const COMMAND: &str = "git log --format=%H";
+    let range = format!("{fork}..HEAD");
+    let output = run(
+        dir,
+        &[
+            "--literal-pathspecs",
+            "-c",
+            "log.showSignature=false",
+            "log",
+            "--format=%H",
+            "--no-renames",
+            &range,
+            "--",
+            path,
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(text(COMMAND, &output.stdout)?
+        .lines()
+        .map(str::to_owned)
+        .collect())
+}
+
+/// The files under `path` (relative to `dir`) at `rev`, relative to `dir`, sorted.
+pub fn files_at(dir: &Path, rev: &str, path: &str) -> Result<Vec<String>, GitError> {
+    nul_paths(
+        dir,
+        "git ls-tree -r",
+        &["ls-tree", "-r", "--name-only", "-z", rev, "--", path],
+    )
+}
+
+/// Every commit in `fork..HEAD`, newest first, with the values of its trailers named
+/// `key`, which git matches without regard to case. A value is as git unfolds it, and
+/// may be empty: the trailers are read with their keys, so that `Key:` with nothing after
+/// it is one empty value, and not the same as no trailer.
+pub fn trailers(dir: &Path, fork: &str, key: &str) -> Result<Vec<(String, Vec<String>)>, GitError> {
+    const COMMAND: &str = "git log --format=%(trailers)";
+    let range = format!("{fork}..HEAD");
+    let format = format!("--format=%H%x00%(trailers:key={key},unfold,separator=%x1f)%x1e");
+    let output = run(
+        dir,
+        &["-c", "log.showSignature=false", "log", &format, &range],
+    )?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    let mut commits = Vec::new();
+    for record in text(COMMAND, &output.stdout)?.split('\u{1e}') {
+        let record = record.trim_start_matches('\n');
+        let Some((commit, values)) = record.split_once('\0') else {
+            continue;
+        };
+        let values = if values.is_empty() {
+            Vec::new()
+        } else {
+            values
+                .split('\u{1f}')
+                .map(|trailer| {
+                    trailer
+                        .split_once(':')
+                        .map_or("", |(_, value)| value)
+                        .trim()
+                        .to_owned()
+                })
+                .collect()
+        };
+        commits.push((commit.to_owned(), values));
+    }
+    Ok(commits)
+}
+
+/// The first parent of `commit`, or `None` for a root commit.
+pub fn first_parent(dir: &Path, commit: &str) -> Result<Option<String>, GitError> {
+    let wanted = format!("{commit}^1");
+    let output = run(
+        dir,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            &wanted,
+        ],
+    )?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(
+        text("git rev-parse", &output.stdout)?.trim().to_owned(),
+    ))
+}
+
+/// The subject line of `commit`'s message.
+pub fn subject(dir: &Path, commit: &str) -> Result<String, GitError> {
+    const COMMAND: &str = "git log -1 --format=%s";
+    let output = run(
+        dir,
+        &[
+            "-c",
+            "log.showSignature=false",
+            "log",
+            "-1",
+            "--format=%s",
+            commit,
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(text(COMMAND, &output.stdout)?.trim().to_owned())
+}
+
+/// The full name of `rev` as a commit: `git rev-parse --verify`.
+pub fn commit_of(dir: &Path, rev: &str) -> Result<String, GitError> {
+    let wanted = format!("{rev}^{{commit}}");
+    let output = run(
+        dir,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            &wanted,
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(GitError::BaseNotFound {
+            base: rev.to_owned(),
+        });
+    }
+    Ok(text("git rev-parse", &output.stdout)?.trim().to_owned())
+}
+
+/// The `-z` list of paths a git command prints, sorted and without repeats.
+fn nul_paths(dir: &Path, command: &'static str, args: &[&str]) -> Result<Vec<String>, GitError> {
+    let output = run(dir, args)?;
+    if !output.status.success() {
+        return Err(failed(command, &output));
+    }
+    let mut paths = Vec::new();
+    for field in output.stdout.split(|&byte| byte == 0) {
+        let field = text(command, field)?.trim_matches('\n');
+        if !field.is_empty() {
+            paths.push(field.to_owned());
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
+/// What to do in a shallow checkout that does not reach the merge base with `base`:
+/// the commands that work, for a person and for CI (`fetch-depth: 0`).
+///
+/// `git fetch origin <base>` alone only sets `FETCH_HEAD` in a shallow clone, whose
+/// fetch refspec names one branch, and a checkout with `fetch-depth: 0` makes
+/// `origin/<base>` but no `<base>`: neither gives git the name that `base` is, so each
+/// has to create it. `--deepen` is not offered: it counts from the existing shallow
+/// boundary, a ref fetched for the first time has none, and the result differs between
+/// versions of git.
+pub fn shallow_advice(base: &str) -> String {
+    let (refspec, full_history) = match base.strip_prefix("origin/") {
+        Some(branch) => (
+            format!("+refs/heads/{branch}:refs/remotes/origin/{branch}"),
+            "check out with `fetch-depth: 0`".to_owned(),
+        ),
+        None => (
+            format!("{base}:{base}"),
+            format!("check out with `fetch-depth: 0` and run `git branch {base} origin/{base}`"),
+        ),
+    };
+    format!(
+        "Fetch the base branch with its history, with `git fetch --unshallow origin {refspec}`, \
+         or in CI {full_history}. If `{base}` is not the base branch, set `git.base_branch` in \
+         invar.yaml"
+    )
+}
+
 /// The bytes of `path` (relative to `dir`) at `rev`. `None` when no file is there.
 ///
 /// `ls-tree` first, so that "no such file" is an answer and any other failure of git

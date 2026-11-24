@@ -92,6 +92,17 @@ pub fn check(root: &ProjectRoot, spec: &Path, mode: Mode) -> Result<Approved, Ch
     }
 }
 
+/// The ticket of a Plan's text whose approval holds: `Status: approved`, every approval
+/// value present, and the checksum the Plan's own. `None` otherwise, or when the text is
+/// not a valid Plan. For a Plan read from history, where there is no file to check
+/// (`invar-yaml.md` §3.8).
+pub fn holds(text: &str, mode: Mode) -> Option<String> {
+    let plan = Plan::parse(text, mode).ok()?;
+    let current = approval::current_digest(&plan);
+    matches!(classify(plan.header(), &current), Prior::Current { .. })
+        .then(|| plan.header().ticket.clone())
+}
+
 // --- refusals ---------------------------------------------------------------
 
 /// An approval whose body or `Acceptance` changed since.

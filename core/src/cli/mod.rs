@@ -20,6 +20,7 @@ use crate::fs::ProjectRoot;
 
 mod acceptance;
 mod context;
+mod cycle;
 mod decision;
 mod done;
 mod hash;
@@ -111,6 +112,11 @@ pub enum Command {
     /// With `--results <REPORT>...`, also refuses, changing nothing, unless every
     /// locked acceptance test of the ticket passed in those JUnit reports.
     Done(done::Args),
+    /// Whether a change has to go through a cycle: `cycle check` for CI, `cycle
+    /// required` for the main session. Off unless `invar.yaml` sets
+    /// `cycle.required_paths`.
+    #[command(subcommand)]
+    Cycle(cycle::Command),
     /// Print the context the agents read: `AI_CONTEXT.md`,
     /// `BUSINESS_CONTEXT.md` and the decision log (§5, §5c, §7).
     #[command(subcommand)]
@@ -150,6 +156,7 @@ impl Cli {
             Command::ReviewInput(args) => review_input::run(args).map(|()| ExitCode::SUCCESS),
             Command::Done(args) => done::run(args).map(|()| ExitCode::SUCCESS),
             Command::Context(command) => context::run(command).map(|()| ExitCode::SUCCESS),
+            Command::Cycle(command) => cycle::run(command).map(|()| ExitCode::SUCCESS),
             Command::Init => init::run().map(|()| ExitCode::SUCCESS),
         }
     }

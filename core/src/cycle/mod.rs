@@ -1,0 +1,570 @@
+//! `invar cycle`: whether a branch that changes declared paths went through a cycle
+//! (#155, `contracts/formats/invar-yaml.md` §3.8).
+//!
+//! The main session decides whether a change needs a Plan (L-9), and it may skip the
+//! cycle for trivial work. Nothing in the session can be the check of that decision,
+//! because the session is what the check would constrain. So the check is in CI, on
+//! the history git keeps: a branch that changes a path the base branch's
+//! `cycle.required_paths` names passes only when every commit of it that touched the
+//! path was made while the Plan of a cycle closed on the branch was approved (D-17), or
+//! with an `Invar-Skip: <reason>` trailer a person wrote. It reads git and writes nothing.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::{self, Write as _};
+use std::path::Path;
+
+use crate::format::config::{self, ConfigError, FILE_NAME};
+use crate::format::glob;
+use crate::format::plan::Mode;
+use crate::fs::ProjectRoot;
+use crate::fs::plans::{SPEC_FILE, parse_dir_name};
+use crate::gate::check;
+use crate::git::{self, GitError};
+
+#[cfg(test)]
+mod tests;
+
+/// The trailer a person writes to say that a branch skips the cycle, and why (§3.8).
+pub const SKIP_TRAILER: &str = "Invar-Skip";
+
+/// Where the Plans are, relative to the project root.
+const PLANS: &str = ".invar/plans";
+
+/// Left out of the changes: the Plans and the decision log are the cycle's own files.
+const INVAR_DIR: &str = ".invar";
+
+/// What `invar cycle check` found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Report {
+    /// The base, as given or found.
+    pub base: String,
+    /// The base's `cycle.required_paths`. Empty: the check is off.
+    pub patterns: Vec<String>,
+    /// Why the check is off, when it is.
+    pub off: Option<String>,
+    /// How the branch changes `cycle.required_paths`, when it does: said, never used.
+    pub list_change: Option<ListChange>,
+    /// The merge base, when the check ran.
+    pub fork: Option<String>,
+    /// Each changed path a pattern matches, and whether the cycles closed on the branch
+    /// cover it.
+    pub required: Vec<Required>,
+    pub closed: Vec<Closed>,
+    pub open: Vec<Open>,
+    /// Each `Invar-Skip:` trailer with a reason.
+    pub skips: Vec<Skip>,
+    /// The commits with an `Invar-Skip:` trailer and no reason: they count for nothing.
+    pub empty_skips: Vec<String>,
+}
+
+/// A path in the branch's net change that a pattern of the base's list matches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Required {
+    pub path: String,
+    /// The first pattern that matches it.
+    pub pattern: String,
+    /// The tickets whose approved Plan was at the parent of a commit that touched it,
+    /// sorted. Meaningful only when `uncovered` is empty.
+    pub covered_by: Vec<String>,
+    /// The commits of the branch that touched it with no closed cycle's approval holding
+    /// at their parent, newest first: each its full name and its subject.
+    pub uncovered: Vec<(String, String)>,
+}
+
+impl Required {
+    /// Every commit of the branch that touched it was covered (D-17).
+    pub fn is_covered(&self) -> bool {
+        self.uncovered.is_empty() && !self.covered_by.is_empty()
+    }
+}
+
+/// A cycle closed on the branch: its Plan was approved in some commit of it, and is gone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Closed {
+    pub ticket: String,
+    /// The Plan's `spec.md`, relative to the project root.
+    pub spec: String,
+    /// The commit that deleted it.
+    pub deleted_in: String,
+}
+
+/// A Plan the branch added or changed that is still there at `HEAD`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Open {
+    pub ticket: String,
+    pub spec: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Skip {
+    pub commit: String,
+    pub reason: String,
+}
+
+/// The patterns a branch adds to or removes from the base's list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListChange {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+}
+
+impl Report {
+    /// The check holds: off, nothing required changed, every required change covered by
+    /// a closed cycle, or a skip.
+    pub fn passes(&self) -> bool {
+        self.off.is_some()
+            || self.required.iter().all(Required::is_covered)
+            || !self.skips.is_empty()
+    }
+
+    /// Why it holds, for the last line.
+    fn why(&self) -> String {
+        if let Some(off) = &self.off {
+            return off.clone();
+        }
+        if self.required.is_empty() {
+            return "no required path changed".to_owned();
+        }
+        if self.required.iter().all(Required::is_covered) {
+            return "every required change is covered by a closed cycle".to_owned();
+        }
+        format!(
+            "skipped by `{SKIP_TRAILER}:` ({} trailer(s))",
+            self.skips.len()
+        )
+    }
+
+    /// Everything the check decided on, ending with one line: `cycle check: off: …`,
+    /// `cycle check: passed: …` or `cycle check: failed`.
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+        let _ = writeln!(out, "base: {}", self.base);
+        if let Some(change) = &self.list_change {
+            let _ = writeln!(
+                out,
+                "note: this branch changes `cycle.required_paths`, and the check uses the base's \
+                 list; the change applies once it is on the base"
+            );
+            for pattern in &change.added {
+                let _ = writeln!(out, "  added on the branch: {pattern}");
+            }
+            for pattern in &change.removed {
+                let _ = writeln!(out, "  removed on the branch: {pattern}");
+            }
+        }
+        if self.off.is_some() {
+            let _ = writeln!(out, "cycle check: off: {}", self.why());
+            return out;
+        }
+        if let Some(fork) = &self.fork {
+            let _ = writeln!(out, "merge base: {}", short(fork));
+        }
+        let _ = writeln!(out, "required paths: {}", self.patterns.join(", "));
+
+        let _ = writeln!(out, "required changes:");
+        if self.required.is_empty() {
+            let _ = writeln!(out, "  none");
+        }
+        for required in &self.required {
+            let (path, pattern) = (&required.path, &required.pattern);
+            if required.is_covered() {
+                let _ = writeln!(
+                    out,
+                    "  {path} ({pattern}): covered by {}",
+                    required.covered_by.join(", ")
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "  {path} ({pattern}): not covered: {}",
+                    commits(required)
+                );
+            }
+        }
+        let _ = writeln!(out, "closed cycles:");
+        if self.closed.is_empty() {
+            let _ = writeln!(out, "  none");
+        }
+        for closed in &self.closed {
+            let _ = writeln!(
+                out,
+                "  {}: {} deleted in {}",
+                closed.ticket,
+                closed.spec,
+                short(&closed.deleted_in)
+            );
+        }
+        for open in &self.open {
+            let _ = writeln!(
+                out,
+                "open cycle: the cycle of {} is not closed, {} is still there: run /invar:done \
+                 {}",
+                open.ticket, open.spec, open.ticket
+            );
+        }
+        let _ = writeln!(out, "skips:");
+        if self.skips.is_empty() {
+            let _ = writeln!(out, "  none");
+        }
+        for skip in &self.skips {
+            let _ = writeln!(
+                out,
+                "  {}: {SKIP_TRAILER}: {}",
+                short(&skip.commit),
+                skip.reason
+            );
+        }
+        for commit in &self.empty_skips {
+            let _ = writeln!(
+                out,
+                "  {}: `{SKIP_TRAILER}:` with no reason, which does not count",
+                short(commit)
+            );
+        }
+        if self.passes() {
+            let _ = writeln!(out, "cycle check: passed: {}", self.why());
+        } else {
+            let _ = writeln!(out, "cycle check: failed");
+        }
+        out
+    }
+}
+
+/// `<sha> <subject>, …` of the commits that touched a path uncovered.
+fn commits(required: &Required) -> String {
+    if required.uncovered.is_empty() {
+        return "no commit of the branch touches it".to_owned();
+    }
+    required
+        .uncovered
+        .iter()
+        .map(|(commit, subject)| format!("{} {subject}", short(commit)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The first 12 characters of a commit's name.
+fn short(commit: &str) -> String {
+    commit.chars().take(12).collect()
+}
+
+/// The refusal: every required change no closed cycle covers, and the two ways out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotCovered {
+    /// Only the required changes that are not covered.
+    pub required: Vec<Required>,
+}
+
+impl NotCovered {
+    pub fn of(report: &Report) -> Self {
+        Self {
+            required: report
+                .required
+                .iter()
+                .filter(|required| !required.is_covered())
+                .cloned()
+                .collect(),
+        }
+    }
+}
+
+impl fmt::Display for NotCovered {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "this branch changes {} required path(s) that no closed cycle covers, and has no \
+             `{SKIP_TRAILER}:` trailer:",
+            self.required.len()
+        )?;
+        for required in &self.required {
+            write!(
+                f,
+                "\n  {} (matches {}), touched outside a cycle by: {}",
+                required.path,
+                required.pattern,
+                commits(required)
+            )?;
+        }
+        write!(
+            f,
+            "\nA commit is covered when, at its parent, the Plan of a cycle closed on this branch \
+             is approved. Either make the change while a Plan is approved and close the cycle \
+             with /invar:done; or, if it needs no Plan, the developer adds a trailer to a \
+             commit of the branch: \
+             `git commit --amend --trailer \"{SKIP_TRAILER}: <reason>\"`, or the same on a new \
+             commit"
+        )
+    }
+}
+
+impl std::error::Error for NotCovered {}
+
+/// Run the check against `base`, or `git.base_branch`, or the base `git` finds.
+pub fn check(
+    root: &ProjectRoot,
+    base: Option<&str>,
+    configured: Option<&str>,
+) -> Result<Report, CycleError> {
+    let dir = root.path();
+    let base = match base {
+        Some(base) => base.to_owned(),
+        None => git::base_branch(dir, configured).map_err(CycleError::Git)?,
+    };
+    let shallow_or = |err: GitError, base: &str| {
+        if matches!(git::is_shallow(dir), Ok(true)) {
+            CycleError::Shallow {
+                base: base.to_owned(),
+                said: err.to_string(),
+            }
+        } else {
+            CycleError::Git(err)
+        }
+    };
+    let base_commit = git::commit_of(dir, &base).map_err(|err| shallow_or(err, &base))?;
+
+    let base_list = match git::file_at(dir, &base_commit, FILE_NAME).map_err(CycleError::Git)? {
+        None => None,
+        Some(bytes) => {
+            let shown = format!("{base}:{FILE_NAME}");
+            let loaded = config::parse_bytes(&bytes, Path::new(&shown))
+                .map_err(|source| CycleError::BaseConfig { source })?;
+            Some(loaded.config.cycle.required_paths)
+        }
+    };
+    let head_list = git::file_at(dir, "HEAD", FILE_NAME)
+        .ok()
+        .flatten()
+        .and_then(|bytes| config::parse_bytes(&bytes, Path::new(FILE_NAME)).ok())
+        .map(|loaded| loaded.config.cycle.required_paths)
+        .unwrap_or_default();
+
+    let patterns = base_list.clone().unwrap_or_default();
+    let list_change = {
+        let added: Vec<String> = head_list
+            .iter()
+            .filter(|p| !patterns.contains(p))
+            .cloned()
+            .collect();
+        let removed: Vec<String> = patterns
+            .iter()
+            .filter(|p| !head_list.contains(p))
+            .cloned()
+            .collect();
+        (!added.is_empty() || !removed.is_empty()).then_some(ListChange { added, removed })
+    };
+
+    let mut report = Report {
+        base: base.clone(),
+        patterns: patterns.clone(),
+        off: None,
+        list_change,
+        fork: None,
+        required: Vec::new(),
+        closed: Vec::new(),
+        open: Vec::new(),
+        skips: Vec::new(),
+        empty_skips: Vec::new(),
+    };
+    match &base_list {
+        None => {
+            report.off = Some(format!("{base} has no {FILE_NAME}"));
+            return Ok(report);
+        }
+        Some(list) if list.is_empty() => {
+            report.off = Some(format!(
+                "{base}:{FILE_NAME} has no `cycle.required_paths`, so no path needs a cycle"
+            ));
+            return Ok(report);
+        }
+        Some(_) => {}
+    }
+
+    let fork = git::merge_base(dir, &base).map_err(|err| shallow_or(err, &base))?;
+
+    // The branch's commits are `<base>..HEAD`: what it merged in from the base is the
+    // base's, not the branch's (D-17). The net change is still taken from the merge base.
+    cycles(root, &base_commit, &mut report)?;
+
+    let mut covering = Covering::default();
+    for path in git::committed_changes(dir, &fork).map_err(CycleError::Git)? {
+        if path == INVAR_DIR || path.starts_with(&format!("{INVAR_DIR}/")) {
+            continue;
+        }
+        let Some(pattern) = glob::first_match(&patterns, &path) else {
+            continue;
+        };
+        let mut required = Required {
+            path: path.clone(),
+            pattern: pattern.to_owned(),
+            covered_by: Vec::new(),
+            uncovered: Vec::new(),
+        };
+        let mut by = BTreeSet::new();
+        for commit in git::commits_touching(dir, &base_commit, &path).map_err(CycleError::Git)? {
+            let tickets = covering.of(dir, &commit, &report.closed)?;
+            if tickets.is_empty() {
+                let subject = git::subject(dir, &commit).map_err(CycleError::Git)?;
+                required.uncovered.push((commit, subject));
+            } else {
+                by.extend(tickets.iter().cloned());
+            }
+        }
+        required.covered_by = by.into_iter().collect();
+        report.required.push(required);
+    }
+
+    for (commit, values) in
+        git::trailers(dir, &base_commit, SKIP_TRAILER).map_err(CycleError::Git)?
+    {
+        let had_trailer = !values.is_empty();
+        let mut counted = false;
+        for value in values {
+            let reason = value.trim();
+            if !reason.is_empty() {
+                report.skips.push(Skip {
+                    commit: commit.clone(),
+                    reason: reason.to_owned(),
+                });
+                counted = true;
+            }
+        }
+        if !counted && had_trailer {
+            report.empty_skips.push(commit);
+        }
+    }
+    report.fork = Some(fork);
+    Ok(report)
+}
+
+/// Which closed cycles cover each commit, asked once per commit.
+#[derive(Default)]
+struct Covering {
+    known: BTreeMap<String, Vec<String>>,
+}
+
+impl Covering {
+    /// The tickets of `closed` whose Plan is at `commit`'s first parent with an approval
+    /// that holds there (D-17). A root commit has none.
+    fn of(
+        &mut self,
+        dir: &Path,
+        commit: &str,
+        closed: &[Closed],
+    ) -> Result<&Vec<String>, CycleError> {
+        if !self.known.contains_key(commit) {
+            let mut tickets = Vec::new();
+            if let Some(parent) = git::first_parent(dir, commit).map_err(CycleError::Git)? {
+                for cycle in closed {
+                    let text = git::file_at(dir, &parent, &cycle.spec).map_err(CycleError::Git)?;
+                    let holds = text
+                        .as_deref()
+                        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                        .and_then(|text| check::holds(text, Mode::Light));
+                    if holds.as_deref() == Some(cycle.ticket.as_str()) {
+                        tickets.push(cycle.ticket.clone());
+                    }
+                }
+            }
+            self.known.insert(commit.to_owned(), tickets);
+        }
+        Ok(&self.known[commit])
+    }
+}
+
+/// The Plans the branch touched: closed when approved in some commit of the branch and
+/// gone at `HEAD`, open when still there. `from` starts the branch's commits.
+fn cycles(root: &ProjectRoot, from: &str, report: &mut Report) -> Result<(), CycleError> {
+    let dir = root.path();
+    let git = CycleError::Git;
+    let at_head = git::files_at(dir, "HEAD", PLANS).map_err(git)?;
+    for spec in git::touched_on_branch(dir, from, PLANS).map_err(git)? {
+        let Some(name) = spec
+            .strip_prefix(&format!("{PLANS}/"))
+            .and_then(|rest| rest.strip_suffix(&format!("/{SPEC_FILE}")))
+            .filter(|name| !name.contains('/'))
+        else {
+            continue;
+        };
+        let dir_ticket = parse_dir_name(name).map_or(name, |(ticket, _)| ticket);
+        if at_head.contains(&spec) {
+            report.open.push(Open {
+                ticket: dir_ticket.to_owned(),
+                spec,
+            });
+            continue;
+        }
+        let mut deleted_in = None;
+        let mut approved = None;
+        for commit in git::commits_touching(dir, from, &spec).map_err(git)? {
+            match git::file_at(dir, &commit, &spec).map_err(git)? {
+                // Newest first: the first deletion found is the last one.
+                None => {
+                    deleted_in.get_or_insert(commit);
+                }
+                Some(bytes) => {
+                    if approved.is_none()
+                        && let Ok(text) = std::str::from_utf8(&bytes)
+                    {
+                        approved = check::holds(text, Mode::Light);
+                    }
+                }
+            }
+        }
+        if let (Some(ticket), Some(deleted_in)) = (approved, deleted_in) {
+            report.closed.push(Closed {
+                ticket,
+                spec,
+                deleted_in,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// What `invar cycle required <path>...` says of each path, from the working tree's
+/// `invar.yaml`: the pattern it matches, if any.
+pub fn required<'a>(patterns: &'a [String], paths: &[String]) -> Vec<(String, Option<&'a str>)> {
+    paths
+        .iter()
+        .map(|path| {
+            let path = path.trim_start_matches("./").replace('\\', "/");
+            let pattern = glob::first_match(patterns, &path);
+            (path, pattern)
+        })
+        .collect()
+}
+
+/// Why the check could not run.
+#[derive(Debug)]
+pub enum CycleError {
+    Git(GitError),
+    /// The base's `invar.yaml` is not a valid config.
+    BaseConfig {
+        source: ConfigError,
+    },
+    /// A shallow checkout that does not reach the merge base.
+    Shallow {
+        base: String,
+        said: String,
+    },
+}
+
+impl fmt::Display for CycleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Git(err) => err.fmt(f),
+            Self::BaseConfig { source } => write!(
+                f,
+                "cannot read `cycle.required_paths` from the base branch: {source}"
+            ),
+            Self::Shallow { base, said } => write!(
+                f,
+                "this is a shallow clone, and it does not have the base branch `{base}` or its \
+                 merge base with this branch, so the branch's history cannot be read: {said}. {}",
+                git::shallow_advice(base)
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CycleError {}
