@@ -460,7 +460,10 @@ pub fn touched_on_branch(dir: &Path, fork: &str, path: &str) -> Result<Vec<Strin
     )
 }
 
-/// The commits in `fork..HEAD` that changed `path` (relative to `dir`), newest first.
+/// The commits in `from..HEAD` that changed `path` (relative to `dir`), newest first. A
+/// merge appears only when it is not the same as one of its parents for `path`, which is
+/// git's default history simplification: a merge that brought in a change made elsewhere
+/// is not one.
 pub fn commits_touching(dir: &Path, fork: &str, path: &str) -> Result<Vec<String>, GitError> {
     const COMMAND: &str = "git log --format=%H";
     let range = format!("{fork}..HEAD");
@@ -534,6 +537,47 @@ pub fn trailers(dir: &Path, fork: &str, key: &str) -> Result<Vec<(String, Vec<St
         commits.push((commit.to_owned(), values));
     }
     Ok(commits)
+}
+
+/// The first parent of `commit`, or `None` for a root commit.
+pub fn first_parent(dir: &Path, commit: &str) -> Result<Option<String>, GitError> {
+    let wanted = format!("{commit}^1");
+    let output = run(
+        dir,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            &wanted,
+        ],
+    )?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(
+        text("git rev-parse", &output.stdout)?.trim().to_owned(),
+    ))
+}
+
+/// The subject line of `commit`'s message.
+pub fn subject(dir: &Path, commit: &str) -> Result<String, GitError> {
+    const COMMAND: &str = "git log -1 --format=%s";
+    let output = run(
+        dir,
+        &[
+            "-c",
+            "log.showSignature=false",
+            "log",
+            "-1",
+            "--format=%s",
+            commit,
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(text(COMMAND, &output.stdout)?.trim().to_owned())
 }
 
 /// The full name of `rev` as a commit: `git rev-parse --verify`.

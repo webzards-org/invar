@@ -159,6 +159,55 @@ impl Project {
         self.commit("Remove plan SHOP-214");
     }
 
+    /// The Plan of `ticket`: its path, and its text as a draft and as approved.
+    fn plan_of(&self, ticket: &str) -> (String, String, String) {
+        let body = BODY.replace("SHOP-214", ticket);
+        let file = self.dir.path().join("to-hash.txt");
+        fs::write(&file, format!("Acceptance: skipped\n{body}")).unwrap();
+        let output = Command::cargo_bin("invar")
+            .unwrap()
+            .arg("hash")
+            .arg(&file)
+            .output()
+            .unwrap();
+        fs::remove_file(&file).unwrap();
+        let checksum = String::from_utf8(output.stdout).unwrap();
+        let spec = format!(".invar/plans/{ticket}-work/spec.md");
+        let draft = format!(
+            "---\nTicket: {ticket}\nModule: orders\nStatus: draft\nApproved-by:\nApproved-at:\n\
+             Approved-checksum:\n---\n\n{body}"
+        );
+        let approved = format!(
+            "---\nTicket: {ticket}\nModule: orders\nStatus: approved\nApproved-by: rade\n\
+             Approved-at: 2026-10-05\nApproved-checksum: {}\nAcceptance: skipped\n---\n\n{body}",
+            checksum.trim()
+        );
+        (spec, draft, approved)
+    }
+
+    /// The Plan of `ticket` written as a draft and committed, then approved and committed.
+    fn open_approved(&self, ticket: &str) {
+        let (spec, draft, approved) = self.plan_of(ticket);
+        self.write(&spec, &draft);
+        self.commit(&format!("plan {ticket}"));
+        self.write(&spec, &approved);
+        self.commit(&format!("approve {ticket}"));
+    }
+
+    /// The real `done` command, as the developer runs it, committing the deletion.
+    fn close(&self, ticket: &str) {
+        self.invar(&["done", ticket, "--commit", &format!("Remove plan {ticket}")])
+            .success();
+    }
+
+    /// A change to `path`, committed under `message`; returns the short name of the commit.
+    fn change(&self, path: &str, message: &str) -> String {
+        let before = fs::read_to_string(self.root().join(path)).unwrap_or_default();
+        self.write(path, &format!("{before}// {message}\n"));
+        self.commit(message);
+        self.head().chars().take(12).collect()
+    }
+
     fn head(&self) -> String {
         self.git(&["rev-parse", "HEAD"]).trim().to_owned()
     }
@@ -246,7 +295,7 @@ fn a_closed_cycle_passes_and_is_named_with_the_commit_that_deleted_its_plan() {
     let assert = project.check().success();
     let out = stdout_of(&assert);
     assert!(
-        out.contains("  app/Models/Order.php (app/Models/**)\n"),
+        out.contains("  app/Models/Order.php (app/Models/**): covered by SHOP-214\n"),
         "{out}"
     );
     assert!(
@@ -254,7 +303,7 @@ fn a_closed_cycle_passes_and_is_named_with_the_commit_that_deleted_its_plan() {
         "{out}"
     );
     assert!(
-        out.ends_with("cycle check: passed: closed cycle(s): SHOP-214\n"),
+        out.ends_with("cycle check: passed: every required change is covered by a closed cycle\n"),
         "{out}"
     );
 }
@@ -302,7 +351,7 @@ fn a_required_change_with_no_cycle_and_no_trailer_fails_naming_path_and_glob() {
     let (out, err) = failed(
         project.check(),
         &[
-            "changes 2 required path(s), with no cycle closed on it and no `Invar-Skip:` trailer",
+            "changes 2 required path(s) that no closed cycle covers, and has no `Invar-Skip:` trailer",
             "  app/Models/Order.php (matches app/Models/**)",
             "  database/migrations/2026_create_orders.php (matches database/migrations/)",
             "/invar:done",
@@ -560,4 +609,230 @@ fn required_reads_the_working_tree_and_with_no_list_requires_nothing() {
         .invar(&["cycle", "required", "./app/Models/Order.php"])
         .success()
         .stdout("app/Models/Order.php: required (app/Models/**)\ncycle: required\n");
+}
+
+// --- what a closed cycle covers (D-17) ------------------------------------------------------
+
+const ORDER: &str = "app/Models/Order.php";
+const MIGRATION: &str = "database/migrations/2026_create_orders.php";
+
+#[test]
+fn a_closed_cycle_does_not_cover_a_change_made_after_it_closed() {
+    // The review's reproduction: a Plan about docs, closed, then a model changed with none.
+    let project = Project::new("cycle:\n  required_paths: [\"app/Models/**\"]\n");
+    project.open_approved("SHOP-214");
+    project.change("README.md", "document cancelling");
+    project.close("SHOP-214");
+    let after = project.change(ORDER, "change the model with no Plan");
+    let (out, err) = failed(
+        project.check(),
+        &[&format!(
+            "{ORDER} (matches app/Models/**), touched outside a cycle by: {after} change the \
+             model with no Plan"
+        )],
+    );
+    assert!(
+        out.contains(&format!(
+            "  {ORDER} (app/Models/**): not covered: {after} change the model with no Plan\n"
+        )),
+        "{out}"
+    );
+    // The cycle is still listed: it closed, it only did not cover this.
+    assert!(out.contains("closed cycles:\n  SHOP-214: "), "{out}");
+    assert!(!err.contains("document cancelling"), "{err}");
+}
+
+#[test]
+fn with_a_skip_the_reproduction_passes_and_prints_the_reason() {
+    let project = Project::new(REQUIRED);
+    project.open_approved("SHOP-214");
+    project.close("SHOP-214");
+    project.change(ORDER, "change the model with no Plan");
+    project.commit_with_trailer("say why", "Invar-Skip: a comment, agreed in review");
+    let assert = project.check().success();
+    let out = stdout_of(&assert);
+    assert!(
+        out.contains("Invar-Skip: a comment, agreed in review"),
+        "{out}"
+    );
+    assert!(
+        out.ends_with("cycle check: passed: skipped by `Invar-Skip:` (1 trailer(s))\n"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_change_made_before_the_approval_is_not_covered() {
+    let project = Project::new(REQUIRED);
+    let (spec, draft, approved) = project.plan_of("SHOP-214");
+    project.write(&spec, &draft);
+    project.commit("plan SHOP-214");
+    let early = project.change(ORDER, "change the model while the Plan is a draft");
+    project.write(&spec, &approved);
+    project.commit("approve SHOP-214");
+    project.close("SHOP-214");
+    failed(
+        project.check(),
+        &[&format!(
+            "touched outside a cycle by: {early} change the model while the Plan is a draft"
+        )],
+    );
+}
+
+#[test]
+fn a_change_made_while_the_plan_is_approved_is_covered() {
+    let project = Project::new(REQUIRED);
+    project.open_approved("SHOP-214");
+    project.change(ORDER, "the coder's change");
+    project.close("SHOP-214");
+    let assert = project.check().success();
+    let out = stdout_of(&assert);
+    assert!(
+        out.contains(&format!("  {ORDER} (app/Models/**): covered by SHOP-214\n")),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_path_touched_while_approved_and_again_after_closing_lists_only_the_second_commit() {
+    let project = Project::new(REQUIRED);
+    project.open_approved("SHOP-214");
+    let during = project.change(ORDER, "the coder's change");
+    project.close("SHOP-214");
+    let after = project.change(ORDER, "one more after closing");
+    let (out, err) = failed(
+        project.check(),
+        &[&format!("{after} one more after closing")],
+    );
+    assert!(!err.contains(&during), "{err}");
+    assert!(
+        out.contains(&format!("not covered: {after} one more after closing\n")),
+        "{out}"
+    );
+}
+
+#[test]
+fn two_cycles_each_cover_their_own_paths() {
+    let project = Project::new(REQUIRED);
+    project.open_approved("SHOP-214");
+    project.change(ORDER, "orders");
+    project.close("SHOP-214");
+    project.open_approved("SHOP-215");
+    project.change(MIGRATION, "a migration");
+    project.close("SHOP-215");
+    let assert = project.check().success();
+    let out = stdout_of(&assert);
+    assert!(
+        out.contains(&format!("  {ORDER} (app/Models/**): covered by SHOP-214\n")),
+        "{out}"
+    );
+    assert!(
+        out.contains(&format!(
+            "  {MIGRATION} (database/migrations/): covered by SHOP-215\n"
+        )),
+        "{out}"
+    );
+}
+
+#[test]
+fn one_cycle_closed_does_not_cover_another_paths_change_with_none() {
+    let project = Project::new(REQUIRED);
+    project.open_approved("SHOP-214");
+    project.change(ORDER, "orders");
+    project.close("SHOP-214");
+    let bare = project.change(MIGRATION, "a migration with no Plan");
+    let (out, err) = failed(
+        project.check(),
+        &[&format!(
+            "{MIGRATION} (matches database/migrations/), touched outside a cycle by: {bare}"
+        )],
+    );
+    assert!(!err.contains(&format!("{ORDER} (matches")), "{err}");
+    assert!(
+        out.contains(&format!("  {ORDER} (app/Models/**): covered by SHOP-214\n")),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_change_after_a_failed_reset_and_before_the_reapproval_is_not_covered() {
+    let project = Project::new(REQUIRED);
+    let (spec, draft, approved) = project.plan_of("SHOP-214");
+    project.write(&spec, &draft);
+    project.commit("plan SHOP-214");
+    project.write(&spec, &approved);
+    project.commit("approve SHOP-214");
+    let during = project.change(ORDER, "first attempt");
+    // A `failed` entry returns the Plan to draft, its approval values cleared.
+    project.write(&spec, &draft);
+    project.commit("SHOP-214 failed, back to draft");
+    let while_draft = project.change(ORDER, "a change while the Plan is a draft again");
+    project.write(&spec, &approved);
+    project.commit("approve SHOP-214 again");
+    project.close("SHOP-214");
+    let (_, err) = failed(
+        project.check(),
+        &[&format!(
+            "{while_draft} a change while the Plan is a draft again"
+        )],
+    );
+    assert!(!err.contains(&during), "{err}");
+}
+
+#[test]
+fn an_approval_that_does_not_hold_at_the_parent_covers_nothing() {
+    let project = Project::new(REQUIRED);
+    let (spec, _, approved) = project.plan_of("SHOP-214");
+    // `Status: approved` with every value, written by hand with a checksum that is not the
+    // Plan's.
+    let forged = approved
+        .lines()
+        .map(|line| {
+            if line.starts_with("Approved-checksum:") {
+                format!("Approved-checksum: sha256:{}", "0".repeat(64))
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    project.write(&spec, &forged);
+    project.commit("approved by hand");
+    let forged_commit = project.change(ORDER, "a change under the forged approval");
+    project.write(&spec, &approved);
+    project.commit("approve SHOP-214");
+    project.close("SHOP-214");
+    failed(
+        project.check(),
+        &[&format!(
+            "{forged_commit} a change under the forged approval"
+        )],
+    );
+}
+
+#[test]
+fn a_commit_merged_in_from_the_base_is_not_the_branchs() {
+    let project = Project::new(REQUIRED);
+    // The base changes the model, the branch merges it in, and the base moves on.
+    project.git(&["checkout", "-q", "main"]);
+    let on_main = project.change(ORDER, "a model change on main");
+    project.git(&["checkout", "-q", "feat/SHOP-214-cancel"]);
+    project.git(&["merge", "-q", "--no-edit", "main"]);
+    project.git(&["checkout", "-q", "main"]);
+    project.change("README.md", "later on main");
+    project.git(&["checkout", "-q", "feat/SHOP-214-cancel"]);
+    // The branch's own change to the same file, through a cycle.
+    project.open_approved("SHOP-214");
+    project.change(ORDER, "the coder's change");
+    project.close("SHOP-214");
+    let assert = project.check().success();
+    let out = stdout_of(&assert);
+    assert!(
+        out.contains(&format!("  {ORDER} (app/Models/**): covered by SHOP-214\n")),
+        "{out}"
+    );
+    // Main's commit is where the branch now leaves the base, and not one of its commits.
+    assert!(out.contains(&format!("merge base: {on_main}\n")), "{out}");
+    assert!(!out.contains("not covered"), "{out}");
 }

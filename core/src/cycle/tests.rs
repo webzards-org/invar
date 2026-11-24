@@ -1,7 +1,19 @@
 //! Tests for what `invar cycle check` decides on a report, and for `cycle required`.
 //! `tests/cycle_check.rs` runs both on real repositories.
 
-use super::{Closed, NotCovered, Report, Skip, required};
+use super::{Closed, NotCovered, Report, Required, Skip, required};
+
+fn order(covered_by: &[&str], uncovered: &[(&str, &str)]) -> Required {
+    Required {
+        path: "app/Models/Order.php".to_owned(),
+        pattern: "app/Models/**".to_owned(),
+        covered_by: covered_by.iter().map(|t| (*t).to_owned()).collect(),
+        uncovered: uncovered
+            .iter()
+            .map(|(c, s)| ((*c).to_owned(), (*s).to_owned()))
+            .collect(),
+    }
+}
 
 fn report() -> Report {
     Report {
@@ -10,10 +22,7 @@ fn report() -> Report {
         off: None,
         list_change: None,
         fork: Some("0123456789abcdef".to_owned()),
-        required: vec![(
-            "app/Models/Order.php".to_owned(),
-            "app/Models/**".to_owned(),
-        )],
+        required: vec![order(&[], &[("0011223344556677", "change the model")])],
         closed: Vec::new(),
         open: Vec::new(),
         skips: Vec::new(),
@@ -22,22 +31,48 @@ fn report() -> Report {
 }
 
 #[test]
-fn a_required_change_needs_a_closed_cycle_or_a_skip() {
-    let mut failing = report();
+fn a_required_change_needs_every_commit_covered_or_a_skip() {
+    let failing = report();
     assert!(!failing.passes());
-    assert!(failing.render().ends_with("cycle check: failed\n"));
+    let out = failing.render();
+    assert!(
+        out.contains(
+            "  app/Models/Order.php (app/Models/**): not covered: 001122334455 change the model\n"
+        ),
+        "{out}"
+    );
+    assert!(out.ends_with("cycle check: failed\n"));
 
-    failing.closed.push(Closed {
+    // A closed cycle that does not cover the change is not enough.
+    let mut unrelated = report();
+    unrelated.closed.push(Closed {
         ticket: "SHOP-214".to_owned(),
         spec: ".invar/plans/SHOP-214-x/spec.md".to_owned(),
         deleted_in: "fedcba9876543210".to_owned(),
     });
-    assert!(failing.passes());
-    let out = failing.render();
+    assert!(!unrelated.passes());
+
+    let mut covered = unrelated.clone();
+    covered.required = vec![order(&["SHOP-214", "SHOP-215"], &[])];
+    assert!(covered.passes());
+    let out = covered.render();
+    assert!(
+        out.contains("(app/Models/**): covered by SHOP-214, SHOP-215\n"),
+        "{out}"
+    );
     assert!(
         out.contains("  SHOP-214: .invar/plans/SHOP-214-x/spec.md deleted in fedcba987654\n"),
         "{out}"
     );
+    assert!(
+        out.ends_with("cycle check: passed: every required change is covered by a closed cycle\n"),
+        "{out}"
+    );
+
+    // Covered by one commit and not by another is not covered.
+    let mut partly = report();
+    partly.required = vec![order(&["SHOP-214"], &[("99aa", "after done")])];
+    assert!(!partly.passes());
 
     let mut skipped = report();
     skipped.skips.push(Skip {
@@ -64,10 +99,19 @@ fn an_off_report_passes_and_says_why_on_its_last_line() {
 
 #[test]
 fn the_refusal_lists_every_path_and_both_ways_out() {
-    let message = NotCovered {
-        required: report().required,
-    }
-    .to_string();
+    let mut both = report();
+    both.required.push(Required {
+        path: "app/Models/User.php".to_owned(),
+        ..order(&["SHOP-214"], &[])
+    });
+    let not_covered = NotCovered::of(&both);
+    assert_eq!(not_covered.required.len(), 1, "only the uncovered one");
+    let message = not_covered.to_string();
+    assert!(
+        message.contains("touched outside a cycle by: 001122334455 change the model"),
+        "{message}"
+    );
+    assert!(!message.contains("User.php"), "{message}");
     assert!(
         message.contains("  app/Models/Order.php (matches app/Models/**)"),
         "{message}"

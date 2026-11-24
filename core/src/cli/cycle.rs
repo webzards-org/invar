@@ -19,11 +19,13 @@ pub enum Command {
     /// list gets a note. With no list there, the check is off and exits 0.
     ///
     /// A path changed on the branch (added, changed, deleted, or either name of a rename;
-    /// `.invar/` left out) that a pattern matches is a required change. The branch passes
-    /// with none, or with a cycle closed on it — a Plan that some commit of the branch has
-    /// approved, and that a later one deleted, as `invar done` does — or with an
-    /// `Invar-Skip: <reason>` trailer on any commit of the branch. A Plan still there is
-    /// an open cycle, and does not count. An `Invar-Skip:` with no reason does not count.
+    /// `.invar/` left out) that a pattern matches is a required change. It is covered when
+    /// every commit of the branch (`<base>..HEAD`) that touched it was made while the Plan
+    /// of a cycle closed on the branch was approved at that commit's parent — a Plan that
+    /// a commit of the branch approved and a later one deleted, as `invar done` does. The
+    /// branch passes when every required change is covered, or with an
+    /// `Invar-Skip: <reason>` trailer on any commit of the branch. A Plan still there is an
+    /// open cycle, and covers nothing. An `Invar-Skip:` with no reason does not count.
     ///
     /// Needs the history from the merge base to HEAD: in CI, check out with
     /// `fetch-depth: 0`. Prints what it decided on, and ends with `cycle check: off: …`,
@@ -63,10 +65,7 @@ pub fn run(command: Command) -> Result<()> {
             if report.passes() {
                 Ok(())
             } else {
-                Err(NotCovered {
-                    required: report.required,
-                }
-                .into())
+                Err(NotCovered::of(&report).into())
             }
         }
         Command::Required { paths } => {
