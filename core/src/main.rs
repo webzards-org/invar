@@ -12,6 +12,7 @@
 mod acceptance;
 mod calendar;
 mod cli;
+mod config_check;
 mod context;
 mod cycle;
 mod decision;

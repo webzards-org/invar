@@ -95,6 +95,7 @@ pub struct Open {
     pub spec: String,
 }
 
+/// A trailer with a reason, and the commit it is on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Skip {
     pub commit: String,
@@ -244,7 +245,7 @@ fn commits(required: &Required) -> String {
 }
 
 /// The first 12 characters of a commit's name.
-fn short(commit: &str) -> String {
+pub fn short(commit: &str) -> String {
     commit.chars().take(12).collect()
 }
 
@@ -306,21 +307,7 @@ pub fn check(
     configured: Option<&str>,
 ) -> Result<Report, CycleError> {
     let dir = root.path();
-    let base = match base {
-        Some(base) => base.to_owned(),
-        None => git::base_branch(dir, configured).map_err(CycleError::Git)?,
-    };
-    let shallow_or = |err: GitError, base: &str| {
-        if matches!(git::is_shallow(dir), Ok(true)) {
-            CycleError::Shallow {
-                base: base.to_owned(),
-                said: err.to_string(),
-            }
-        } else {
-            CycleError::Git(err)
-        }
-    };
-    let base_commit = git::commit_of(dir, &base).map_err(|err| shallow_or(err, &base))?;
+    let (base, base_commit) = resolve_base(dir, base, configured)?;
 
     let base_list = match git::file_at(dir, &base_commit, FILE_NAME).map_err(CycleError::Git)? {
         None => None,
@@ -379,7 +366,7 @@ pub fn check(
         Some(_) => {}
     }
 
-    let fork = git::merge_base(dir, &base).map_err(|err| shallow_or(err, &base))?;
+    let fork = merge_base(dir, &base)?;
 
     // The branch's commits are `<base>..HEAD`: what it merged in from the base is the
     // base's, not the branch's (D-17). The net change is still taken from the merge base.
@@ -413,15 +400,54 @@ pub fn check(
         report.required.push(required);
     }
 
-    for (commit, values) in
-        git::trailers(dir, &base_commit, SKIP_TRAILER).map_err(CycleError::Git)?
-    {
+    (report.skips, report.empty_skips) = trailers(dir, &base_commit, SKIP_TRAILER)?;
+    report.fork = Some(fork);
+    Ok(report)
+}
+
+/// The base as given, or `git.base_branch`, or the one `git` finds; and its commit. In a
+/// shallow clone that does not have it, the error says how to fetch it.
+pub fn resolve_base(
+    dir: &Path,
+    base: Option<&str>,
+    configured: Option<&str>,
+) -> Result<(String, String), CycleError> {
+    let base = match base {
+        Some(base) => base.to_owned(),
+        None => git::base_branch(dir, configured).map_err(CycleError::Git)?,
+    };
+    let commit = git::commit_of(dir, &base).map_err(|err| shallow_or(dir, err, &base))?;
+    Ok((base, commit))
+}
+
+/// The merge base of `base` and `HEAD`, with the advice of [`resolve_base`].
+pub fn merge_base(dir: &Path, base: &str) -> Result<String, CycleError> {
+    git::merge_base(dir, base).map_err(|err| shallow_or(dir, err, base))
+}
+
+fn shallow_or(dir: &Path, err: GitError, base: &str) -> CycleError {
+    if matches!(git::is_shallow(dir), Ok(true)) {
+        CycleError::Shallow {
+            base: base.to_owned(),
+            said: err.to_string(),
+        }
+    } else {
+        CycleError::Git(err)
+    }
+}
+
+/// The trailers `key` on the commits `from..HEAD`: each one with a reason, and the commits
+/// whose trailer had none, which count for nothing. For `Invar-Skip` and `Invar-Config`.
+pub fn trailers(dir: &Path, from: &str, key: &str) -> Result<(Vec<Skip>, Vec<String>), CycleError> {
+    let mut with_reason = Vec::new();
+    let mut empty = Vec::new();
+    for (commit, values) in git::trailers(dir, from, key).map_err(CycleError::Git)? {
         let had_trailer = !values.is_empty();
         let mut counted = false;
         for value in values {
             let reason = value.trim();
             if !reason.is_empty() {
-                report.skips.push(Skip {
+                with_reason.push(Skip {
                     commit: commit.clone(),
                     reason: reason.to_owned(),
                 });
@@ -429,11 +455,10 @@ pub fn check(
             }
         }
         if !counted && had_trailer {
-            report.empty_skips.push(commit);
+            empty.push(commit);
         }
     }
-    report.fork = Some(fork);
-    Ok(report)
+    Ok((with_reason, empty))
 }
 
 /// Which closed cycles cover each commit, asked once per commit.
@@ -543,6 +568,7 @@ pub enum CycleError {
         source: ConfigError,
     },
     /// A shallow checkout that does not reach the merge base.
+    /// The same for `invar config check`.
     Shallow {
         base: String,
         said: String,

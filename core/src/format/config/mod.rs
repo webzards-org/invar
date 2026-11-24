@@ -1,6 +1,6 @@
 //! `invar.yaml` — the project config (§6).
 //!
-//! Implements `contracts/formats/invar-yaml.md` v2.4.0. The contract is the
+//! Implements `contracts/formats/invar-yaml.md` v2.5.0. The contract is the
 //! authority; section numbers below (`§3.4`, `D-2`) point into it.
 //!
 //! Light mode reads `scenarios`, `review.offer`, `git.base_branch`,
@@ -31,6 +31,9 @@ use crate::fs::ProjectRoot;
 
 #[cfg(test)]
 mod tests;
+mod weaken;
+
+pub use weaken::{Weakening, weakenings};
 
 /// The config file's name. Its directory is the project root, which
 /// [`crate::fs`] finds and builds every path from (M1-4).
