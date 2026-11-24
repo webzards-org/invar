@@ -32,7 +32,13 @@ pub fn run(args: Args) -> Result<()> {
     match check::check(&root, &spec, mode) {
         Ok(approved) => {
             // Before the lines below, so that they are only ever there when it holds.
-            let report = verify::for_ticket(&root, &config, &approved, Stage::Working);
+            let report = verify::for_ticket(
+                &root,
+                &config,
+                &approved,
+                Stage::Working,
+                config.git.base_branch.as_deref(),
+            );
             if !report.holds() {
                 return Err(report.into());
             }

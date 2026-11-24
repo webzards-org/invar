@@ -372,3 +372,86 @@ fn a_shallow_clone_missing_the_merge_base_says_to_fetch_the_history() {
         assert!(err.contains(part), "{part}:\n{err}");
     }
 }
+
+// --- the branch does not choose its base (D-20) -----------------------------------------
+
+/// The review's reproduction: `main` signs approvals and requires a cycle for models; one
+/// commit on `feat/x` stops signing, names itself as the base, and changes a model.
+fn chooses_its_own_base() -> Project {
+    let main = "approval:\n  signed: true\ncycle:\n  required_paths: [\"app/Models/**\"]\n";
+    let project = Project::new(Some(main));
+    project.git(&["checkout", "-q", "main"]);
+    project.write("app/Models/O.php", "<?php\n");
+    project.commit("a model");
+    project.git(&["checkout", "-q", "-b", "feat/x"]);
+    project.write(
+        "invar.yaml",
+        "git:\n  base_branch: feat/x\ncycle:\n  required_paths: [\"app/Models/**\"]\n",
+    );
+    project.write("app/Models/O.php", "<?php\n// changed\n");
+    project.commit("stop signing, choose the base, change a model");
+    project
+}
+
+fn invar(project: &Project, args: &[&str]) -> Assert {
+    Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(project.root())
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", project.root().join(".gitconfig-test"))
+        .env("HOME", project.root())
+        .args(args)
+        .assert()
+}
+
+#[test]
+fn without_base_a_branch_cannot_choose_what_config_and_cycle_check_compare_with() {
+    let project = chooses_its_own_base();
+    let note = "sets `git.base_branch: feat/x`, and the base used is `main`";
+
+    let (out, _) = failed(
+        invar(&project, &["config", "check"]),
+        &["approval.signed: true -> false"],
+    );
+    assert!(out.starts_with("base: main\n"), "{out}");
+    assert!(out.contains(note), "{out}");
+
+    let assert = invar(&project, &["cycle", "check"]).failure();
+    let out = stdout_of(&assert);
+    assert!(out.starts_with("base: main\n"), "{out}");
+    assert!(out.contains(note), "{out}");
+    assert!(out.ends_with("cycle check: failed\n"), "{out}");
+    assert!(
+        stderr_of(&assert).contains("app/Models/O.php"),
+        "{}",
+        stderr_of(&assert)
+    );
+}
+
+#[test]
+fn with_base_both_fail_as_before_and_say_nothing_of_the_key() {
+    let project = chooses_its_own_base();
+    let (out, _) = failed(
+        invar(&project, &["config", "check", "--base", "main"]),
+        &["approval.signed: true -> false"],
+    );
+    assert!(!out.contains("and the base used is"), "{out}");
+    let assert = invar(&project, &["cycle", "check", "--base", "main"]).failure();
+    assert!(stdout_of(&assert).ends_with("cycle check: failed\n"));
+}
+
+#[test]
+fn config_check_notes_a_changed_git_base_branch_without_counting_it() {
+    let project = Project::new(Some(CONFIG));
+    project.change_config(&format!("{CONFIG}git:\n  base_branch: develop\n"));
+    let assert = project.check().success();
+    let out = stdout_of(&assert);
+    assert!(
+        out.contains("note: this branch changes `git.base_branch`: absent -> develop"),
+        "{out}"
+    );
+    assert!(
+        out.ends_with("config check: passed: no check is weakened\n"),
+        "{out}"
+    );
+}

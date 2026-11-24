@@ -948,3 +948,42 @@ fn the_ci_recipe_in_install_works_on_a_checkout_like_the_one_actions_makes() {
     clone.git(&["branch", "develop", "origin/develop"]);
     clone.done().success();
 }
+
+// --- the branch does not choose its base (invar-yaml.md D-20) --------------------------
+
+#[test]
+fn verify_ignores_a_base_branch_the_branch_set_to_itself_and_the_local_commands_honor_it() {
+    let project = Project::new();
+    project.lock_mine();
+    // The branch names itself as the base, and deletes another ticket's locked test.
+    project.write(
+        "invar.yaml",
+        &format!("git:\n  base_branch: feat/SHOP-214-cancel\n{CONFIG}"),
+    );
+    project.git(&["rm", "-q", OTHERS]);
+    project.commit("choose the base, delete a test");
+
+    // CI: compared with `main`, found, and the deletion is seen.
+    let assert = project
+        .invar(&["acceptance", "verify", "SHOP-214"])
+        .failure()
+        .stdout("");
+    let err = stderr_of(&assert);
+    assert!(
+        err.contains(OTHERS) && err.contains("deleted on this branch"),
+        "{err}"
+    );
+    assert!(
+        err.contains("sets `git.base_branch: feat/SHOP-214-cancel`, and the base used is `main`"),
+        "{err}"
+    );
+    // And with `--base`, the same.
+    refused(
+        project.invar(&["acceptance", "verify", "SHOP-214", "--base", "main"]),
+        &[OTHERS, "deleted on this branch"],
+    );
+    // Locally the key is the developer's, as before: compared with itself, nothing changed.
+    project.plan_check().success();
+    project.done().success();
+    assert!(!project.exists(PLAN_DIR));
+}

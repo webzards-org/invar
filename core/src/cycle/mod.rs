@@ -38,6 +38,8 @@ const INVAR_DIR: &str = ".invar";
 pub struct Report {
     /// The base, as given or found.
     pub base: String,
+    /// What was said about the base: a `git.base_branch` the check did not use.
+    pub notes: Vec<String>,
     /// The base's `cycle.required_paths`. Empty: the check is off.
     pub patterns: Vec<String>,
     /// Why the check is off, when it is.
@@ -140,6 +142,9 @@ impl Report {
     pub fn render(&self) -> String {
         let mut out = String::new();
         let _ = writeln!(out, "base: {}", self.base);
+        for note in &self.notes {
+            let _ = writeln!(out, "note: {note}");
+        }
         if let Some(change) = &self.list_change {
             let _ = writeln!(
                 out,
@@ -300,14 +305,11 @@ impl fmt::Display for NotCovered {
 
 impl std::error::Error for NotCovered {}
 
-/// Run the check against `base`, or `git.base_branch`, or the base `git` finds.
-pub fn check(
-    root: &ProjectRoot,
-    base: Option<&str>,
-    configured: Option<&str>,
-) -> Result<Report, CycleError> {
+/// Run the check against `base`, or the remote's default branch, or `main` (§3.3.1).
+pub fn check(root: &ProjectRoot, base: Option<&str>) -> Result<Report, CycleError> {
     let dir = root.path();
-    let (base, base_commit) = resolve_base(dir, base, configured)?;
+    let given = base;
+    let (base, base_commit) = resolve_base(dir, given)?;
 
     let base_list = match git::file_at(dir, &base_commit, FILE_NAME).map_err(CycleError::Git)? {
         None => None,
@@ -342,6 +344,7 @@ pub fn check(
 
     let mut report = Report {
         base: base.clone(),
+        notes: base_note(dir, given, &base).into_iter().collect(),
         patterns: patterns.clone(),
         off: None,
         list_change,
@@ -405,19 +408,44 @@ pub fn check(
     Ok(report)
 }
 
-/// The base as given, or `git.base_branch`, or the one `git` finds; and its commit. In a
+/// The base a CI command compares a branch with, and its commit: `--base`, else the
+/// remote's default branch (`origin/HEAD`), else `main` (`invar-yaml.md` §3.3.1, D-20).
+/// Never `git.base_branch`, which the branch being checked could set to itself. In a
 /// shallow clone that does not have it, the error says how to fetch it.
-pub fn resolve_base(
-    dir: &Path,
-    base: Option<&str>,
-    configured: Option<&str>,
-) -> Result<(String, String), CycleError> {
-    let base = match base {
-        Some(base) => base.to_owned(),
-        None => git::base_branch(dir, configured).map_err(CycleError::Git)?,
-    };
+pub fn resolve_base(dir: &Path, base: Option<&str>) -> Result<(String, String), CycleError> {
+    let base = ci_base(dir, base).map_err(CycleError::Git)?;
     let commit = git::commit_of(dir, &base).map_err(|err| shallow_or(dir, err, &base))?;
     Ok((base, commit))
+}
+
+/// The base of [`resolve_base`], without its commit: for `acceptance verify`, whose branch
+/// rule resolves the commit itself.
+pub fn ci_base(dir: &Path, base: Option<&str>) -> Result<String, GitError> {
+    match base {
+        Some(base) => Ok(base.to_owned()),
+        None => git::base_branch(dir, None),
+    }
+}
+
+/// What to say when no `--base` was given and `invar.yaml` at `HEAD` names another
+/// `git.base_branch` than the base that was used: it was not used, and why (D-20).
+pub fn base_note(dir: &Path, given: Option<&str>, used: &str) -> Option<String> {
+    if given.is_some() {
+        return None;
+    }
+    let bytes = git::file_at(dir, "HEAD", FILE_NAME).ok().flatten()?;
+    let named = config::parse_bytes(&bytes, Path::new(FILE_NAME))
+        .ok()?
+        .config
+        .git
+        .base_branch?;
+    (named != used).then(|| {
+        format!(
+            "{FILE_NAME} on this branch sets `git.base_branch: {named}`, and the base used is \
+             `{used}`, the remote's default branch or `main`: a branch does not choose what it \
+             is checked against. If pull requests target `{named}`, give `--base origin/{named}`"
+        )
+    })
 }
 
 /// The merge base of `base` and `HEAD`, with the advice of [`resolve_base`].

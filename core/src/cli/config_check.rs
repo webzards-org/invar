@@ -34,7 +34,8 @@ pub enum Command {
     /// developer's key comes with the verification of signed approvals (#154).
     Check {
         /// The branch or commit to compare with: in CI, the pull request's target, such as
-        /// `origin/main`. Without it, `git.base_branch`, else `origin/HEAD`, else `main`.
+        /// `origin/main`. Without it, the branch `origin/HEAD` points to, else `main`; never
+        /// `git.base_branch`, which the branch being checked could set to itself.
         #[arg(long, value_name = "REF")]
         base: Option<String>,
     },
@@ -44,22 +45,13 @@ pub fn run(command: Command) -> Result<()> {
     match command {
         Command::Check { base } => {
             // A branch that deleted invar.yaml has no project root: the current directory
-            // is the one CI checked out, and the deletion is what to report.
-            let (dir, configured) = match fs::project_root() {
-                Ok(root) => {
-                    // The working tree's file may be what is wrong: only its base branch is
-                    // read from it, and a file that cannot be read gives none.
-                    let configured = super::config(&root)
-                        .ok()
-                        .and_then(|config| config.git.base_branch);
-                    (root.path().to_owned(), configured)
-                }
-                Err(_) => (
-                    std::env::current_dir().context("cannot read the current directory")?,
-                    None,
-                ),
+            // is the one CI checked out, and the deletion is what to report. Nothing is read
+            // from the working tree's invar.yaml: the branch does not choose its base (D-20).
+            let dir = match fs::project_root() {
+                Ok(root) => root.path().to_owned(),
+                Err(_) => std::env::current_dir().context("cannot read the current directory")?,
             };
-            let report = config_check::check(&dir, base.as_deref(), configured.as_deref())?;
+            let report = config_check::check(&dir, base.as_deref())?;
             print!("{}", report.render());
             if report.passes() {
                 Ok(())

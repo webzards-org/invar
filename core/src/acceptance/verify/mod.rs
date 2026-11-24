@@ -62,11 +62,17 @@ pub enum Stage {
 }
 
 /// The check for a ticket whose Plan holds: §10.1, §10.2 and, when closing, §10.3.
+///
+/// `base` is what the branch rule compares with, as [`crate::git::base_branch`] reads it: the
+/// local commands pass `git.base_branch`, and `invar acceptance verify`, a CI command,
+/// passes its `--base` or nothing, so that the branch cannot choose it (`invar-yaml.md`
+/// §3.3.1).
 pub fn for_ticket(
     root: &ProjectRoot,
     config: &Config,
     approved: &Approved,
     stage: Stage,
+    base: Option<&str>,
 ) -> Report {
     let mut report = Report::default();
     let Some(acceptance) = &config.acceptance else {
@@ -85,7 +91,7 @@ pub fn for_ticket(
             &acceptance.dir,
             &approved.ticket,
             &plan.tests_to_change(),
-            config.git.base_branch.as_deref(),
+            base,
             &mut report,
         ),
         Err(err) => report.problems.push(err.to_string()),
