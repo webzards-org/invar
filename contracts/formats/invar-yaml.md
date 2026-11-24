@@ -298,8 +298,9 @@ tree, and reads the working tree's file.
 point it at another branch, so in CI give the pull request's target with `--base`
 (`--base origin/${{ github.base_ref }}`), and do not rely on the key there.
 
-**What `invar cycle check` decides.** It needs the history from the merge base of the base
-and `HEAD` to `HEAD`: a shallow checkout that does not reach it is an error naming
+**What `invar cycle check` decides.** The **commits of the branch** are `<base>..HEAD`: what
+the branch merged in from the base is the base's, not the branch's. It needs the history
+from the merge base of the base and `HEAD` to `HEAD`: a shallow checkout that does not reach it is an error naming
 `fetch-depth: 0`. Then:
 
 - **The required changes**: every file that differs between the merge base and `HEAD`,
@@ -316,15 +317,25 @@ and `HEAD` to `HEAD`: a shallow checkout that does not reach it is an error nami
   reason that is not empty once trimmed. git matches the key without regard to case. A
   trailer with no reason is named, and does not count (D-15).
 
-The branch **passes** when there is no required change, or at least one closed cycle, or
-at least one skip. One pull request may close several tickets: every required change is
-covered by any closed cycle, because which path belongs to which ticket is in a Plan's
-Scope, which is prose. Otherwise it **fails**, non-zero, with every required change and its
-pattern on stderr, and the two ways out: a cycle closed with `/invar:done`, or a trailer the
-developer writes.
+- **A covered commit**: a commit of the branch is **covered by ticket T** when, at its first
+  parent, T's Plan is there and its approval holds there, and T is a closed cycle of the
+  branch (D-17). A root commit is covered by nothing.
+- **A covered required change**: every commit of the branch that touched its path is covered
+  by some ticket. A rename touches both names, and each name that is a required change is
+  judged on its own. git's default history simplification applies, so a merge that only
+  brought in a change made elsewhere did not touch the path.
+
+The branch **passes** when there is no required change, or every required change is
+covered, or there is at least one skip. One pull request may close several tickets, and each
+covers the commits made while its Plan was approved. Otherwise it **fails**, non-zero, with
+every required change that is not covered, its pattern and the commits that touched it
+outside a cycle (each its short name and subject) on stderr, and the two ways out: a change
+made while a Plan is approved and closed with `/invar:done`, or a trailer the developer
+writes.
 
 The output on stdout always says what was decided on: the base and the merge base, the
-patterns, the required changes, the closed cycles with the commit that deleted each Plan,
+patterns, each required change with `covered by <TICKET>, …` or `not covered: <sha>
+<subject>, …`, the closed cycles with the commit that deleted each Plan,
 the open cycles, the skips with their commits and reasons, and the note on a changed list.
 Its last line is one of `cycle check: off: <why>`, `cycle check: passed: <why>` and
 `cycle check: failed`. It writes nothing, and it is not a developer-only command.
@@ -548,6 +559,19 @@ name is the developer's text and proves nothing. The commits do: a Plan whose ap
 one of them, deleted in a later one, is what `plan approve` and `invar done` leave behind. The
 approval must hold in that text, and not only say `Status: approved`, so that a header typed by
 hand is not a cycle. Whose approval it was is #154's to check.
+
+**D-17 — A change is covered by the cycle whose approved Plan was at its parent** (2.4.0).
+One closed cycle anywhere on a branch covering every change on it would pass a Plan about
+documentation followed, after `done`, by a change to a model with no Plan at all. Which paths
+a Plan is about is in its `## Scope`, and Scope is prose: matching it would be a guess. The
+history answers instead, without reading it: the work of a cycle is made while its Plan is
+approved, so a commit is the cycle's when the Plan is approved at the commit's parent. That
+covers the coder's commits and the deletion by `done`, and not a commit made before the
+approval or after the deletion. The parent, and not the commit, because the commit that
+deletes the Plan is the cycle's and has no Plan of its own, and the commit that approves a
+Plan was made before it was approved. A `failed` reset and a later approval need no rule of
+their own: a commit is covered only while some approval holds. The rule is deterministic and
+reads only what `plan approve` and `invar done` write.
 
 ## 9. Open questions
 
@@ -782,8 +806,12 @@ cycle:
 **2.4.0 — `cycle.required_paths` (#155).**
 
 - §3, new §3.8: the key, its glob rules, that `invar cycle check` reads it from the base
-  branch, what the check decides, and the `Invar-Skip:` trailer. New D-14, D-15 and D-16, and
+  branch, what the check decides, and the `Invar-Skip:` trailer. New D-14 to D-17, and
   examples 10.14 and 10.15.
+- Revised in review, before 2.4.0 was released (D-17): a required change is covered only when
+  every commit of the branch that touched it was made while a closed cycle's Plan was
+  approved at the commit's parent, and not by any closed cycle on the branch. The branch's
+  commits are `<base>..HEAD`.
 - §6: unknown keys are reported inside `cycle` too. §7: **Invalid** covers the key.
 - New commands read it: `invar cycle check` and `invar cycle required`. `plan guard` denies
   an agent's `git commit` that writes the trailer.
