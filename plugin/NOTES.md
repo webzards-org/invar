@@ -2324,10 +2324,33 @@ approval of the Plan on the branch, and a body change settled only by the deleti
 does not count as settled. At `HEAD`, rule 5 reports only an approval no earlier commit
 reported, so a replay at `HEAD` is one problem, not two.
 
+**A replay from another branch (found in review of PR #169).** The replay rule looked at the
+branch alone. Reproduced with real keys: on `feat/SHOP-214-a`, a signed approval at commit A,
+then `decision record --type failed`; on `feat/SHOP-214-b` from `main`, the Plan and
+`approval.sig` copied from A with `git show A:<path>`, committed. `approval verify --base
+main` printed `passed`, and a new branch after a failed cycle is the usual path. Now the
+verifier also refuses an id written into an approved Plan at any commit a ref reaches outside
+`<merge base>..HEAD`: one `git log --all -p -G'^Approval-id:'` over the Plans, then a check
+of the few matches, and the message names the commit and the base or a ref that holds it. A
+`failed` entry records the id it cancels (`decision-entry.md` 1.5.0), and the verifier reads
+the base's entries with one `git grep`, which still works once the failed branch is deleted,
+if its entry was merged.
+
+What it cannot see is a commit no ref reaches: a branch deleted unmerged, with its entry, or
+a branch not fetched. `actions/checkout` with `fetch-depth: 0` fetches every branch and tag,
+so in CI that is only the deleted branch. The reverse also holds: a ref that still has an
+older version of the branch being checked, the pushed branch before a rebase is pushed, or a
+branch stacked on it, makes an honest approval read as a replay. In CI the pushed branch is
+the one checked; locally, push first. The test harness kept its keys and git config in the
+work tree, where `git add -A` committed them, and a branch made from `main` lost the signing
+setup; the repository is now a subdirectory.
+
 **Not exercised.**
 
 - [ ] The step on a real pull request in GitHub Actions, with `fetch-depth: 0`, `ref:` the
-      head, and the attested binary
+      head, and the attested binary, including that every branch is fetched
+- [ ] A stacked pull request whose base branch was rebased, which the replay search reads
+      as a replay
 - [ ] A security key (`sk-ssh-ed25519`) signature through the verifier; the tests use
       ed25519 keys without a passphrase
 

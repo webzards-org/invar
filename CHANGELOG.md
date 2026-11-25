@@ -11,15 +11,17 @@
   `.invar/approvers` (a key the branch adds to the list does not count until it
   is on the base), a signature over another approval, a Plan changed while
   approved with no signed approval, reset or deletion after it, a Plan deleted
-  with no signed approval before it, and an approval replayed from earlier on
-  the branch. It names who signed each approval, the principal and the key's
+  with no signed approval before it, and an approval replayed: from earlier on
+  the branch, from any commit another branch, tag or the base reaches, or one a
+  `failed` entry on the base cancelled. A `failed` entry now records the
+  `approval-id` it cancels, and `plan approve` prints the `Approval-id`. It names who signed each approval, the principal and the key's
   fingerprint, and notes when `Approved-by` says otherwise. A branch that turns
   `approval.signed` off is checked all the same. Every problem is listed in one
   run; the last line is `approval verify: off | passed | failed`. It needs the
   pull request's own head with full history: a shallow clone, and the merge
   commit `actions/checkout` makes by default, are refused. `docs/INSTALL.md` has
   the CI step (#168). Contracts `approval-signature.md` 1.0.0 (changed before
-  release), `invar-yaml.md` 2.7.0.
+  release), `invar-yaml.md` 2.7.0, `decision-entry.md` 1.5.0.
 
 - **Invariant ids: the gate shows which invariants a Plan leaves out.** Start
   each item under `## Invariants` in `BUSINESS_CONTEXT.md` with an id,

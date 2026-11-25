@@ -236,7 +236,10 @@ steps:
 ```
 
 `fetch-depth: 0` is for `config check`, `cycle check` and `approval verify`, which read the
-branch's history from its merge base. `acceptance verify` needs none. `ref:` checks out the
+branch's history from its merge base. It also makes `actions/checkout` fetch every branch and
+tag, which `approval verify` needs: it refuses an approval copied from another branch, such as
+the one of a failed cycle, by searching every commit a ref reaches, and with a shallow or
+single-branch fetch those commits are not there to search. `acceptance verify` needs none. `ref:` checks out the
 pull request's own head: by default `actions/checkout` checks out a merge commit onto the
 base, which holds the whole branch in one commit, and `approval verify` refuses it, since the
 branch's commits cannot be followed through it. Each step is described below.
@@ -522,10 +525,21 @@ cannot sign. Nothing else changes for the team: the agents never see the key.
    approval that is not signed, or signed by a key the base does not list, or
    that does not match its Plan; a Plan changed after its approval with no new
    signed approval; a Plan deleted without one; and an approval put back from
-   earlier on the branch. For each approval it prints who signed it, the
+   earlier on the branch, copied from another branch, or cancelled by a `failed`
+   entry on the base. For each approval it prints who signed it, the
    principal in `.invar/approvers` and the key's fingerprint: that, and not
    `Approved-by`, is the record of who approved. A pull request that turns
    `approval.signed` off is checked all the same.
+
+**Where a replayed approval is seen.** Every approval has an `Approval-id` of
+its own, which `plan approve` prints. `approval verify` refuses an id it finds
+earlier on the branch, in an approved Plan at any commit a branch, tag or
+remote-tracking branch of the checkout reaches, or in a `failed` entry on the
+base, which records the id it cancelled. A branch deleted without being merged
+takes its commits out of that search, so merge the `failed` entry of a cycle you
+abandon, or keep its branch. Run the check on the branch as pushed: before a
+rebased branch is pushed, the old one still holds its approvals, and they read
+as replays.
 
 **Adding an approver** is a change to `.invar/approvers` on the base branch, and
 nothing else. Open a pull request that adds the line, and have it reviewed and
