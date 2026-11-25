@@ -767,3 +767,39 @@ fn a_new_approval_on_a_new_branch_after_a_failed_one_passes() {
         stdout(&assert)
     );
 }
+
+#[test]
+fn an_approval_from_a_deleted_branch_is_refused_through_its_merged_failed_entry() {
+    let (project, _) = Project::signed();
+    let approved = failed_on_another_branch(&project);
+    let copied: Vec<(&str, String)> = [SPEC, SIGNATURE]
+        .into_iter()
+        .map(|path| (path, project.git(&["show", &format!("{approved}:{path}")])))
+        .collect();
+    // The failed entry reaches main; the branch is deleted, and no ref reaches A.
+    project.git(&["checkout", "-q", "main"]);
+    project.git(&["checkout", "feat/SHOP-214-a", "--", ".invar/decisions"]);
+    project.commit_all("chore: keep the failed entry of SHOP-214");
+    project.git(&["branch", "-q", "-D", "feat/SHOP-214-a", "feat/SHOP-214-b"]);
+    let entry = project
+        .git(&["ls-files", ".invar/decisions"])
+        .trim()
+        .to_owned();
+    assert!(project.read(&entry).unwrap().contains("\napproval-id: "));
+
+    project.git(&["checkout", "-q", "-b", "feat/SHOP-214-b"]);
+    for (path, bytes) in &copied {
+        project.write(path, bytes);
+    }
+    project.commit_all("chore: approve SHOP-214");
+    let assert = failed(&project);
+    let out = stdout(&assert);
+    assert!(
+        out.contains(&format!(
+            "this approval is replayed: its `Approval-id` {} is the one the `failed` entry \
+             {entry} on main cancelled",
+            project.field("Approval-id")
+        )),
+        "{out}"
+    );
+}

@@ -49,6 +49,7 @@ fn sample() -> Entry {
         kind: Type::Failed,
         scenario: None,
         acceptance: None,
+        approval_id: None,
         body: "Line one.\n\nLine three.".into(),
     }
 }
@@ -454,5 +455,42 @@ fn a_draft_with_crlf_and_a_bom_parses_like_one_with_lf() {
     assert_eq!(
         super::parse_draft(&crlf).unwrap(),
         super::parse_draft(&lf).unwrap()
+    );
+}
+
+// --- `approval-id` (§4.1, §7) ---------------------------------------------------------
+
+#[test]
+fn an_approval_id_round_trips_and_a_malformed_one_is_reported() {
+    let entry = Entry {
+        approval_id: Some("0123456789abcdef0123456789abcdef".into()),
+        ..sample()
+    };
+    let text = entry.render();
+    assert!(
+        text.contains("type: failed\napproval-id: 0123456789abcdef0123456789abcdef\n---\n"),
+        "{text}"
+    );
+    assert_eq!(parse(&text).unwrap(), entry);
+
+    let bad = text.replace("0123456789abcdef0123456789abcdef", "ABC");
+    let problems = parse(&bad).unwrap_err().render(Path::new("entry.md"));
+    assert!(
+        problems.contains("`approval-id` must be 32 lowercase hex digits; found `ABC`"),
+        "{problems}"
+    );
+}
+
+#[test]
+fn a_draft_with_an_approval_id_is_refused() {
+    let draft = draft_example("12.4").replacen(
+        "\n---\n",
+        "\napproval-id: 0123456789abcdef0123456789abcdef\n---\n",
+        1,
+    );
+    assert!(
+        draft_problems(&draft).contains("a draft has no `approval-id`"),
+        "{}",
+        draft_problems(&draft)
     );
 }

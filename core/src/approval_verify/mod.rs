@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cycle::{self, CycleError, short};
 use crate::format::config::{self, ConfigError, FILE_NAME};
+use crate::format::decision::{self, Type};
 use crate::format::plan::{Mode, Plan, Status};
 use crate::fs::plans::{SIGNATURE_FILE, SPEC_FILE};
 use crate::gate::approval;
@@ -33,6 +34,8 @@ use crate::signature::{self, Approvers, Verified};
 pub const APPROVERS: &str = ".invar/approvers";
 
 const PLANS: &str = ".invar/plans";
+
+const DECISIONS: &str = ".invar/decisions";
 
 /// What `invar approval verify` found.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -205,11 +208,13 @@ pub fn check(dir: &Path, base: Option<&str>) -> Result<Report, VerifyError> {
     }
 
     let outside = outside_ids(dir, &fork)?;
+    let cancelled = cancelled_ids(dir, &base_commit)?;
     let mut walk = Walk {
         dir,
         base: &base,
         fork: &fork,
         outside,
+        cancelled,
         mode: Mode::of(&base_config),
         approvers: &approvers,
         list_shown: format!("{base}:{APPROVERS}"),
@@ -340,6 +345,8 @@ struct Walk<'a> {
     /// Every `Approval-id` written at a commit a ref reaches outside the branch, with
     /// where: candidates for rule 6, each checked when an approval has its id.
     outside: HashMap<String, Vec<(String, String)>>,
+    /// Every `Approval-id` a `failed` entry at the base cancelled, with the entry.
+    cancelled: HashMap<String, String>,
     mode: Mode,
     approvers: &'a Approvers,
     list_shown: String,
@@ -483,7 +490,18 @@ impl Walk<'_> {
                 }
                 None => {
                     self.ids.insert(id.clone(), commit.to_owned());
-                    if let Some(replayed) = self.replayed_from_outside(id)? {
+                    let replayed = match self.replayed_from_outside(id)? {
+                        Some(replayed) => Some(replayed),
+                        None => self.cancelled.get(id).map(|entry| {
+                            format!(
+                                "this approval is replayed: its `Approval-id` {id} is the one \
+                                 the `failed` entry {entry} on {} cancelled \
+                                 (approval-signature.md §6.3, rule 6). Approve the Plan again",
+                                self.base
+                            )
+                        }),
+                    };
+                    if let Some(replayed) = replayed {
                         let mut problems = result.err().unwrap_or_default();
                         problems.push(replayed);
                         result = Err(problems);
@@ -710,6 +728,25 @@ fn outside_ids(
             .push((commit, spec));
     }
     Ok(outside)
+}
+
+/// Every `Approval-id` a `failed` entry under `.invar/decisions/` at the base
+/// cancelled, with the entry's path (§6.3, rule 6; `decision-entry.md` §7). One `git
+/// grep` finds the entries that name one; only those are read.
+fn cancelled_ids(dir: &Path, base_commit: &str) -> Result<HashMap<String, String>, VerifyError> {
+    let mut cancelled = HashMap::new();
+    for path in git::files_matching_at(dir, base_commit, "^approval-id: ", DECISIONS)? {
+        let Some(bytes) = git::file_at(dir, base_commit, &path)? else {
+            continue;
+        };
+        if let Ok(entry) = decision::parse(&String::from_utf8_lossy(&bytes))
+            && entry.kind == Type::Failed
+            && let Some(id) = entry.approval_id
+        {
+            cancelled.entry(id).or_insert(path);
+        }
+    }
+    Ok(cancelled)
 }
 
 /// `approval.sig`, beside `spec`.

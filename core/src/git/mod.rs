@@ -633,6 +633,47 @@ pub fn added_lines_on_any_ref(
     Ok(found)
 }
 
+/// The files under `path` (relative to `dir`) at `rev` that have a line matching
+/// `pattern`, an extended regular expression, relative to `dir`, sorted: one `git grep`.
+pub fn files_matching_at(
+    dir: &Path,
+    rev: &str,
+    pattern: &str,
+    path: &str,
+) -> Result<Vec<String>, GitError> {
+    const COMMAND: &str = "git grep";
+    let output = run(
+        dir,
+        &[
+            "--literal-pathspecs",
+            "grep",
+            "-l",
+            "-z",
+            "-E",
+            "--no-color",
+            "-e",
+            pattern,
+            rev,
+            "--",
+            path,
+        ],
+    )?;
+    // 1 is "no match", not a failure.
+    match output.status.code() {
+        Some(0) => {}
+        Some(1) => return Ok(Vec::new()),
+        _ => return Err(failed(COMMAND, &output)),
+    }
+    let prefix = format!("{rev}:");
+    let mut files: Vec<String> = text(COMMAND, &output.stdout)?
+        .split('\0')
+        .filter(|field| !field.is_empty())
+        .map(|field| field.strip_prefix(&prefix).unwrap_or(field).to_owned())
+        .collect();
+    files.sort();
+    Ok(files)
+}
+
 /// Whether `ancestor` is reachable from `commit`: `git merge-base --is-ancestor`.
 pub fn is_ancestor(dir: &Path, ancestor: &str, commit: &str) -> Result<bool, GitError> {
     let output = run(dir, &["merge-base", "--is-ancestor", ancestor, commit])?;

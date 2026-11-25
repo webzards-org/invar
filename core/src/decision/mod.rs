@@ -296,6 +296,14 @@ fn write(
         plan,
     } = resolved;
 
+    // The approval a `failed` entry cancels, read before the reset clears it (§7).
+    let approval_id = match (kind, &plan) {
+        (Type::Failed, Some((_, text))) => Plan::parse(text, mode)
+            .ok()
+            .and_then(|plan| plan.header().approval_id.clone()),
+        _ => None,
+    };
+
     // `failed`: return the Plan to `draft` before writing anything else.
     let (reset, signature) = if kind == Type::Failed {
         let Some((spec, text)) = &plan else {
@@ -325,6 +333,7 @@ fn write(
                 kind,
                 scenario,
                 acceptance,
+                approval_id,
                 body,
             };
             let name = FileName {

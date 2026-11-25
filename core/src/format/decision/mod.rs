@@ -1,7 +1,7 @@
 //! A decision entry: `.invar/decisions/<YYYY-MM-DD>-<HHMMSS>-<module>-<slug>.md`
 //! (§7).
 //!
-//! Implements `contracts/formats/decision-entry.md` v1.4.0, including the
+//! Implements `contracts/formats/decision-entry.md` v1.5.0, including the
 //! draft of §8.1; section numbers and decision ids below point into it.
 //!
 //! **Writing** produces one canonical text: LF line endings, the five keys in
@@ -77,6 +77,8 @@ pub struct Entry {
     /// What the Plan decided about acceptance tests (§4.2). `None` is
     /// unknown, never `skipped` (D-14).
     pub acceptance: Option<Acceptance>,
+    /// The `Approval-id` a `failed` entry cancelled (§4.1, §7). `None` is unknown.
+    pub approval_id: Option<String>,
     /// Free text, without trailing newline.
     pub body: String,
 }
@@ -96,6 +98,9 @@ impl Entry {
         }
         if let Some(acceptance) = self.acceptance {
             out.push_str(&format!("acceptance: {}\n", acceptance.as_str()));
+        }
+        if let Some(id) = &self.approval_id {
+            out.push_str(&format!("approval-id: {id}\n"));
         }
         out.push_str("---\n\n");
         out.push_str(&self.body);
@@ -252,6 +257,7 @@ const MODULE: &str = "module";
 const TYPE: &str = "type";
 const SCENARIO: &str = "scenario";
 const ACCEPTANCE: &str = "acceptance";
+const APPROVAL_ID: &str = "approval-id";
 
 /// The front matter's `key: value` pairs, each with its line number, and the
 /// body.
@@ -321,6 +327,28 @@ impl Raw {
             );
         }
         parsed
+    }
+}
+
+impl Raw {
+    /// `approval-id`, which is optional (§4.1): absent is unknown.
+    fn approval_id(&self, found: &mut Diagnostics) -> Option<String> {
+        let (_, value, line) = self.get(APPROVAL_ID)?;
+        let valid = value.len() == 32
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !valid {
+            found.at(
+                *line,
+                format!(
+                    "`approval-id` must be 32 lowercase hex digits; found `{value}`. The core \
+                     writes it on a `failed` entry; remove the line: absent means unknown"
+                ),
+            );
+            return None;
+        }
+        Some(value.clone())
     }
 }
 
@@ -444,6 +472,7 @@ pub fn parse(text: &str) -> Result<Entry, Diagnostics> {
     );
     let scenario = raw.scenario(&mut found);
     let acceptance = raw.acceptance(&mut found);
+    let approval_id = raw.approval_id(&mut found);
 
     match (id, date, ticket, module, kind) {
         (Some(id), Some(date), Some(ticket), Some(module), Some(kind)) if found.is_empty() => {
@@ -455,6 +484,7 @@ pub fn parse(text: &str) -> Result<Entry, Diagnostics> {
                 kind: Type::parse(&kind).expect("checked above"),
                 scenario,
                 acceptance,
+                approval_id,
                 body: raw.body,
             })
         }
@@ -494,6 +524,13 @@ pub fn parse_draft(text: &str) -> Result<Draft, Diagnostics> {
     let Some(raw) = read(text, &mut found) else {
         return Err(found);
     };
+    if let Some((_, _, line)) = raw.get(APPROVAL_ID) {
+        found.at(
+            *line,
+            "a draft has no `approval-id`: it is taken from the Plan when a `failed` draft is \
+             recorded (decision-entry.md §7); remove this line",
+        );
+    }
     for key in [ID, DATE] {
         if let Some((_, _, line)) = raw.get(key) {
             found.at(

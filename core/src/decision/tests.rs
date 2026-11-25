@@ -560,6 +560,49 @@ fn failed_removes_the_approval_signature_and_clears_the_approval_id() {
     assert_eq!(plan_dir_files(&root), ["spec.md"]);
     let reset = fs::read_to_string(spec(&root)).unwrap();
     assert!(reset.contains("\nApproval-id:\n---\n"), "{reset}");
+    // The entry records the approval it cancelled (decision-entry.md §7).
+    assert_eq!(
+        recorded.entry.approval_id.as_deref(),
+        Some("0123456789abcdef0123456789abcdef")
+    );
+    assert!(
+        fs::read_to_string(&recorded.path)
+            .unwrap()
+            .contains("\napproval-id: 0123456789abcdef0123456789abcdef\n---\n")
+    );
+}
+
+#[test]
+fn only_a_failed_entry_for_a_signed_plan_records_an_approval_id() {
+    let signed = approved_plan().replace(
+        "Acceptance: skipped\n",
+        "Acceptance: skipped\nApproval-id: 0123456789abcdef0123456789abcdef\n",
+    );
+    // A note about a signed Plan cancels nothing.
+    let (_dir, root) = project(Some(&signed));
+    let recorded = record(
+        &root,
+        request("SHOP-214", Type::Note, None),
+        NOW,
+        Mode::Light,
+    )
+    .unwrap();
+    assert_eq!(recorded.entry.approval_id, None);
+    // A failed entry for an unsigned Plan has no id to record.
+    let (_dir, root) = project(Some(&approved_plan()));
+    let recorded = record(
+        &root,
+        request("SHOP-214", Type::Failed, None),
+        NOW,
+        Mode::Light,
+    )
+    .unwrap();
+    assert_eq!(recorded.entry.approval_id, None);
+    assert!(
+        !fs::read_to_string(&recorded.path)
+            .unwrap()
+            .contains("approval-id")
+    );
 }
 
 #[test]
