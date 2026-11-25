@@ -273,6 +273,25 @@ fn script(dir: &Path, body: &str) -> String {
     path.display().to_string()
 }
 
+/// Sign with the script at `program`, trying again while Linux says it is busy. Another
+/// test's child can inherit the script's write handle for the moment between its `fork`
+/// and its `exec`, and `exec` of a file open for writing fails with `ETXTBSY`. Only the
+/// tests write a program and run it at once.
+#[cfg(unix)]
+fn sign_script(program: &str, dir: &Path, deadline: Duration) -> Result<String, SignError> {
+    for _ in 0..100 {
+        match signer(program).sign(dir, "x\n", deadline) {
+            Err(SignError::CannotStart { source, .. })
+                if source.kind() == std::io::ErrorKind::ExecutableFileBusy =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            other => return other,
+        }
+    }
+    signer(program).sign(dir, "x\n", deadline)
+}
+
 #[cfg(unix)]
 #[test]
 fn a_signer_whose_helper_holds_the_pipes_times_out_within_the_deadline() {
@@ -287,7 +306,7 @@ fn a_signer_whose_helper_holds_the_pipes_times_out_within_the_deadline() {
         ),
     );
     let started = Instant::now();
-    match signer(&program).sign(dir.path(), "x\n", Duration::from_millis(300)) {
+    match sign_script(&program, dir.path(), Duration::from_millis(300)) {
         Err(SignError::TimedOut { .. }) => {}
         other => panic!("expected TimedOut, got {other:?}"),
     }
@@ -308,9 +327,7 @@ fn a_signer_that_finishes_in_time_is_read_to_the_end() {
         dir.path(),
         "cat > /dev/null\necho '-----BEGIN SSH SIGNATURE-----'\necho 'U1NIU0lH'\necho '-----END SSH SIGNATURE-----'",
     );
-    let signature = signer(&program)
-        .sign(dir.path(), "x\n", Duration::from_secs(5))
-        .unwrap();
+    let signature = sign_script(&program, dir.path(), Duration::from_secs(5)).unwrap();
     assert_eq!(
         signature,
         "-----BEGIN SSH SIGNATURE-----\nU1NIU0lH\n-----END SSH SIGNATURE-----\n"

@@ -94,6 +94,17 @@ impl Approvers {
         statement: &str,
         signature: &[u8],
     ) -> io::Result<Result<Verified, Refused>> {
+        self.verify_in(NAMESPACE, statement, signature)
+    }
+
+    /// [`verify`](Self::verify) in `namespace`: `invar-skip` or `invar-config` for
+    /// the trailers of §6.5.
+    pub fn verify_in(
+        &self,
+        namespace: &str,
+        statement: &str,
+        signature: &[u8],
+    ) -> io::Result<Result<Verified, Refused>> {
         let signature =
             TempFile::write("approval", "sig", signature).map_err(|(_, source)| source)?;
         let sig = signature.path().as_os_str();
@@ -103,7 +114,7 @@ impl Approvers {
                 "-Y".as_ref(),
                 "check-novalidate".as_ref(),
                 "-n".as_ref(),
-                NAMESPACE.as_ref(),
+                namespace.as_ref(),
                 "-s".as_ref(),
                 sig,
             ],
@@ -152,7 +163,7 @@ impl Approvers {
                     "-I".as_ref(),
                     principal.as_ref(),
                     "-n".as_ref(),
-                    NAMESPACE.as_ref(),
+                    namespace.as_ref(),
                     "-s".as_ref(),
                     sig,
                 ],

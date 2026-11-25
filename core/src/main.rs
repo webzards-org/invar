@@ -11,6 +11,7 @@
 
 mod acceptance;
 mod approval_verify;
+mod attestation;
 mod calendar;
 mod cli;
 mod config_check;

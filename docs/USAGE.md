@@ -88,7 +88,10 @@ git commit --amend --trailer "Invar-Skip: a comment typo in Order, no behavior"
 ```
 
 The reason is printed in CI and read in review. The main session never writes
-it: the decision is yours.
+it: the decision is yours. **With signed approvals** (`approval.signed: true` on
+the base), a bare trailer does not count: sign the skip instead, once the change
+is committed, with **`/invar:skip <reason>`**. It signs the required changes as
+they are, so a later change to one of them needs a new skip.
 
 **When you weaken a check on purpose.** If CI runs `invar config check`, a
 branch that removes the `acceptance:` section, changes `acceptance.dir` or
@@ -101,7 +104,9 @@ git commit --amend --trailer "Invar-Config: the acceptance tests moved under tes
 ```
 
 Write it yourself. The agent cannot make those edits through its edit tools,
-and it does not write the trailer either.
+and it does not write the trailer either. **With signed approvals**, sign it
+instead with **`/invar:config-accept <reason>`**; a later edit of `invar.yaml`
+needs a new one.
 
 ## 1. Plan
 
@@ -405,6 +410,9 @@ You never need them inside Claude Code. They are useful in a shell or in CI
 | `invar plan validate <TICKET>` | Checks the Plan's form |
 | `invar plan check <TICKET>` | Checks that the Plan is approved and unchanged, and the locks |
 | `invar plan approve <TICKET> [--acceptance\|--no-acceptance] [--reapprove] [--commit <MESSAGE>\|--no-commit]` | The approval, as `/invar:approve` runs it; signed with `approval.signed` |
+| `invar cycle skip --reason <reason>` | What `/invar:skip` runs: a signed skip of the cycle, committed |
+| `invar config accept --reason <reason>` | What `/invar:config-accept` runs: a signed weakening of `invar.yaml`, committed |
+| `invar pr-body <TICKET> --from-approval [--base <ref>]` | The PR description from the Plan as it was signed, read from git, with who signed it |
 | `invar approval verify [--base <ref>]` | Checks, for CI, that every approval on the branch is signed by a key in the base's `.invar/approvers`, when the base has `approval.signed: true` |
 | `invar acceptance verify [<TICKET>] [--results <report>… [--report-root <dir>]]` | Checks the locks. Without a ticket: the whole test directory, for CI. With `--results`, also that every locked test passed in your JUnit reports |
 | `invar acceptance run <TICKET>` | Runs the ticket's locked tests, and says per criterion whether they pass |

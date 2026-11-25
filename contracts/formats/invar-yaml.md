@@ -1,6 +1,6 @@
 # Contract: `invar.yaml`
 
-**Version:** 2.7.0 — `approval.signed` is read from the base by the verifier of approvals; see §11
+**Version:** 2.8.0 — with `approval.signed` at the base, `Invar-Skip` and `Invar-Config` count only signed; see §11
 **Status:** stable
 **Implements:** §6 (Config file), §13c (the review's base branch), §14.3; light
 mode L-2 and L-7 (`docs/TASKS-M1.md`); A-2, A-6 and A-7 (`docs/TASKS-AT.md`)
@@ -339,7 +339,12 @@ from the merge base of the base and `HEAD` to `HEAD`: a shallow checkout that do
   **open cycle**: it is named, with `/invar:done`, and does not count.
 - **A skip**: a trailer `Invar-Skip: <reason>` on **any commit of the branch**, with a
   reason that is not empty once trimmed. git matches the key without regard to case. A
-  trailer with no reason is named, and does not count (D-15).
+  trailer with no reason is named, and does not count (D-15). **When `approval.signed` is
+  `true` at the base**, a skip counts only with an `Invar-Skip-Signature` beside it that
+  verifies against the base's `.invar/approvers` over the branch's required changes as they
+  are (`approval-signature.md` §6.5); a trailer without one, or with one that does not
+  verify, is named with the reason and a note, and does not count. The developer makes a
+  signed skip with `invar cycle skip --reason <reason>`.
 
 - **A covered commit**: a commit of the branch is **covered by ticket T** when, at its first
   parent, T's Plan is there and its approval holds there, and T is a closed cycle of the
@@ -369,8 +374,9 @@ Bash command line that runs `git commit` and holds the key `Invar-Skip`, in any 
 (`-m`, `--trailer`, a here-document), and tells the agent to ask the developer. That is a
 scan of words, like the rest of the guard: a message written to a file and given with `-F`
 gets past it. It makes a skip visible in CI and owned in review, not proven to be a
-person's: binding a skip to the developer's key is a signed statement, as an approval is,
-and comes with the verification of signed approvals (#154).
+person's. With `approval.signed` on at the base, the signature is what proves it, and the
+guard is a convenience; `invar cycle skip`, which signs, is a developer-only command the guard
+denies an agent.
 
 **`invar cycle required <path>...`** prints `<path>: required (<pattern>)` for each path a
 pattern of the working tree's list matches, then `cycle: required` or `cycle: not
@@ -404,7 +410,12 @@ same thing (`./tests/Acceptance`).
 and at `HEAD`, with the base found by §3.3.1, as `cycle check` reads it (§3.8), and lists every weakening with its
 value at both. It passes with none. It passes a weakening when any commit of the branch
 (`<base>..HEAD`) has an **`Invar-Config: <reason>`** trailer with a reason that is not empty
-once trimmed, read as `Invar-Skip` is (D-15), and prints each reason and its commit.
+once trimmed, read as `Invar-Skip` is (D-15), and prints each reason and its commit. **When
+`approval.signed` is `true` at the base**, the trailer counts only with an
+`Invar-Config-Signature` beside it that verifies against the base's `.invar/approvers` over
+`invar.yaml` at the base and at `HEAD` (`approval-signature.md` §6.5); otherwise it is named
+with a note and does not count. The developer makes one with `invar config accept --reason
+<reason>`.
 Otherwise it fails, non-zero, naming each weakening and the way out: `git commit --amend
 --trailer "Invar-Config: <reason>"`. No `invar.yaml` at the base: the check is off, and
 exits 0. One at the base or at `HEAD` that is not a valid config: an error. A shallow
@@ -418,8 +429,8 @@ each weakened key; it allows the call whenever it cannot tell, or either side is
 config, because CI refuses what it lets through. An `invar.yaml` that is not the project's
 own, such as one in a subdirectory with no project of its own, is not judged. It denies an
 agent's `git commit` that writes the `Invar-Config` key, as it does `Invar-Skip`: a scan of
-words, which a message given with `-F` gets past. Binding the trailer to the developer's key
-comes with the verification of signed approvals (#154), as for a skip.
+words, which a message given with `-F` gets past. With `approval.signed` on at the base, the
+signature binds the trailer to the developer's key, as for a skip.
 
 ## 4. Value rules
 
@@ -899,6 +910,20 @@ cycle:
 **Why:** a pattern names paths under the project root as they are.
 
 ## 11. Version history
+
+**2.8.0 — signed skips and configuration changes (#168).**
+
+- §3.8, §3.9: when `approval.signed` is `true` at the base, `Invar-Skip` and `Invar-Config`
+  count only with a signature trailer that verifies against the base's `.invar/approvers`
+  (`approval-signature.md` §6.5); a bare trailer is named with a note. The developer signs
+  with `invar cycle skip --reason` and `invar config accept --reason`.
+
+**Why:** both trailers were text, and the guard that keeps an agent from writing them is a
+scan of words (#157, #168).
+
+**Compatibility:** no key, value or default changes. With `approval.signed` off at the base,
+or absent, both trailers work as before. A project that has it on needs signed trailers from
+this version: a bare `Invar-Skip` or `Invar-Config` on an open pull request stops counting.
 
 **2.7.0 — where the verifier reads `approval.signed` (#168).**
 

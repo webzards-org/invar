@@ -247,7 +247,12 @@ branch's commits cannot be followed through it. Each step is described below.
 **Every step that compares the branch with a base passes `--base`**, the pull request's target.
 Without it, these commands use the branch `origin/HEAD` points to, else `main`, and never
 `git.base_branch` from `invar.yaml`: that file is on the branch being checked, and a branch that
-set the key to itself would be compared with itself and pass. If your pull requests target
+set the key to itself would be compared with itself and pass.
+
+With `approval.signed: true` on the base, the same steps also hold the two trailers to a
+signature: `cycle check` counts an `Invar-Skip:` and `config check` an `Invar-Config:` only
+when an approver signed it ([Signing a skip or a configuration
+change](#signing-a-skip-or-a-configuration-change)). If your pull requests target
 `develop`, `--base origin/${{ github.base_ref }}` already says so. `git.base_branch` stays for the
 commands you run yourself (`plan check`, `done`, `review-input`).
 
@@ -408,13 +413,15 @@ A pull request that changes a required path passes when:
 
   A trailer survives `git rebase --signoff`, which drops commit signatures. One trailer
   anywhere on the branch covers it, since the pull request is what is reviewed, and the
-  reason is printed in the job's output.
+  reason is printed in the job's output. With `approval.signed: true` on the base, the
+  trailer counts only signed: run `/invar:skip <reason>` instead ([Signing a skip or a
+  configuration change](#signing-a-skip-or-a-configuration-change)).
 
 Otherwise it fails, listing each required path that is not covered, the pattern it matched,
 and the commits that touched it outside a cycle.
 Changes under `.invar/` never count. The plugin's guard denies an agent's `git commit` that
-writes the trailer, but that is a scan of the command line: it is not yet proof that a
-person wrote it. A signed skip comes with signed approvals (#154).
+writes the trailer, but that is a scan of the command line: without signed approvals, nothing
+proves that a person wrote it. With them, the signature does.
 
 ## Optional: refuse a weakened configuration
 
@@ -442,9 +449,11 @@ of the branch:
 git commit --amend --trailer "Invar-Config: the acceptance tests moved under tests/Feature"
 ```
 
-The reason is printed in the job. The plugin's guard denies an agent's edit that weakens
-`invar.yaml`, and its commit that writes the trailer; both are conveniences, and this check is
-the boundary.
+The reason is printed in the job. With `approval.signed: true` on the base, the trailer
+counts only signed: run `/invar:config-accept <reason>` instead ([Signing a skip or a
+configuration change](#signing-a-skip-or-a-configuration-change)). The plugin's guard denies
+an agent's edit that weakens `invar.yaml`, and its commit that writes the trailer; both are
+conveniences, and this check is the boundary.
 
 ## Optional: signed approvals
 
@@ -501,7 +510,17 @@ To set it up:
    allowed-signers format, and merge it to your base branch through review:
 
    ```
-   dev@example.com namespaces="invar-approval" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...
+   dev@example.com namespaces="invar-approval,invar-skip,invar-config" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...
+   ```
+
+   `namespaces=` says what a key may sign: `invar-approval` an approval,
+   `invar-skip` a skip of the cycle, `invar-config` a change that weakens a
+   check. **A line without `namespaces=` accepts every namespace**, git's commit
+   signatures included. A person who approves Plans and skips the cycle, but does
+   not weaken the configuration:
+
+   ```
+   lead@example.com namespaces="invar-approval,invar-skip" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...
    ```
 
    A check of approvals reads this file from the base branch, never from the
@@ -549,6 +568,34 @@ protection on the base. A pull request that adds its own key gets a note from
 on the base. The list is read each time the check runs: an open pull request's
 approvals with a new key count once the line is merged and CI runs again, and a
 key whose line is removed stops counting the same way.
+
+### Signing a skip or a configuration change
+
+With `approval.signed: true` on the base, two more decisions of yours are signed:
+a change to required paths without a cycle, and a change that weakens a check in
+`invar.yaml`. A bare `Invar-Skip:` or `Invar-Config:` trailer is listed in CI with
+a note, and does not count. Sign one instead, after the change is committed:
+
+```text
+/invar:skip a comment typo in Order, no behavior
+/invar:config-accept the acceptance tests moved under tests/Feature
+```
+
+or from a terminal, `invar cycle skip --reason "<reason>"` and `invar config accept
+--reason "<reason>"`. Each lists what it covers (the required changes, or the
+weakenings), signs it with the key git signs with, within 90 seconds, and makes one
+empty commit with two trailers: the reason, and the signature on one line. Push it
+with the branch. `--print` prints the two trailers instead, for a commit of your
+own.
+
+The signature covers the change as it is: each required path with its content at
+the merge base and on the branch, or `invar.yaml` on the base and on the branch.
+A later commit to a required path, a new one, or another edit of `invar.yaml`
+needs a new signature; CI then says the signature is not over the change as it is
+now. It survives `git rebase
+--signoff`, which keeps the empty commit and its trailers, unless the base itself
+changed what it covers. The key needs `invar-skip` or `invar-config` in its
+`namespaces=`, or none.
 
 **Checking a signature by hand.** For a Plan as it is now, against the list on
 `origin/main`:

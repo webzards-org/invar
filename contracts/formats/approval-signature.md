@@ -27,7 +27,9 @@ defines:
 - the list of people who may approve, `.invar/approvers` (§2);
 - the statement that is signed (§3) and the file that holds the signature (§4);
 - how `plan approve` signs, when `approval.signed` is on (§5);
-- what a verifier checks, and where it reads the list from (§6).
+- what a verifier checks, and where it reads the list from (§6);
+- the same for two more decisions of a person, a skip of the cycle and a change
+  that weakens a check, signed as trailers (§6.5).
 
 With `approval.signed` absent or `false`, nothing here applies: no signature is
 written, and none is read.
@@ -48,8 +50,15 @@ dev@example.com namespaces="invar-approval" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA
 
 - The **principal** is how the approver is reported (§6.4): an email address or
   any name without spaces.
-- `namespaces="invar-approval"` is recommended. It limits the key to approvals,
-  so the same line does not also make it valid for git commit signatures.
+- `namespaces=` limits what the key may sign. A line without it accepts every
+  namespace, git's commit signatures (`git`) included. The namespaces here are
+  `invar-approval` (§3), `invar-skip` and `invar-config` (§6.5), so a line can
+  give a person some of the three and not the others. One who approves Plans
+  and skips the cycle, but does not weaken the configuration:
+
+  ```
+  lead@example.com namespaces="invar-approval,invar-skip" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...
+  ```
 - A verifier reads the list **from the base branch only**
   (`git show <base>:.invar/approvers`), never from the work tree or the branch
   being checked (D-3). A branch that adds a key to the list does not make that
@@ -243,6 +252,78 @@ signature matched (`ssh-keygen -Y find-principals`), and the key's fingerprint.
 That is the record of who approved. When the header's `Approved-by` differs, it
 says so: the header stays text.
 
+### 6.5 Signed skips and configuration changes
+
+Two more decisions of a person are commit trailers, read by the CI checks of
+`invar-yaml.md`: `Invar-Skip: <reason>`, a change to required paths made without
+a cycle (§3.8 there), and `Invar-Config: <reason>`, a change that weakens a check
+(§3.9 there). When `invar.yaml` at the base has `approval.signed: true`, each
+counts only with a signature by an approver, made and checked as an approval is.
+
+**The statements**, each line ending with `\n` (LF), in this order and with
+nothing else:
+
+```
+invar-skip 1
+reason: <reason>
+change: <before> <after> <path>
+```
+
+- `<reason>` is the value of the `Invar-Skip` trailer, trimmed: one line, not
+  empty.
+- One `change:` line per required change (`invar-yaml.md` §3.8): each path that
+  `cycle.required_paths` at the base requires and that differs between the merge
+  base and `HEAD`, sorted by path, byte by byte. `<before>` is its git object id
+  at the merge base, `<after>` at `HEAD`, and `-` where it is absent. The path
+  comes last, so that it may hold spaces; a path with a newline cannot be
+  signed.
+
+```
+invar-config 1
+reason: <reason>
+config: <base> <head>
+```
+
+- `<reason>` is the value of the `Invar-Config` trailer, trimmed.
+- `<base>` and `<head>` are the git object ids of `invar.yaml` at the base and at
+  `HEAD`, what `config check` compares (`invar-yaml.md` §3.9), and `-` where it
+  is absent.
+
+The namespaces are `invar-skip` and `invar-config`, so that no signature of one
+kind is ever valid as another, or as an approval (D-9).
+
+**The trailers.** On one commit of the branch, the reason trailer and beside it
+`Invar-Skip-Signature: <signature>`, or `Invar-Config-Signature: <signature>`.
+`<signature>` is what `ssh-keygen -Y sign` writes (§4) without its first and
+last lines and without line breaks: its base64 on one line. A verifier puts the
+armor back, 70 characters a line, as `ssh-keygen` writes it (D-10).
+
+**Making one.** `invar cycle skip --reason <reason>` and `invar config accept
+--reason <reason>`, each with `[--base <ref>] [--print]`, are the developer's
+commands. The base is found by the rule of the CI commands (`invar-yaml.md`
+§3.3.1), because the statement depends on it. Each prints what it covers, signs
+as `plan approve` does (§5, steps 1 to 3, in its own namespace), and makes one
+empty commit with the two trailers, under the project's own hooks; nothing is
+pushed. With `--print` it prints the two trailers instead, and commits nothing.
+It refuses, and signs nothing, when `approval.signed` is not on at the base, when
+there is nothing to cover (no required change, or no weakening), when the reason
+is empty or not one line, and when a path holds a newline.
+
+**Verifying.** A signed trailer counts when its commit is in `<base>..HEAD`, it
+has one reason trailer and one signature trailer of its kind, and the signature
+verifies in its namespace over the statement built from the branch **as it is
+when checked**, for a principal in `<base>:.invar/approvers`, with `ssh-keygen`
+directly (§6.1, D-5). Each one that counts is reported with its principal and
+the key's fingerprint (§6.4). Each one that does not is named with the reason: no
+signature, a signature that does not verify, or one by a key the list does not
+have. Since the statement is built from the branch as it is, a signature covers
+the change it was made for and nothing else: a later commit to a required path,
+a new required path, or a base that changed `invar.yaml` or a covered file,
+needs a new signature.
+
+When `approval.signed` is not on at the base, a signature trailer is not read,
+and a reason trailer counts as it did before.
+
 ## 7. Limits
 
 A signature shows that the key was used, not that a person meant to approve this
@@ -335,6 +416,28 @@ approval of its own, with the same `Approval-id` as the one it merges, and rule
 6 would refuse an honest branch. So the verifier follows first parents, and
 refuses a `HEAD` that is a merge onto the base, naming what to check out.
 
+**D-9 — A skip or a configuration change is bound to what it covers** (1.0.0,
+#168). The candidates were the merge base, HEAD's tree, the content covered, and
+a random id as for an approval. Measured in `plugin/NOTES.md` §20: `git rebase
+--signoff`, which this repository runs before every merge, changes the merge base
+and HEAD's tree, so a signature bound to either would not survive the merge
+process, and the merge base does not even cover the commits made after the
+signature. The blobs of the covered paths survive the rebase, and change with any
+later change to them. What it leaves is a trailer copied to another branch that
+makes the same change, byte for byte: the same decision about the same change, so
+no id is added to refuse it. Separate namespaces, so that a team can give a person
+one of these decisions without the others (§2).
+
+**D-10 — In a trailer, on an empty commit** (1.0.0, #168). A trailer survives a
+rebase (`git rebase --signoff` keeps it and the empty commit), leaves nothing in
+the tree, and needs no clean-up after the merge. A file under `.invar/` would be
+merged into the base, and every later branch would have to tell its own from the
+base's. The signature goes on one line, because a trailer that continues on more
+lines is easy to break by hand, and the armor is fixed text a verifier can put
+back. The command makes an empty commit of its own rather than amend one of the
+agent's. A squash merge drops the trailers, which does not matter: the checks run
+on the pull request, before it.
+
 ## 9. Version history
 
 **1.0.0** — initial version (#154).
@@ -367,6 +470,14 @@ Not yet released, so changed in place again with the verifier (#168):
   in an approved Plan at a commit any ref reaches outside `<merge base>..HEAD`,
   or in a `failed` entry at the base; the limit, a commit no ref reaches. §7
   says what that leaves.
+
+Not yet released, so changed in place again for signed skips and configuration
+changes (#168, its second PR):
+
+- §1, §2: the namespaces `invar-skip` and `invar-config`, and what a line
+  without `namespaces=` accepts.
+- New §6.5: the two statements, their trailers, the commands that make them, and
+  how `cycle check` and `config check` verify them. New D-9 and D-10.
 
 **Why:** the review of #162 found that a reset approval could be replayed from
 history with every rule of §6 passing it (D-7), and that §6.1 read the

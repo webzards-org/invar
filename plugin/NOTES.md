@@ -2404,6 +2404,181 @@ approval is, so that a skip in CI is accepted only when someone in the base's
 - [ ] The check on a real pull request in GitHub Actions, with `fetch-depth: 0` and
       `--base origin/${{ github.base_ref }}`
 
+### Signed `Invar-Skip` and `Invar-Config` — spike for #168
+
+Spike on 2026-11-25, before any code. git 2.53.0, OpenSSH 10.2p1, Ubuntu, Linux 7.0.0
+x86_64. Throwaway ed25519 keys and a throwaway repository; the script is not kept in the
+repository.
+
+**The gap.** Both trailers are text. `plan guard` denies an agent's `git commit` that writes
+the key, which is a word scan (§21, B3): a message given with `-F` passes. Bound to an
+approver's key as an approval is, the trailer would be a person's decision wherever it is
+checked, in CI against the base's `.invar/approvers`.
+
+#### What was measured
+
+| | Result |
+|---|---|
+| **M1** — size of an ed25519 SSHSIG over a three-line statement | 6 armored lines; **240 characters** as one line of base64 without the armor |
+| **M2** — that line as a trailer on an empty commit, read with `%(trailers:key=…,valueonly,unfold)` | the same bytes |
+| **M3** — re-armored at 70 and at 76 columns | both verify with `ssh-keygen -Y verify`; at 70 columns it is byte-identical to what `ssh-keygen -Y sign` wrote |
+| **M4** — `git rebase --signoff` onto a `main` that moved (a change to `README.md` only) | the trailers are kept, `Signed-off-by` goes after them; the blobs of the covered file before and after the change are kept; **the merge base changes**, and with it HEAD's tree |
+| **M6** — the branch squashed into one commit with the messages concatenated, as GitHub's squash merge does | the trailer is no longer parsed: the trailer block is the end of the message only |
+| **M7** — a later commit to the covered file | its blob changes: a statement over the old blob no longer matches |
+| **M8** — an approvers line with `namespaces="invar-approval"` and a signature in `invar-skip` | `key is not permitted for use in signature namespace "invar-skip"`; with `namespaces="invar-approval,invar-skip,invar-config"` it verifies |
+
+#### 1. What the statement is bound to
+
+What an agent with a shell could still do, for each candidate. Every candidate keeps the
+reason in the statement, so the reason a reviewer reads is the one that was signed.
+
+- **The merge base.** Another branch from the same merge base takes the trailer with it.
+  Commits after the signature leave the merge base as it was, so they are covered too: it
+  does not bind "after more commits" at all. And `git rebase --signoff`, which this
+  repository runs before every merge, changes the merge base (M4), so every signature dies
+  at the rebase. **Rejected.**
+- **HEAD's tree at signing.** The strongest binding: any later commit, of any file, needs a
+  new signature, and another branch only matches with an identical tree. The rebase changes
+  the tree too (M4), as soon as `main` has moved at all, so the developer signs again after
+  every rebase and every fixup. **Rejected**, for the same reason as a commit signature (D-1
+  of `approval-signature.md`): the merge process breaks it.
+- **What it covers, by content** — for a skip, each required path the branch changes, with
+  its blob at the merge base and at HEAD; for a config change, the blob of `invar.yaml` at
+  the base and at HEAD. A later change to a covered path, or a new required path, is not
+  covered (M7). The rebase keeps it unless `main` changed a covered file itself (M4), which
+  is a different change and should be signed again. What is left to the agent: changing
+  paths that are not required, which never needed a cycle; and putting the same trailer on
+  another branch that makes byte-for-byte the same change, which is the same decision about
+  the same change. **Recommended.**
+- **A random id, as `Approval-id`.** Binds nothing by itself: it only lets a verifier refuse
+  a trailer it has seen elsewhere, through the search of PR #169, with the same limit (a
+  commit no ref reaches) and the same false alarm (a ref holding an older version of the
+  branch). With the content binding, a replay is the same change, so the id adds little.
+  **Not recommended**, unless you want a skip that a reviewer rejected on one pull request
+  not to count on another with identical content (question Q2).
+
+#### 2. Where it lives
+
+- **A trailer** (recommended): the reason trailer as today, `Invar-Skip: <reason>` or
+  `Invar-Config: <reason>`, and on the same commit `Invar-Skip-Signature: <base64>` or
+  `Invar-Config-Signature: <base64>`, the signature without its armor on one line (M1, M2);
+  the verifier puts the armor back at 70 columns (M3). Any commit of the branch may carry
+  it; the command makes an empty commit of its own, so that no commit of the agent's is
+  amended. It survives the rebase (M4). Nothing is left in the tree, and nothing has to be
+  deleted after the merge. A squash merge loses it (M6), which does not matter: the checks
+  run on the pull request, before the merge.
+- **A file** under `.invar/` (`.invar/skips/<n>.sig` with its statement): it would be merged
+  into `main` and stay there, so every later branch would have to ignore the files of its
+  base, and something would have to delete them; there is no `done` for a skip. **Not
+  recommended.**
+
+#### 3. Namespace and statement
+
+`invar-skip` and `invar-config`, each apart from `invar-approval`, so that a signature for one
+kind is never valid as another, and so that a team can give a person one power without the
+others with `namespaces=` in `.invar/approvers` (question Q3). In the style of
+`approval-signature.md` §3, LF after each line, nothing else:
+
+```
+invar-skip 1
+reason: <reason>
+change: <before> <after> <path>
+change: <before> <after> <path>
+```
+
+One `change:` line per path that `cycle.required_paths` at the base requires and that
+differs between the merge base and HEAD, sorted by path. `<before>` and `<after>` are git
+object ids, or `-` where the file is absent; the path comes last so that it may hold spaces,
+and a path with a newline is refused at signing.
+
+```
+invar-config 1
+reason: <reason>
+config: <base> <head>
+```
+
+The blobs of `invar.yaml` at the base and at HEAD, `-` where absent: what `config check`
+compares (§3.9 of `invar-yaml.md` compares the base itself, not the merge base). Any later
+edit of `invar.yaml` needs a new signature; the weakened keys could be bound instead, but
+their values (a `run` command) would need a canonical form in the contract, and edits of
+`invar.yaml` are rare. `<reason>` is the trailer's value, trimmed, one line, not empty.
+
+#### 4. How the developer makes it
+
+Two commands on `HUMAN_ONLY`, signing with the `Signer` and the 90 s deadline of
+`plan approve`, with `--skill` as there:
+
+- `invar cycle skip --reason "<reason>" [--base <ref>]`: lists the required changes it
+  covers, signs, and makes an empty commit with both trailers.
+- `invar config accept --reason "<reason>" [--base <ref>]`: lists the weakenings, signs, and
+  commits likewise.
+
+Both find the base by the CI rule (`invar-yaml.md` §3.3.1), not `git.base_branch`, because
+the statement depends on it and CI must compute the same one. Both refuse with nothing to
+cover, and when `approval.signed` is off at the base, where a plain trailer is the way.
+`--print` writes the two trailers instead of committing, for a developer who wants them on
+their own commit. Skills `/invar:skip <reason>` and `/invar:config-accept <reason>`, each
+`disable-model-invocation: true`, one shell block, as `/invar:approve`. The guard's word
+scan also covers `Invar-Skip-Signature` and `Invar-Config-Signature`.
+
+#### 5. The rule
+
+When `invar.yaml` at the base has `approval.signed: true`, `cycle check` and `config check`
+count a trailer only with a signature that verifies, for a principal in the base's
+`.invar/approvers`, over the statement built from the branch as it is now; each counted one
+names its principal and fingerprint. A bare trailer, or one whose signature does not verify
+or no longer matches, is listed with a note saying why and does not count. When it is off,
+or the base has no `invar.yaml`, a trailer works as today and a signature trailer is
+ignored. A signed skip covers the branch's required changes as they were signed, where a bare
+trailer covers the whole branch; a branch that changes another required path after signing
+needs a new one.
+
+#### 6. Contracts
+
+- `approval-signature.md`: a section for the two statements, their namespaces, the trailer
+  encoding and their verification, using its §2 list and §5 signing. 1.0.0 is still
+  unreleased (no tag since v0.2.0), so changed in place, or 1.1.0 (question Q4).
+- `invar-yaml.md` 2.8.0: §3.8 and §3.9, the signed form required when `approval.signed` is
+  on at the base; the two commands.
+- `plan-header.md` and `decision-entry.md`: unchanged.
+
+#### Decided, and built
+
+The developer took every recommendation: the content binding (Q1), no random id and no
+search across refs for these two (Q2), separate namespaces (Q3), `approval-signature.md`
+1.0.0 changed in place (Q4), `invar cycle skip --reason` and `invar config accept --reason`
+(Q5), an empty commit by default with `--print` as the alternative and no amend (Q6), and
+`pr-body --from-approval` finding its base by the CI rule (Q7).
+
+**Q6, measured.** An empty commit made by `git commit --only --allow-empty --trailer …`, then
+`git rebase --signoff` onto a `main` that moved: git 2.53.0 keeps the empty commit (a commit
+that started empty is kept by default; only one that becomes empty is dropped), keeps both
+trailers, and adds `Signed-off-by` after them in the same block. `cycle check` still counts
+the skip, since the covered blobs did not change. `--only` with no path makes the empty
+commit without what is staged, which stays staged. Covered by
+`tests/signed_skip.rs` (`a_signed_skip_survives_a_rebase_with_signoff_onto_a_moved_main`,
+`a_signed_skip_passes_and_names_who_signed`).
+
+**How it is verified.** The statement is rebuilt in CI from the branch as it is, so the
+trailer carries no list of what it covers: a skip signed for `app/Models/Order.php` stops
+counting when another required path changes, rather than covering half the branch. The
+signature is checked with `ssh-keygen` directly, in its namespace, against the base's
+`.invar/approvers`, as an approval is. When the base has `approval.signed` on and no
+approvers list, every signed trailer is named as one that cannot be verified, and the check
+fails as it would with a bare trailer.
+
+**`pr-body --from-approval`.** It runs the checks of `approval verify` and renders the
+ticket's Plan from the last approval that passed them, read from git, with a line naming the
+principal, the fingerprint and the commit. An approval refused as a replay is not one it
+renders. It works after `done` has deleted the Plan, which the plain `pr-body` does not.
+
+**Not exercised.**
+
+- [ ] `/invar:skip` and `/invar:config-accept` in a real session with a key that asks for a
+      touch or a confirmation
+- [ ] The three checks on a real pull request with signed trailers, through GitHub's own
+      rebase and merge buttons
+
 ## 21. The configuration, and what the guard cannot close (#157)
 
 **What is built.** The keys that decide whether something is checked are a closed list in

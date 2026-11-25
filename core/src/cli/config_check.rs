@@ -4,8 +4,12 @@
 use anyhow::{Context as _, Result};
 use clap::Subcommand;
 
+use crate::attestation::Kind;
 use crate::config_check::{self, Weakened};
-use crate::fs;
+use crate::cycle::short;
+use crate::fs::{self, ProjectRoot};
+use crate::git;
+use crate::signature::{self, Signer};
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -39,6 +43,34 @@ pub enum Command {
         #[arg(long, value_name = "REF")]
         base: Option<String>,
     },
+    /// Sign that this branch weakens what invar checks on purpose, and commit it. The
+    /// developer's, never an agent's.
+    ///
+    /// For a project whose base has `approval.signed: true`, where `config check` counts
+    /// an `Invar-Config:` trailer only with a signature by a key in the base's
+    /// `.invar/approvers`. Lists each weakening, signs a statement of invar.yaml at the
+    /// base and at HEAD, and the reason, with the SSH key git signs with, within 90
+    /// seconds, then makes one empty commit with the trailers `Invar-Config: <reason>` and
+    /// `Invar-Config-Signature: <signature>`. What else is staged stays staged; nothing
+    /// is pushed. A later change to invar.yaml needs a new signature.
+    Accept {
+        /// Why the branch weakens the checks, in one line: the value of `Invar-Config:`.
+        #[arg(long)]
+        reason: String,
+
+        /// The branch the pull request targets, as `config check` takes it.
+        #[arg(long, value_name = "REF")]
+        base: Option<String>,
+
+        /// Print the two trailers instead of committing them.
+        #[arg(long)]
+        print: bool,
+
+        /// Report as `/invar:config-accept` needs it: a refusal is printed on stdout as
+        /// `error: …`, and the exit code is 0.
+        #[arg(long)]
+        skill: bool,
+    },
 }
 
 pub fn run(command: Command) -> Result<()> {
@@ -58,9 +90,63 @@ pub fn run(command: Command) -> Result<()> {
             } else {
                 Err(Weakened {
                     weakenings: report.weakenings,
+                    signed: report.signed,
                 }
                 .into())
             }
         }
+        Command::Accept {
+            reason,
+            base,
+            print,
+            skill,
+        } => super::for_skill(
+            skill,
+            fs::project_root()
+                .map_err(Into::into)
+                .and_then(|root| accept(&root, &reason, base.as_deref(), print)),
+        ),
     }
+}
+
+/// `invar config accept`: show, sign, then commit or print.
+fn accept(root: &ProjectRoot, reason: &str, base: Option<&str>, print: bool) -> Result<()> {
+    let prepared = config_check::prepare_accept(root, base, reason)?;
+    let signer = Signer::from_git(root.path())?;
+    println!(
+        "What this branch weakens in invar.yaml, against {} (base -> this branch):",
+        prepared.base
+    );
+    for weakening in &prepared.weakenings {
+        println!("  {weakening}");
+    }
+    println!();
+    println!("Invar-Config: {}", prepared.reason);
+    println!();
+    println!("signing with {} — answer its prompt if it asks", signer.key);
+    let armored = signer.sign_in(
+        root.path(),
+        Kind::Config.namespace(),
+        &prepared.statement,
+        signature::DEADLINE,
+    )?;
+    let one_line = signature::one_line(&armored);
+    let trailers = [
+        (Kind::Config.reason_key(), prepared.reason.as_str()),
+        (Kind::Config.signature_key(), one_line.as_str()),
+    ];
+    if print {
+        for (key, value) in trailers {
+            println!("{key}: {value}");
+        }
+        return Ok(());
+    }
+    let message = "chore: accept the configuration change";
+    let commit = git::commit_empty(root.path(), message, &trailers)?;
+    println!("committed: {} {message}", short(&commit));
+    println!(
+        "configuration change signed: {} weakening(s)",
+        prepared.weakenings.len()
+    );
+    Ok(())
 }

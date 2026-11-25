@@ -15,6 +15,13 @@ const CONFIG: &str = "review:\n  offer: true\napproval:\n  signed: true\n\
     run: [\"pest\", \"{report}\", \"{files}\"]\n\
     cycle:\n  required_paths: [\"app/Models/**\", \"database/migrations/\"]\n";
 
+/// [`CONFIG`] without `approval.signed`: where a bare `Invar-Config:` trailer counts
+/// (`invar-yaml.md` §3.9). With it on, the trailer has to be signed, which
+/// `tests/signed_config.rs` covers.
+fn unsigned() -> String {
+    CONFIG.replace("approval:\n  signed: true\n", "")
+}
+
 struct Project {
     dir: TempDir,
 }
@@ -199,7 +206,8 @@ fn each_weakening_fails_naming_its_base_and_head_values() {
             &[
                 "weakens 1 check(s) in invar.yaml against the base, with no `Invar-Config:` trailer",
                 &format!("  {says}"),
-                "git commit --amend --trailer \"Invar-Config: <reason>\"",
+                // The base has `approval.signed`, so the way out is a signed one.
+                "invar config accept --reason \"<reason>\"",
             ],
         );
         assert!(out.contains(&format!("  {says}\n")), "{out}");
@@ -225,10 +233,10 @@ fn removing_invar_yaml_altogether_is_every_weakening_at_once() {
 
 #[test]
 fn a_weakening_with_the_trailer_passes_and_prints_the_reason() {
-    let project = Project::new(Some(CONFIG));
+    let project = Project::new(Some(&unsigned()));
     project.write(
         "invar.yaml",
-        &CONFIG.replace("dir: tests/Acceptance", "dir: tests/Feature/Acceptance"),
+        &unsigned().replace("dir: tests/Acceptance", "dir: tests/Feature/Acceptance"),
     );
     project.commit_with_trailer(
         "move the acceptance tests",
@@ -291,10 +299,10 @@ fn an_invalid_invar_yaml_on_the_branch_is_an_error() {
 
 #[test]
 fn the_trailer_survives_rebase_signoff() {
-    let project = Project::new(Some(CONFIG));
+    let project = Project::new(Some(&unsigned()));
     project.write(
         "invar.yaml",
-        &CONFIG.replace("signed: true", "signed: false"),
+        &unsigned().replace("offer: true", "offer: false"),
     );
     project.commit_with_trailer("unsign", "Invar-Config: no security keys until January");
     project.git(&["checkout", "-q", "main"]);
