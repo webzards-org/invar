@@ -9,6 +9,7 @@
 //! - the `.feature` metadata block (§4)          — the feature-tests milestone
 //! - the `invar-lock:` line (§4d)                — AT-5, [`lock`]
 //! - JUnit XML test results (§14.2)              — AT-6, [`junit`]
+//! - the Plan audit's `findings.md`              — #167, [`audit`]
 //!
 //! The specifications live in `contracts/formats/`; this module implements
 //! them and must not drift from them. A change here that changes what a file
@@ -24,6 +25,7 @@
 //! `Scenario:` lines. Steps are the adapter's concern, never the core's
 //! (§14.2).
 
+pub mod audit;
 pub mod config;
 pub mod decision;
 pub mod glob;
