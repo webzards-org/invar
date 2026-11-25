@@ -1,7 +1,7 @@
 # Contract: Decision entry
 
-**Version:** 1.4.0 — the `acceptance` key: how the ticket was closed; see §4.2 and
-the version history
+**Version:** 1.5.0 — a `failed` entry records the `approval-id` it cancels; see §4.1,
+§7 and the version history
 **Status:** stable
 **Implements:** §7 (Decision log), §4c (a `failed` entry resets the cycle),
 §12 (the entry survives the Plan); light mode L-1, L-4 (`docs/TASKS-M1.md`)
@@ -89,6 +89,7 @@ The free-text body.
 | `type` | yes | `confirmed`, `correction`, `failed` or `note` (§5) |
 | `scenario` | **no** | The `.feature` scenario the entry is about, when `scenarios: true`. **Absent in light mode** (L-1) |
 | `acceptance` | **no** | `required` or `skipped`, lowercase, exactly: what the ticket's approved Plan decided about acceptance tests (§4.2). **Absent means unknown** |
+| `approval-id` | **no** | 32 lowercase hex digits: the Plan's `Approval-id` (plan-header.md §5) that a `failed` entry cancelled (§7). Written by the core on a `failed` entry only. **Absent means unknown** |
 
 Each key appears at most once. A key not listed here is permitted and ignored,
 so a newer writer cannot break an older reader.
@@ -143,17 +144,25 @@ Writing a `failed` entry for a ticket also returns that ticket's Plan to
 `draft` (§4c, light-mode form):
 
 1. `Status` becomes `draft`, and `Approved-by`, `Approved-at` and
-   `Approved-checksum` become empty. `Lockfile-checksum` and `Acceptance`,
-   when present, become empty too. The keys stay (plan-header.md D-3).
+   `Approved-checksum` become empty. `Lockfile-checksum`, `Acceptance` and
+   `Approval-id`, when present, become empty too. The keys stay (plan-header.md
+   D-3).
 2. The body is not touched — nothing is reverted, only de-approved.
-3. There are no `.feature` files to reset in light mode.
+3. The Plan's `approval.sig`, when it has one, is deleted: it signed the approval
+   being disproved (`approval-signature.md` §4). When the Plan had an
+   `Approval-id`, the entry records it as `approval-id`, so that a verifier
+   refuses the cancelled approval if it is put back, on any branch, once the
+   entry is on the base (`approval-signature.md` §6.3, rule 6). An entry for a
+   Plan without one has no key.
+4. There are no `.feature` files to reset in light mode.
 
 Without a Plan there is nothing to reset, and the command **refuses**: a
 `failed` entry promises that the approval it disproves is gone. A failure
 without a Plan is recorded as a `note`.
 
 The two writes happen Plan first, entry second. If the entry cannot be
-written, the Plan is restored to the exact bytes it had (D-8).
+written, the Plan is restored to the exact bytes it had, and `approval.sig`
+with it (D-8).
 
 The entry's `acceptance` (§4.2) is what the Plan said **before** the reset: the
 reset clears `Acceptance`, and the entry records the approval it disproves.
@@ -199,6 +208,7 @@ matter, `---`, a non-empty body — with these fields:
 | `scenario` | **no** | As in §4.1 |
 | `acceptance` | **no** | As in §4.1, and equal to what the Plan says (§4.2); checked when the draft is recorded |
 | `id`, `date` | **must be absent** | Assigned when the draft is recorded (D-10) |
+| `approval-id` | **must be absent** | Taken from the Plan when a `failed` draft is recorded (§7), never from the draft |
 
 A key not listed is permitted and ignored, as for an entry.
 
@@ -560,6 +570,32 @@ it. `invar decision approve` refuses it and writes nothing: the draft says
 remove the line and let the Plan's value be recorded.
 
 ## 13. Version history
+
+**1.5.0 — a `failed` entry records the approval it cancels (#168).**
+
+- §4.1: the optional key `approval-id`, 32 lowercase hex digits, written by the
+  core on a `failed` entry for a Plan that had an `Approval-id`. Absent means
+  unknown. §8.1: a draft must not have it.
+- §7: the reset records the Plan's `Approval-id` in the entry.
+
+**Why:** an approval undone by a `failed` entry could be put back on a new branch
+for the same ticket (`approval-signature.md` D-7). The failed branch's history is
+not always there to show it; the entry, once merged, is.
+
+**Compatibility:** every entry and draft that was valid stays valid: none had the
+key, and absent means unknown. An older reader ignores the key (§4.1). A draft
+that holds an `approval-id` key, which no tool wrote, is now refused.
+
+**1.4.1 — a `failed` entry clears `Approval-id` and removes `approval.sig` (#168).**
+
+- §7: `Approval-id`, new in `plan-header.md` 1.10.0, is cleared with the other
+  approval values, and the Plan's `approval.sig` is deleted, and put back with the
+  Plan if the entry cannot be written.
+
+**Why:** a `failed` entry promises that the approval it disproves is gone, and
+the signature was part of it (`approval-signature.md` §4).
+
+**Compatibility:** nothing changes for a Plan without the field or the file.
 
 **1.4.0 — the `acceptance` key (AT-15).**
 

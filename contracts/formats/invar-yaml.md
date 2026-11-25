@@ -1,6 +1,6 @@
 # Contract: `invar.yaml`
 
-**Version:** 2.6.0 — the CI commands never take their base from the branch they check; see §11
+**Version:** 2.7.0 — `approval.signed` is read from the base by the verifier of approvals; see §11
 **Status:** stable
 **Implements:** §6 (Config file), §13c (the review's base branch), §14.3; light
 mode L-2 and L-7 (`docs/TASKS-M1.md`); A-2, A-6 and A-7 (`docs/TASKS-AT.md`)
@@ -118,8 +118,8 @@ call `git`, and fail loudly if it does not.
 #### 3.3.1 Which base a CI command uses
 
 **Nothing a branch changes chooses what that branch is checked against** (D-20). The
-commands CI runs — `invar config check`, `invar cycle check`, and `invar acceptance verify`
-with a ticket — find their base in this order:
+commands CI runs — `invar config check`, `invar cycle check`, `invar approval verify`, and
+`invar acceptance verify` with a ticket — find their base in this order:
 
 1. `--base <ref>`;
 2. `git symbolic-ref refs/remotes/origin/HEAD`, the remote's default branch;
@@ -249,7 +249,11 @@ it cannot sign (`approval-signature.md` §5). The signature is written next to t
 Plan as `approval.sig`. The key only says what `plan approve` writes: whether a
 branch's approvals are signed is checked where the agent cannot change the
 answer, against the base branch's `.invar/approvers` (`approval-signature.md`
-§6).
+§6). **Verification is required when `invar.yaml` at the base has
+`approval.signed: true`.** A branch that turns it off is still checked, with a
+note, by the rule of §3.3.1: `invar approval verify` reads the key from the base,
+never from the branch. `invar config check` reports the change as a weakening
+(§3.9).
 
 **`commit`** and **`commit_message`** work as `done.commit` and
 `done.commit_message` do (§3.5), for the approval instead of the deletion:
@@ -895,6 +899,19 @@ cycle:
 **Why:** a pattern names paths under the project root as they are.
 
 ## 11. Version history
+
+**2.7.0 — where the verifier reads `approval.signed` (#168).**
+
+- §3.7: verification of signed approvals is required when `invar.yaml` at the base
+  has `approval.signed: true`; a branch that turns it off is still checked, with a
+  note. §3.3.1: `invar approval verify` is one of the CI commands, and finds its base
+  as they do.
+
+**Why:** `approval-signature.md` §6.1 read the approvers list from the base, but not
+the switch, so a branch could turn the check off for itself (#168).
+
+**Compatibility:** no key, value or default changes, so every valid file stays valid
+and reads as it did. `plan approve` reads the key as before.
 
 **2.6.0 — the CI commands do not take their base from the branch (#165).**
 

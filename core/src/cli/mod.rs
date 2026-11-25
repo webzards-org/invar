@@ -19,6 +19,7 @@ use crate::format::plan::Mode;
 use crate::fs::ProjectRoot;
 
 mod acceptance;
+mod approval;
 mod config_check;
 mod context;
 mod cycle;
@@ -113,6 +114,10 @@ pub enum Command {
     /// With `--results <REPORT>...`, also refuses, changing nothing, unless every
     /// locked acceptance test of the ticket passed in those JUnit reports.
     Done(done::Args),
+    /// Whether every approval on a branch is signed by an approver of the base:
+    /// `approval verify`, for CI.
+    #[command(subcommand)]
+    Approval(approval::Command),
     /// Whether a branch weakens what invar checks, in invar.yaml: `config check`, for CI.
     #[command(subcommand)]
     Config(config_check::Command),
@@ -162,6 +167,7 @@ impl Cli {
             Command::Context(command) => context::run(command).map(|()| ExitCode::SUCCESS),
             Command::Cycle(command) => cycle::run(command).map(|()| ExitCode::SUCCESS),
             Command::Config(command) => config_check::run(command).map(|()| ExitCode::SUCCESS),
+            Command::Approval(command) => approval::run(command).map(|()| ExitCode::SUCCESS),
             Command::Init => init::run().map(|()| ExitCode::SUCCESS),
         }
     }

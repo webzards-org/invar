@@ -2271,6 +2271,89 @@ signature yet, and the docs say so. Also not built: the `pr-body` signer line.
 key, and the 90 s deadline in a real session. The deadline is covered by a unit
 test of the wait.
 
+### The verifier, and what landed late from #162 (#168)
+
+**What the review of #162 asked for, and missed `main`.** Of four changes, only the
+deadline fix above landed. The other three came with the verifier, since it could not be
+correct without them:
+
+- **Replay of a reset approval.** The statement was the ticket and the checksum, ed25519
+  signs the same lines to the same signature, and a `failed` reset left `approval.sig` in
+  place. An agent with a shell could put back the old header and signature after a reset,
+  from the work tree or from `git show`, and every rule of §6 passed it: a good signature,
+  by a listed key, over a checksum that matches. Reproduced in
+  `tests/approval_verify.rs` (`a_replayed_approval_after_a_reset_is_refused`): approve,
+  `decision record --type failed`, `git checkout <approval commit> -- spec.md approval.sig`,
+  commit. Now `plan approve` writes `Approval-id`, 128 bits from `/dev/urandom`, into the
+  header and the statement's fourth line, and the verifier refuses an id it has already
+  seen on the branch (`approval-signature.md` D-7). The reset deletes `approval.sig` too,
+  for clarity only: history keeps it, and the id is what closes the replay.
+- **Where `approval.signed` is read from.** §6.1 read the approvers list from the base but
+  not the switch. The verifier reads both from the base, and a branch that turns signing off
+  is checked all the same, with a note: the rule of #165.
+- **A failed `--commit`, then a retry.** The second `/invar:approve` found the approval
+  current and gave no next step. The error now names the files to commit and says to ask
+  the session to start Phase 2.
+
+**`invar approval verify [--base <ref>]`.** §6 as written: the base by the CI rule, the
+switch and `.invar/approvers` from it (written to a temporary file for `ssh-keygen`), every
+first-parent commit from the merge base to `HEAD`, each Plan at the commit against its first
+parent. Three `ssh-keygen` calls per approval, measured on OpenSSH 10.2p1 before writing the
+parser: `-Y check-novalidate` says whether the signature is over this statement in this
+namespace, and prints the fingerprint; `-Y find-principals` gives the principals that have
+the key, but ignores `namespaces=`; `-Y verify -I <principal>` is the verdict, and refuses a
+line whose `namespaces=` leaves `invar-approval` out (`key is not permitted for use in
+signature namespace`). It names commit and Plan for every problem in one run, and for each
+approval that passes, the principal and the fingerprint.
+
+**Found while building it: CI's merge commit.** On a `pull_request` event,
+`actions/checkout` checks out `refs/pull/N/merge`, whose first parent is the base. The merge
+base is then the base itself, the first-parent walk is that one commit, and a Plan approved
+without a signature and deleted by `done` is in none of it: the check passes. Walking every
+parent instead makes the merge an approval of its own, with the same `Approval-id`, so an
+honest branch fails as a replay. Decided with the developer: the verifier refuses a `HEAD`
+that is a merge whose first parent is the base, naming `ref: ${{
+github.event.pull_request.head.sha }}`, and `docs/INSTALL.md` checks out the head
+(`approval-signature.md` D-8). A merge of `main` into the branch is fine: its first parent is
+the branch (`a_merge_of_the_base_into_the_branch_is_followed_along_the_branch`).
+
+**Where §6 needed a reading, written into the contract.** A body change while approved is a
+digest other than the parent's under the same checksum and signature. A `spec.md` that is not
+a valid Plan and not a draft counts as approved and fails rule 1. Rule 3 looks at the last
+approval of the Plan on the branch, and a body change settled only by the deletion itself
+does not count as settled. At `HEAD`, rule 5 reports only an approval no earlier commit
+reported, so a replay at `HEAD` is one problem, not two.
+
+**A replay from another branch (found in review of PR #169).** The replay rule looked at the
+branch alone. Reproduced with real keys: on `feat/SHOP-214-a`, a signed approval at commit A,
+then `decision record --type failed`; on `feat/SHOP-214-b` from `main`, the Plan and
+`approval.sig` copied from A with `git show A:<path>`, committed. `approval verify --base
+main` printed `passed`, and a new branch after a failed cycle is the usual path. Now the
+verifier also refuses an id written into an approved Plan at any commit a ref reaches outside
+`<merge base>..HEAD`: one `git log --all -p -G'^Approval-id:'` over the Plans, then a check
+of the few matches, and the message names the commit and the base or a ref that holds it. A
+`failed` entry records the id it cancels (`decision-entry.md` 1.5.0), and the verifier reads
+the base's entries with one `git grep`, which still works once the failed branch is deleted,
+if its entry was merged.
+
+What it cannot see is a commit no ref reaches: a branch deleted unmerged, with its entry, or
+a branch not fetched. `actions/checkout` with `fetch-depth: 0` fetches every branch and tag,
+so in CI that is only the deleted branch. The reverse also holds: a ref that still has an
+older version of the branch being checked, the pushed branch before a rebase is pushed, or a
+branch stacked on it, makes an honest approval read as a replay. In CI the pushed branch is
+the one checked; locally, push first. The test harness kept its keys and git config in the
+work tree, where `git add -A` committed them, and a branch made from `main` lost the signing
+setup; the repository is now a subdirectory.
+
+**Not exercised.**
+
+- [ ] The step on a real pull request in GitHub Actions, with `fetch-depth: 0`, `ref:` the
+      head, and the attested binary, including that every branch is fetched
+- [ ] A stacked pull request whose base branch was rebased, which the replay search reads
+      as a replay
+- [ ] A security key (`sk-ssh-ed25519`) signature through the verifier; the tests use
+      ed25519 keys without a passphrase
+
 ## 20. Required paths through a cycle (#155)
 
 **The gap.** Whether a change goes through the cycle is decided by the main session (L-9,

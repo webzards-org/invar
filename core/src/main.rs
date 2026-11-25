@@ -10,6 +10,7 @@
 //! with the exit code being right.
 
 mod acceptance;
+mod approval_verify;
 mod calendar;
 mod cli;
 mod config_check;

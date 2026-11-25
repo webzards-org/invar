@@ -5,8 +5,9 @@
 **Implements:** #154 (an approval the agent cannot produce); builds on
 `plan-header.md` §5.3 (what `plan approve` writes) and `invar-yaml.md` §3.7
 (`approval.signed`)
-**Read by:** the core (`plan approve` signs); a verifier of approvals (§6); any
-later reimplementation
+**Read by:** the core (`plan approve` signs, `decision record --type failed`
+removes the signature, `approval verify` checks it, §6); any later
+reimplementation
 
 > Changing this file is a **public-contract change** (§14.3). It is made
 > deliberately, in its own PR, with the reason recorded, the version bumped,
@@ -59,18 +60,25 @@ dev@example.com namespaces="invar-approval" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA
 
 ## 3. The statement
 
-What is signed is three lines, each ending with `\n` (LF), in this order and with
+What is signed is four lines, each ending with `\n` (LF), in this order and with
 nothing else:
 
 ```
 invar-approval 1
 ticket: <Ticket>
 approved-checksum: <Approved-checksum>
+approval-id: <Approval-id>
 ```
 
-`<Ticket>` and `<Approved-checksum>` are the values of the Plan's header after
-the approval is written (`plan-header.md` §5.3). The `1` is the version of this
-statement. A later version changes that number and is a contract change.
+`<Ticket>`, `<Approved-checksum>` and `<Approval-id>` are the values of the
+Plan's header after the approval is written (`plan-header.md` §5.3). The `1` is
+the version of this statement. A later version changes that number and is a
+contract change.
+
+`<Approval-id>` is 128 random bits from the operating system, written as 32
+lowercase hex digits, new for every approval, a re-approval of the same body
+included (D-7). `plan approve` chooses it just before it signs, and writes it to
+the header only with a signature: an unsigned approval has none.
 
 The statement holds no date and no name: `Approved-checksum` already covers the
 body and `Acceptance` (D-19 of `plan-header.md`), and the signer is known from
@@ -89,8 +97,10 @@ SIGNATURE-----`), made with the namespace `invar-approval`, over the statement o
 
 It belongs to one approval: a new approval of the Plan replaces it. It is
 deleted with the Plan directory by `invar done`. A `failed` entry, which returns
-the Plan to `draft`, leaves it where it is; for a draft it means nothing, and the
-next approval replaces it.
+the Plan to `draft`, deletes it, and puts it back if the entry cannot be written,
+as it does the Plan (`decision-entry.md` §7). That is for clarity, not security:
+the file stays in git's history, and what keeps it from being put back is the
+replay rule (§6.3, D-7).
 
 An absent file means an unsigned approval: the behavior before this contract.
 
@@ -116,17 +126,18 @@ An absent file means an unsigned approval: the behavior before this contract.
    still read a passphrase from it, and only the program is killed. Either way,
    the refusal never waits for what the program started to exit.
 4. **Before anything is written.** The order of `plan-header.md` §5.3 is:
-   validate, read approver and date, print the criteria, **sign**, write. A
-   refusal at the signing step leaves the Plan and any earlier `approval.sig`
-   as they were.
+   validate, read approver and date, print the criteria, **choose the
+   `Approval-id` and sign**, write. A refusal at the signing step leaves the
+   Plan and any earlier `approval.sig` as they were.
 5. **Written together.** The signature is written to `approval.sig`, replacing
-   the file atomically, then the header. If the header cannot be written, the
-   earlier `approval.sig` is put back, or the new one removed when there was
-   none.
+   the file atomically, then the header, with its `Approval-id`. If the header
+   cannot be written, the earlier `approval.sig` is put back, or the new one
+   removed when there was none.
 
 `plan approve` refuses, and writes nothing, when:
 
 - `gpg.format` is not `ssh`, or `user.signingkey` is not set;
+- no random bits can be read for the `Approval-id`;
 - the signing program cannot be started, exits non-zero, or writes no
   signature. The refusal repeats what the program wrote to standard error;
 - the deadline of step 3 passes.
@@ -137,13 +148,26 @@ nothing, with or without a signature on disk.
 ## 6. Verifying
 
 What a verifier of approvals checks for a branch, against a base branch `<base>`.
-It reads, and writes nothing.
+It reads, and writes nothing. The core's verifier is `invar approval verify
+[--base <ref>]`, which finds `<base>` as every CI command does (`invar-yaml.md`
+§3.3.1): `--base`, else the remote's default branch, else `main`, never
+`git.base_branch` from the branch.
 
 ### 6.1 Preconditions
 
+- **On when the base says so.** Verification is required when `invar.yaml` at
+  `<base>` has `approval.signed: true`. Otherwise the verifier says that it is
+  off, and passes. A branch that turns it off is still checked, with a note:
+  what a branch is checked against is never the branch's to choose
+  (`invar-yaml.md` §3.3.1, §3.7).
 - **Full history.** Every commit from the merge base of `<base>` and `HEAD` to
   `HEAD` is read. A shallow checkout is refused, naming full history
   (`fetch-depth: 0` for `actions/checkout`).
+- **The branch's own head.** A `HEAD` that is a merge commit whose first parent
+  is `<base>` is refused: the branch's commits are not on its first-parent line,
+  so §6.2 would see one commit holding the whole branch (D-8). That is the
+  commit `actions/checkout` makes for a pull request by default; check out the
+  pull request's head instead.
 - **The list from the base.** `<base>:.invar/approvers`, never the work tree's
   copy (§2). When the base has no such file, the run is refused: no approval can
   be verified.
@@ -160,32 +184,57 @@ compared with the Plan at that parent:
   absent, is a draft, or has another `Approved-checksum` or another
   `approval.sig`;
 - a **body change while approved**: `Status: approved` at both, the same
-  `Approved-checksum`, and another approval digest (`plan-header.md` §5.3);
+  `Approved-checksum` and `approval.sig`, and another approval digest than at
+  the parent (`plan-header.md` §5.3);
 - a **reset**: approved at the parent, a draft at `C`;
 - a **deletion**: present at the parent, absent at `C`;
 - nothing to check, otherwise.
 
+A `spec.md` that is not a valid Plan and does not read `Status: draft` counts as
+approved, and fails rule 1: an approval that cannot be read is not one that
+passes.
+
 ### 6.3 Rules
 
-1. An **approval** has `approval.sig` at `C`, and the signature verifies
-   (`ssh-keygen -Y verify -n invar-approval`) over the statement built from the
-   Plan at `C`, for a principal in the base's list. The Plan's
-   `Approved-checksum` at `C` equals its approval digest at `C`.
+1. An **approval** has `approval.sig` and an `Approval-id` at `C`, and the
+   signature verifies (`ssh-keygen -Y verify -n invar-approval`) over the
+   statement built from the Plan at `C`, for a principal in the base's list.
+   The Plan's `Approved-checksum` at `C` equals its approval digest at `C`. An
+   approval with no `Approval-id` is refused.
 2. A **body change while approved** is followed, at a later commit up to `HEAD`,
    by an approval that passes rule 1, a reset or a deletion.
-3. A **deletion** comes after an approval that passes rule 1, with no body
-   change while approved between them that rule 2 has not settled. A Plan
-   created and deleted on the branch without one is refused.
+3. A **deletion** comes after an approval that passes rule 1: the last approval
+   of the Plan on the branch passes it, and no body change while approved since
+   was settled only by the deletion itself. A Plan created and deleted on the
+   branch without one is refused.
 4. A **reset** needs no signature. Nor does a draft.
 5. At `HEAD`, a Plan that is approved passes rule 1 as it stands.
+6. **No replay.** An approval is refused as replayed, whatever its
+   signature, when its `Approval-id` appeared before (D-7):
+   - in an earlier approval of the branch;
+   - in an approved Plan, a `.invar/plans/*/spec.md` with `Status: approved`,
+     at any commit that a ref of the repository reaches (`git log --all`) and
+     that is not in `<merge base>..HEAD`: the base's history and every other
+     branch, tag and remote-tracking branch included;
+   - in a `failed` entry under `.invar/decisions/` at `<base>`, whose
+     `approval-id` records the approval it cancelled (`decision-entry.md` §7).
+
+   The refusal names the commit, and a ref that holds it where git can tell,
+   or the entry. Only commits a ref reaches are searched: a commit of a branch
+   that was deleted, or never fetched (a shallow or single-branch fetch), is
+   not seen, and a `failed` entry survives a deleted branch only if it was
+   merged to the base. So the verifier needs a checkout that fetched every
+   branch: `fetch-depth: 0`, with which `actions/checkout` fetches them all.
 
 A branch that has no Plan at any commit passes, with a note that there was
 nothing to verify. A branch that changes `.invar/approvers` passes or fails as
 it would without that change, with a note that the change applies once it is on
 the base.
 
-Every problem is reported in one run, each naming the commit and the Plan, and
-the run then fails.
+Every problem is reported in one run, each naming the commit (its short id and
+subject) and the Plan, and the run then fails, non-zero. The last line is one of
+`approval verify: off: <why>`, `approval verify: passed: <what>` and `approval
+verify: failed`.
 
 ### 6.4 Who approved
 
@@ -212,6 +261,14 @@ Plan. Two cases matter:
 What a verifier adds over `Approved-checksum` holds only where the agent cannot
 change it: in CI, with the list read from the base branch.
 
+The replay rule (§6.3, rule 6) sees what a ref reaches, and the base's
+`failed` entries. An approval taken from a branch that was deleted without being
+merged, whose `failed` entry was never merged either, is not refused. A ref that
+holds an earlier version of the branch being checked, such as the pushed branch
+before a rebase is pushed, or a branch stacked on it, holds its approvals too,
+and an honest approval then reads as a replay: run the check on the branch as it
+is pushed, as CI does.
+
 ## 8. Decisions and their reasons
 
 **D-1 — The approval is signed, not the commit** (1.0.0). A commit signature
@@ -221,9 +278,10 @@ a forged approval commit included; a squash merge drops every signature. Measure
 in `plugin/NOTES.md` §19 (A4). A signature over the statement depends on no
 commit, so it survives every way a branch reaches the base.
 
-**D-2 — The statement is the ticket and the checksum** (1.0.0). The checksum
-already covers what was approved, and the ticket binds it to one Plan. A date or
-a name in it would be text the signer chose; the key says who signed.
+**D-2 — The statement is the ticket, the checksum and the approval id** (1.0.0).
+The checksum already covers what was approved, and the ticket binds it to one
+Plan. The id makes each approval a statement of its own (D-7). A date or a name
+in it would be text the signer chose; the key says who signed.
 
 **D-3 — The list is read from the base** (1.0.0). A list read from the branch
 could be extended by the branch. Only the base, which the branch cannot change
@@ -246,6 +304,37 @@ apart from a commit signature. A GPG signature would need all of those, and
 `gpg-agent` caches a passphrase for ten minutes by default, inside which the
 agent could sign too.
 
+**D-7 — Every approval has an id of its own, and a verifier refuses one seen
+before** (1.0.0, #168). With only the ticket and the checksum in the statement,
+two approvals of the same body sign the same three lines, and ed25519 makes the
+same signature for the same lines. After a `failed` reset, an agent with a shell
+could put back the old header and `approval.sig`, from the work tree or from git
+history, and every other rule of §6 would pass it: the signature is good, by a
+listed key, over a checksum that matches. Removing `approval.sig` on a reset
+(§4) does not close it, since history keeps the file. A random id in the header
+and in the statement makes each approval's signature its own, so an approval put
+back is one the branch has already seen, and rule 6 refuses it. 128 bits from
+the operating system, because the id must not be guessed ahead of a signature,
+and no counter or date in the repository can promise that.
+
+Looking at the branch alone was not enough (found in review of PR #169). After a
+failed cycle the usual path is a new branch for the same ticket, from the base,
+and an approval copied there from the failed branch (`git show <commit>:<path>`)
+is new to that branch's history. So a verifier also searches every commit a ref
+reaches outside the branch, in one `git log --all` over the Plans, and the base's
+`failed` entries, which record the id they cancel and outlive the branch once
+merged. Neither can see a commit no ref reaches: that is the limit, stated in
+rule 6 and §7, and the reason CI fetches every branch.
+
+**D-8 — The branch's own head, not CI's merge commit** (1.0.0, #168). For a pull
+request, `actions/checkout` checks out a merge commit whose first parent is the
+base. Its merge base with the base is the base itself, so the commits of §6.2
+are that one merge, and a Plan approved without a signature and then deleted is
+in none of it. Following every parent instead would count the merge as an
+approval of its own, with the same `Approval-id` as the one it merges, and rule
+6 would refuse an honest branch. So the verifier follows first parents, and
+refuses a `HEAD` that is a merge onto the base, naming what to check out.
+
 ## 9. Version history
 
 **1.0.0** — initial version (#154).
@@ -256,3 +345,36 @@ Not yet released, so changed in place during review (PR #162):
   there is no terminal, and the refusal never waits for it. Before, only the
   program was killed, and a helper holding its output open kept `plan approve`
   waiting until the helper exited, long past the 90 seconds.
+
+Not yet released, so changed in place again with the verifier (#168):
+
+- §3: the statement is four lines; the fourth is `approval-id: <Approval-id>`,
+  the new header key of `plan-header.md` 1.10.0, new on every signed approval.
+  Still `invar-approval 1`. D-2 says why, and new D-7.
+- §4: a `failed` entry deletes `approval.sig` instead of leaving it, for
+  clarity; history still has it.
+- §5: `plan approve` chooses the id before it signs, and refuses when it cannot
+  read random bits.
+- §6: the verifier is `invar approval verify`. §6.1: it is on when the base's
+  `invar.yaml` has `approval.signed: true`, whatever the branch says, and it
+  refuses a `HEAD` that is a merge commit onto the base (new D-8). §6.2: a body
+  change is a digest other than the parent's under the same checksum and
+  signature, and a `spec.md` that cannot be read and is not a draft counts as
+  approved. §6.3: rule 1 needs an `Approval-id`; rule 3 says which approval a
+  deletion follows; new rule 6 refuses a replayed approval; the last line of
+  the output. §7: what the replay rule does not cover.
+- In review of PR #169, §6.3 rule 6 and D-7: a replay is also an `Approval-id`
+  in an approved Plan at a commit any ref reaches outside `<merge base>..HEAD`,
+  or in a `failed` entry at the base; the limit, a commit no ref reaches. §7
+  says what that leaves.
+
+**Why:** the review of #162 found that a reset approval could be replayed from
+history with every rule of §6 passing it (D-7), and that §6.1 read the
+approvers list from the base but not the switch. Building the verifier showed
+that the default pull-request checkout hides the branch from §6.2 (D-8). The
+review of PR #169 replayed an approval from a failed branch onto a new branch
+for the same ticket, and the branch-only rule passed it (D-7).
+
+**Compatibility:** none needed. 1.0.0 has not been released. An approval signed
+by a build of `main` from before this change has no `Approval-id`, and the
+verifier refuses it; approving it again signs the new statement.

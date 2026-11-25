@@ -1,6 +1,6 @@
 # Contract: Plan header and required sections
 
-**Version:** 1.9.0 — invariant ids: a criterion cites them, Implementation context names them, the gate lists them; see §10 for what changed and why
+**Version:** 1.10.0 — `Approval-id`, new on every signed approval; see §10 for what changed and why
 **Status:** stable
 **Implements:** §4a (Plan document structure), §4d (Checksums), §5c (Context
 delivery), §12 (Plan lifecycle); light mode L-1, L-2, L-5
@@ -123,14 +123,16 @@ once canonicalized (§4d), which ignores a BOM and trailing whitespace (D-19).
 | `Approved-checksum` | key present always; value only when `Status: approved` | `sha256:` + 64 lowercase hex, over the **body**, and over the `Acceptance` value when there is one (§5.3, D-19) | **Command only** (`plan approve`) |
 | `Lockfile-checksum` | **optional** since 1.1.0 — absent and empty both mean no observation (§5.2) | `sha256:` + 64 lowercase hex, or empty | **Command only** (`plan approve`, from the milestone that introduces package context; never in light mode) |
 | `Acceptance` | **optional** since 1.7.0 — absent and empty both mean not decided yet | `required` or `skipped`, lowercase, exactly, or empty | **Command only** (`plan approve`, which adds the key if it is absent; a `failed` entry clears the value and keeps the key) |
+| `Approval-id` | **optional** since 1.10.0 — absent and empty both mean no signed approval | 32 lowercase hex digits (128 random bits), or empty | **Command only** (`plan approve`, with `approval.signed` only, which adds the key if it is absent and writes a new value on every approval; an unsigned approval and a `failed` entry clear the value and keep the key) |
 
 **The three approval keys — `Approved-by`, `Approved-at` and
 `Approved-checksum` — must be present as keys from the moment the agent creates
 the file**, with empty values (D-3). A missing key and an empty value would
 otherwise be indistinguishable, and `plan validate` could not tell a Plan that
 follows the convention from one that forgot half of it. `Lockfile-checksum` is
-exempt: it may be left out entirely (D-7). So is `Acceptance`: the agent does
-not write it, and a Plan created before 1.7.0 does not have it.
+exempt: it may be left out entirely (D-7). So are `Acceptance` and
+`Approval-id`: the agent writes neither, and a Plan created before 1.7.0, or
+1.10.0, does not have them.
 
 **"Command only" is a protocol rule, not an enforcement.** A misbehaving agent
 can write `Status: approved` itself. What makes the ordinary failure mode
@@ -144,7 +146,8 @@ run `invar` can compute it. A signed approval does, with `approval.signed` in
 ### 5.1 Consistency rules
 
 - `Status: draft` — the three approval values are expected to be empty, and so
-  are `Lockfile-checksum` and `Acceptance` when their keys are present. Nothing
+  are `Lockfile-checksum`, `Acceptance` and `Approval-id` when their keys are
+  present. Nothing
   treats a draft that
   holds some as an error: `plan check` refuses every draft for being one, and
   `plan approve` overwrites whatever the approval keys hold (§5.3). While
@@ -154,6 +157,8 @@ run `invar` can compute it. A signed approval does, with `approval.signed` in
   `Acceptance` is `required` or `skipped`, or has no value. No value means the
   Plan was approved before 1.7.0, and it is treated as `skipped`, because no
   test-writer existed then.
+  `Approval-id` has a value when the approval was signed, and none when it was
+  not (`approval-signature.md` §3).
 - `Ticket` must equal the `<TICKET>` part of the directory name.
 - *When `scenarios: true`:* every `.feature` file confirmed against this Plan
   carries the same `Ticket`.
@@ -273,15 +278,19 @@ In order:
    have no ids, one warning instead says that coverage cannot be shown, and how to
    add ids. No file, an empty one, or no invariant: nothing. It refuses nothing
    that step 1 did not; it only shows. The same text appears with `--skill`.
-5. **Sign**, only when `approval.signed` is on in `invar.yaml`: the statement
-   of `approval-signature.md` §3, built from `Ticket` and the `Approved-checksum`
-   about to be written, is signed with the developer's SSH signing key, within 90
-   seconds (`approval-signature.md` §5). A refusal here writes nothing.
+5. **Sign**, only when `approval.signed` is on in `invar.yaml`: a new
+   `Approval-id`, 128 random bits from the operating system, and the statement
+   of `approval-signature.md` §3, built from `Ticket`, the `Approved-checksum`
+   about to be written and that id, signed with the developer's SSH signing key,
+   within 90 seconds (`approval-signature.md` §5). A refusal here writes nothing.
 6. **Write.** `Status` becomes `approved`; `Approved-by`, `Approved-at`,
-   `Approved-checksum` and `Acceptance` get their values. If the header has no
-   `Acceptance` key, it is added right after `Approved-checksum`, with that line's
-   line ending. Nothing else changes — not the other header lines, not their
-   comments, not the line endings, not one byte of the body. `Lockfile-checksum`
+   `Approved-checksum` and `Acceptance` get their values, and `Approval-id` the
+   id from step 5. If the header has no `Acceptance` key, it is added right after
+   `Approved-checksum`, and with a signature, no `Approval-id` key is added right
+   after `Acceptance`, each with that line's line ending. An unsigned approval
+   empties an `Approval-id` an earlier one left, and adds no key. Nothing else
+   changes — not the other header lines, not their comments, not the line
+   endings, not one byte of the body. `Lockfile-checksum`
    is left as it is (§5.2). The file is replaced atomically, and refused if it
    changed after the criteria were printed.
 
@@ -863,6 +872,18 @@ asked for unnamed invariants; a flag typed every cycle becomes a habit, not a re
 The references are checked when the Plan is written and approved, not afterwards,
 because the approved body is frozen and the file is the team's to change.
 
+**D-23 — Each signed approval has an id of its own** (1.10.0, #168). The signed
+statement was the ticket and the checksum, so two approvals of the same body
+signed the same text to the same signature, and one undone by a `failed` entry
+could be put back from history and pass every check (`approval-signature.md`
+D-7). The id is in the header, where every other approval value is, so that a
+verifier builds the statement from the Plan alone, and a reader that knows
+nothing of signatures ignores one more value. It is outside the approval digest:
+it says which approval this is, not what was approved, and the digest of a body
+must not change with the act of approving it. It is command-only like the other
+approval values, so `plan guard` denies an agent that writes it, and a `failed`
+entry clears it.
+
 ## 8. Open questions
 
 **OQ-1 — Re-approving an already approved Plan.** *Resolved in 1.3.0 by
@@ -1290,6 +1311,25 @@ Let customers cancel their own unpaid orders.
 is example 9.13 in miniature.
 
 ## 10. Version history
+
+**1.10.0 — `Approval-id` (#168).**
+
+- §5: new optional key `Approval-id`, 32 lowercase hex digits, written only by
+  `plan approve` with `approval.signed`, new on every approval; an unsigned
+  approval and a `failed` entry clear its value and keep its key. §5.1: a draft's
+  is empty. New D-23.
+- §5.3: step 5 chooses the id and signs it with the ticket and the checksum
+  (`approval-signature.md` §3); step 6 writes it, adding the key right after
+  `Acceptance` when it is absent.
+
+**Why:** a signed approval undone by a reset could be replayed from history, the
+same signature over the same statement (`approval-signature.md` D-7).
+
+**Compatibility:** every Plan that was valid stays valid, and its approval digest
+does not change: the key is optional, outside the digest, and the planner does not
+write it. A value other than 32 lowercase hex digits under an `Approval-id` key,
+which was an unknown key before, is now an error. An unsigned approval writes what
+it wrote before.
 
 **1.9.0 — invariant ids (#158).**
 

@@ -535,6 +535,111 @@ fn when_the_entry_cannot_be_written_the_plan_is_restored() {
     assert_eq!(plan_dir_files(&root), ["spec.md"]);
 }
 
+const SIGNATURE: &str = "-----BEGIN SSH SIGNATURE-----\nU1NIU0lH\n-----END SSH SIGNATURE-----\n";
+
+#[test]
+fn failed_removes_the_approval_signature_and_clears_the_approval_id() {
+    let original = approved_plan().replace(
+        "Acceptance: skipped\n",
+        "Acceptance: skipped\nApproval-id: 0123456789abcdef0123456789abcdef\n",
+    );
+    let (_dir, root) = project(Some(&original));
+    let signature = spec(&root).with_file_name("approval.sig");
+    fs::write(&signature, SIGNATURE).unwrap();
+    let recorded = record(
+        &root,
+        request("SHOP-214", Type::Failed, None),
+        NOW,
+        Mode::Light,
+    )
+    .unwrap();
+    assert_eq!(
+        recorded.signature_removed.as_deref(),
+        Some(signature.as_path())
+    );
+    assert_eq!(plan_dir_files(&root), ["spec.md"]);
+    let reset = fs::read_to_string(spec(&root)).unwrap();
+    assert!(reset.contains("\nApproval-id:\n---\n"), "{reset}");
+    // The entry records the approval it cancelled (decision-entry.md §7).
+    assert_eq!(
+        recorded.entry.approval_id.as_deref(),
+        Some("0123456789abcdef0123456789abcdef")
+    );
+    assert!(
+        fs::read_to_string(&recorded.path)
+            .unwrap()
+            .contains("\napproval-id: 0123456789abcdef0123456789abcdef\n---\n")
+    );
+}
+
+#[test]
+fn only_a_failed_entry_for_a_signed_plan_records_an_approval_id() {
+    let signed = approved_plan().replace(
+        "Acceptance: skipped\n",
+        "Acceptance: skipped\nApproval-id: 0123456789abcdef0123456789abcdef\n",
+    );
+    // A note about a signed Plan cancels nothing.
+    let (_dir, root) = project(Some(&signed));
+    let recorded = record(
+        &root,
+        request("SHOP-214", Type::Note, None),
+        NOW,
+        Mode::Light,
+    )
+    .unwrap();
+    assert_eq!(recorded.entry.approval_id, None);
+    // A failed entry for an unsigned Plan has no id to record.
+    let (_dir, root) = project(Some(&approved_plan()));
+    let recorded = record(
+        &root,
+        request("SHOP-214", Type::Failed, None),
+        NOW,
+        Mode::Light,
+    )
+    .unwrap();
+    assert_eq!(recorded.entry.approval_id, None);
+    assert!(
+        !fs::read_to_string(&recorded.path)
+            .unwrap()
+            .contains("approval-id")
+    );
+}
+
+#[test]
+fn when_the_entry_cannot_be_written_the_signature_is_put_back_too() {
+    let original = approved_plan();
+    let (_dir, root) = project(Some(&original));
+    let signature = spec(&root).with_file_name("approval.sig");
+    fs::write(&signature, SIGNATURE).unwrap();
+    fs::create_dir_all(root.decisions_dir().parent().unwrap()).unwrap();
+    fs::write(root.decisions_dir(), "not a directory").unwrap();
+
+    assert!(
+        record(
+            &root,
+            request("SHOP-214", Type::Failed, None),
+            NOW,
+            Mode::Light
+        )
+        .is_err()
+    );
+    assert_eq!(fs::read_to_string(spec(&root)).unwrap(), original);
+    assert_eq!(fs::read_to_string(&signature).unwrap(), SIGNATURE);
+}
+
+#[test]
+fn an_unsigned_reset_removes_nothing() {
+    let (_dir, root) = project(Some(&approved_plan()));
+    let recorded = record(
+        &root,
+        request("SHOP-214", Type::Failed, None),
+        NOW,
+        Mode::Light,
+    )
+    .unwrap();
+    assert_eq!(recorded.signature_removed, None);
+}
+
 /// The names in the Plan's directory.
 fn plan_dir_files(root: &ProjectRoot) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(spec(root).parent().unwrap())

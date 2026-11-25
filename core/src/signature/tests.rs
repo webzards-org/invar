@@ -5,14 +5,35 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::{Group, Key, SignError, Signer, isolate, parse_key, run_with_deadline, statement};
+use super::{
+    Group, Key, SignError, Signer, isolate, new_approval_id, parse_key, run_with_deadline,
+    statement,
+};
 
 #[test]
-fn the_statement_is_three_lines_ending_in_lf() {
+fn the_statement_is_four_lines_ending_in_lf() {
     assert_eq!(
-        statement("SHOP-214", "sha256:00ff"),
-        "invar-approval 1\nticket: SHOP-214\napproved-checksum: sha256:00ff\n"
+        statement(
+            "SHOP-214",
+            "sha256:00ff",
+            "0123456789abcdef0123456789abcdef"
+        ),
+        "invar-approval 1\nticket: SHOP-214\napproved-checksum: sha256:00ff\n\
+         approval-id: 0123456789abcdef0123456789abcdef\n"
     );
+}
+
+#[test]
+fn an_approval_id_is_32_lowercase_hex_digits_and_new_each_time() {
+    let first = new_approval_id().unwrap();
+    assert_eq!(first.len(), 32);
+    assert!(
+        first
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "{first}"
+    );
+    assert_ne!(first, new_approval_id().unwrap());
 }
 
 #[test]
