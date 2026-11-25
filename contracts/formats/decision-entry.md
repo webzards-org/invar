@@ -1,7 +1,7 @@
 # Contract: Decision entry
 
-**Version:** 1.4.0 — the `acceptance` key: how the ticket was closed; see §4.2 and
-the version history
+**Version:** 1.4.1 — the reset also clears `Approval-id` and removes
+`approval.sig`; see §7 and the version history
 **Status:** stable
 **Implements:** §7 (Decision log), §4c (a `failed` entry resets the cycle),
 §12 (the entry survives the Plan); light mode L-1, L-4 (`docs/TASKS-M1.md`)
@@ -143,17 +143,21 @@ Writing a `failed` entry for a ticket also returns that ticket's Plan to
 `draft` (§4c, light-mode form):
 
 1. `Status` becomes `draft`, and `Approved-by`, `Approved-at` and
-   `Approved-checksum` become empty. `Lockfile-checksum` and `Acceptance`,
-   when present, become empty too. The keys stay (plan-header.md D-3).
+   `Approved-checksum` become empty. `Lockfile-checksum`, `Acceptance` and
+   `Approval-id`, when present, become empty too. The keys stay (plan-header.md
+   D-3).
 2. The body is not touched — nothing is reverted, only de-approved.
-3. There are no `.feature` files to reset in light mode.
+3. The Plan's `approval.sig`, when it has one, is deleted: it signed the approval
+   being disproved (`approval-signature.md` §4).
+4. There are no `.feature` files to reset in light mode.
 
 Without a Plan there is nothing to reset, and the command **refuses**: a
 `failed` entry promises that the approval it disproves is gone. A failure
 without a Plan is recorded as a `note`.
 
 The two writes happen Plan first, entry second. If the entry cannot be
-written, the Plan is restored to the exact bytes it had (D-8).
+written, the Plan is restored to the exact bytes it had, and `approval.sig`
+with it (D-8).
 
 The entry's `acceptance` (§4.2) is what the Plan said **before** the reset: the
 reset clears `Acceptance`, and the entry records the approval it disproves.
@@ -560,6 +564,17 @@ it. `invar decision approve` refuses it and writes nothing: the draft says
 remove the line and let the Plan's value be recorded.
 
 ## 13. Version history
+
+**1.4.1 — a `failed` entry clears `Approval-id` and removes `approval.sig` (#168).**
+
+- §7: `Approval-id`, new in `plan-header.md` 1.10.0, is cleared with the other
+  approval values, and the Plan's `approval.sig` is deleted, and put back with the
+  Plan if the entry cannot be written.
+
+**Why:** a `failed` entry promises that the approval it disproves is gone, and
+the signature was part of it (`approval-signature.md` §4).
+
+**Compatibility:** nothing changes for a Plan without the field or the file.
 
 **1.4.0 — the `acceptance` key (AT-15).**
 
