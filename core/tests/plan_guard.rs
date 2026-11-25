@@ -547,20 +547,40 @@ fn an_approved_plan_with_crlf_is_denied_too() {
 
 /// A draft as `reset_to_draft` leaves one: every approval key there, and empty.
 const DRAFT: &str = "---\nTicket: SHOP-214\nModule: orders\nStatus: draft\nApproved-by:\n\
-    Approved-at:\nApproved-checksum:\nLockfile-checksum:\nAcceptance:\n---\n\n\
+    Approved-at:\nApproved-checksum:\nLockfile-checksum:\nAcceptance:\nApproval-id:\n---\n\n\
     ## Ticket\nSHOP-214\n\n## Acceptance criteria\n- AC1: refused with 403\n";
 
 const CHECKSUM: &str = "sha256:b9caa4c64bc83723bb4e930d7fedeae733950c5210ee0e30f4ece84eb2c2cf7b";
 
 /// Each approval key, and the value an edit fills it with.
-fn approval_values() -> [(&'static str, String); 5] {
+fn approval_values() -> [(&'static str, String); 6] {
     [
         ("Approved-by", "rade".to_owned()),
         ("Approved-at", "2026-10-05".to_owned()),
         ("Approved-checksum", CHECKSUM.to_owned()),
         ("Lockfile-checksum", CHECKSUM.replace("b9", "c0")),
         ("Acceptance", "required".to_owned()),
+        ("Approval-id", APPROVAL_ID.to_owned()),
     ]
+}
+
+const APPROVAL_ID: &str = "0123456789abcdef0123456789abcdef";
+
+#[test]
+fn an_edit_that_writes_an_approval_id_is_denied_even_with_the_key_absent() {
+    // A draft from the planner has no `Approval-id` key: an edit that adds one with
+    // a value writes an approval value all the same (#168).
+    let draft = DRAFT.replace("Approval-id:\n", "");
+    let project = Project::new(&draft);
+    denied_as_approval(
+        edit_with(
+            &project.root(),
+            &project.path(SPEC),
+            "Acceptance:\n",
+            &format!("Acceptance:\nApproval-id: {APPROVAL_ID}\n"),
+        ),
+        "a value for `Approval-id`",
+    );
 }
 
 fn denied_as_approval(stdin: String, written: &str) {

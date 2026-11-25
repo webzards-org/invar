@@ -1,7 +1,7 @@
 //! The decision log, `.invar/decisions/` (§7): writing one entry, and reading
 //! them all.
 //!
-//! Implements `contracts/formats/decision-entry.md` v1.4.0; the draft of
+//! Implements `contracts/formats/decision-entry.md` v1.4.1; the draft of
 //! §8.1 is checked and recorded in [`draft`].
 //!
 //! **Insert-only** (§6). An entry is created with an exclusive create, so an
@@ -16,8 +16,9 @@
 //! both commands.
 //!
 //! **`failed` resets the cycle** (§7, §4c). The ticket's Plan returns to
-//! `draft` with its approval values cleared, and its body untouched. The Plan
-//! is written first and restored if the entry cannot be (D-8).
+//! `draft` with its approval values cleared, and its body untouched, and its
+//! `approval.sig` is removed (approval-signature.md §4). The Plan is written
+//! first and restored, with the signature, if the entry cannot be (D-8).
 //!
 //! **`acceptance` is the Plan's** (§4.2, D-15). What an entry says about
 //! acceptance tests is checked against the ticket's Plan, read before any
@@ -37,7 +38,7 @@ use crate::format::decision::{self, Entry, FileName, Type};
 use crate::format::plan::{Acceptance, Mode, Plan, Status};
 use crate::format::values::{is_module, is_ticket};
 use crate::fs::ProjectRoot;
-use crate::fs::plans::{self, LookupError};
+use crate::fs::plans::{self, LookupError, SIGNATURE_FILE};
 use crate::git::Instant;
 
 pub mod draft;
@@ -67,6 +68,8 @@ pub struct Recorded {
     pub entry: Entry,
     /// The Plan returned to `draft`, for a `failed` entry.
     pub reset: Option<PathBuf>,
+    /// The `approval.sig` that reset removed, when there was one.
+    pub signature_removed: Option<PathBuf>,
     /// The entry's `acceptance` was the Plan's, because the draft had none
     /// (§8.1): said in the output, since the developer did not read it.
     pub acceptance_from_plan: bool,
@@ -294,7 +297,7 @@ fn write(
     } = resolved;
 
     // `failed`: return the Plan to `draft` before writing anything else.
-    let reset = if kind == Type::Failed {
+    let (reset, signature) = if kind == Type::Failed {
         let Some((spec, text)) = &plan else {
             return Err(RecordError::NoPlanToReset {
                 ticket,
@@ -302,9 +305,9 @@ fn write(
             });
         };
         reset_plan(spec, text, mode)?;
-        Some(spec.clone())
+        (Some(spec.clone()), remove_signature(spec, text, mode)?)
     } else {
-        None
+        (None, None)
     };
 
     let dir = root.decisions_dir();
@@ -338,6 +341,7 @@ fn write(
             path,
             entry,
             reset,
+            signature_removed: signature.map(|(path, _)| path),
             acceptance_from_plan: false,
         }),
         Err(err) => {
@@ -347,6 +351,15 @@ fn write(
             {
                 return Err(RecordError::RestoreFailed {
                     spec: spec.clone(),
+                    entry_error: err.to_string(),
+                    source,
+                });
+            }
+            if let Some((path, bytes)) = signature
+                && let Err(source) = fs::write(&path, bytes)
+            {
+                return Err(RecordError::RestoreFailed {
+                    spec: path,
                     entry_error: err.to_string(),
                     source,
                 });
@@ -391,6 +404,31 @@ fn reset_plan(spec: &Path, original: &str, mode: Mode) -> Result<(), RecordError
         Err(RecordError::PlanNotPreserved {
             spec: spec.to_owned(),
         })
+    }
+}
+
+/// Remove the reset Plan's `approval.sig`, if it has one: its path and its
+/// bytes, for [`write`] to put back if the entry cannot be written. A draft's
+/// signature means nothing, so removing it is for clarity, not security: the file
+/// stays in git's history (approval-signature.md §4). If it cannot be removed, the
+/// Plan is put back as it was, and nothing is recorded.
+fn remove_signature(
+    spec: &Path,
+    original: &str,
+    mode: Mode,
+) -> Result<Option<(PathBuf, Vec<u8>)>, RecordError> {
+    let path = spec.with_file_name(SIGNATURE_FILE);
+    let removed = match fs::read(&path) {
+        Ok(bytes) => fs::remove_file(&path).map(|()| Some(bytes)),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err),
+    };
+    match removed {
+        Ok(bytes) => Ok(bytes.map(|bytes| (path, bytes))),
+        Err(source) => {
+            let _ = restore_plan(spec, original, mode);
+            Err(RecordError::Io { path, source })
+        }
     }
 }
 

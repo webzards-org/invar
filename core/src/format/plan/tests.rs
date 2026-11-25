@@ -68,8 +68,11 @@ fn approval() -> Approval {
         at: "2026-10-05".to_owned(),
         checksum: format!("sha256:{}", "ab".repeat(32)),
         acceptance: Acceptance::Required,
+        id: None,
     }
 }
+
+const ID: &str = "0123456789abcdef0123456789abcdef";
 
 fn replace(text: &str, from: &str, to: &str) -> String {
     assert!(text.contains(from), "{from:?} not in the fixture");
@@ -418,6 +421,88 @@ fn approving_fills_a_present_key_in_place() {
     );
 }
 
+// --- `Approval-id` (§5, §5.3) -------------------------------------------------
+
+#[test]
+fn a_signed_approval_adds_its_id_right_after_acceptance() {
+    let mut plan = parse(&valid());
+    plan.approve(Approval {
+        id: Some(ID.to_owned()),
+        ..approval()
+    })
+    .unwrap();
+    let text = plan.to_text();
+    assert!(
+        text.contains(&format!("\nAcceptance: required\nApproval-id: {ID}\n---\n")),
+        "{text}"
+    );
+    assert_eq!(parse(&text).header().approval_id.as_deref(), Some(ID));
+}
+
+#[test]
+fn an_unsigned_approval_writes_no_id_and_empties_an_earlier_one() {
+    let mut plan = parse(&valid());
+    plan.approve(approval()).unwrap();
+    assert!(
+        !plan.to_text().contains("Approval-id"),
+        "{}",
+        plan.to_text()
+    );
+
+    let mut plan = parse(&valid());
+    plan.approve(Approval {
+        id: Some(ID.to_owned()),
+        ..approval()
+    })
+    .unwrap();
+    plan.approve(approval()).unwrap();
+    assert!(
+        plan.to_text().contains("\nApproval-id:\n---\n"),
+        "{}",
+        plan.to_text()
+    );
+    assert_eq!(plan.header().approval_id, None);
+}
+
+#[test]
+fn reset_to_draft_clears_the_approval_id_but_keeps_its_key() {
+    let mut plan = parse(&valid());
+    plan.approve(Approval {
+        id: Some(ID.to_owned()),
+        ..approval()
+    })
+    .unwrap();
+    plan.reset_to_draft();
+    assert_eq!(
+        plan.to_text(),
+        replace(
+            &valid(),
+            "Approved-checksum:\n",
+            "Approved-checksum:\nAcceptance:\nApproval-id:\n"
+        )
+    );
+    assert_eq!(plan.header().approval_id, None);
+}
+
+#[test]
+fn an_approval_id_that_is_not_32_lowercase_hex_digits_is_an_error() {
+    for value in ["abc", "0123456789ABCDEF0123456789ABCDEF", &format!("{ID}0")] {
+        let text = replace(
+            &valid(),
+            "Approved-checksum:\n",
+            &format!("Approved-checksum:\nApproval-id: {value}\n"),
+        );
+        let rendered = Plan::parse(&text, Mode::Light)
+            .unwrap_err()
+            .render(Path::new("spec.md"));
+        assert!(
+            rendered.contains("`Approval-id` must be 32 lowercase hex digits")
+                && rendered.contains(&format!("found `{value}`")),
+            "{rendered}"
+        );
+    }
+}
+
 #[test]
 fn reset_to_draft_adds_no_acceptance_key() {
     let approved = valid()
@@ -455,6 +540,10 @@ fn an_approval_that_cannot_be_written_back_is_refused() {
         },
         Approval {
             checksum: "sha256:ABC".to_owned(),
+            ..approval()
+        },
+        Approval {
+            id: Some("0123456789ABCDEF0123456789ABCDEF".to_owned()),
             ..approval()
         },
     ] {

@@ -125,6 +125,10 @@ impl Project {
     }
 
     fn approve(&self, args: &[&str]) -> assert_cmd::assert::Assert {
+        self.invar(&["plan", "approve"], args)
+    }
+
+    fn invar(&self, command: &[&str], args: &[&str]) -> assert_cmd::assert::Assert {
         Command::cargo_bin("invar")
             .unwrap()
             .current_dir(self.root())
@@ -133,10 +137,20 @@ impl Project {
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("SSH_AUTH_SOCK")
             .envs(self.env())
-            .args(["plan", "approve"])
+            .args(command)
             .args(args)
             .write_stdin("")
             .assert()
+    }
+
+    /// The value of `name` in the Plan's header, if it has one.
+    fn field(&self, name: &str) -> Option<String> {
+        self.read(SPEC)?
+            .split("\n---\n")
+            .next()?
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{name}:")))
+            .map(|value| value.trim().to_owned())
     }
 
     fn read(&self, relative: &str) -> Option<String> {
@@ -144,20 +158,16 @@ impl Project {
     }
 
     /// `ssh-keygen -Y verify` of `approval.sig` over the statement built from the
-    /// header, against an allowed-signers line for `principal` and `key`: an
-    /// independent check of what `plan approve` wrote.
+    /// header, four lines (`approval-signature.md` §3), against an allowed-signers
+    /// line for `principal` and `key`: an independent check of what `plan approve`
+    /// wrote.
     fn verify(&self, principal: &str, key: &Path) -> std::process::Output {
-        let spec = self.read(SPEC).unwrap();
-        let field = |name: &str| {
-            spec.lines()
-                .find_map(|line| line.strip_prefix(&format!("{name}: ")))
-                .unwrap()
-                .to_owned()
-        };
+        let field = |name: &str| self.field(name).unwrap();
         let statement = format!(
-            "invar-approval 1\nticket: {}\napproved-checksum: {}\n",
+            "invar-approval 1\nticket: {}\napproved-checksum: {}\napproval-id: {}\n",
             field("Ticket"),
-            field("Approved-checksum")
+            field("Approved-checksum"),
+            field("Approval-id")
         );
         let public = fs::read_to_string(key.with_extension("pub")).unwrap();
         let allowed = self.keys().join("allowed");
@@ -275,6 +285,83 @@ fn the_signature_is_over_the_approval_and_no_other() {
 }
 
 #[test]
+fn the_statement_names_the_approval_id_written_in_the_header() {
+    let project = Project::new(SIGNED);
+    let key = project.key("approver", "");
+    project.sign_with(&key.display().to_string());
+    project.approve(&["SHOP-214"]).success();
+    let id = project.field("Approval-id").unwrap();
+    assert_eq!(id.len(), 32, "{id}");
+    assert!(
+        id.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "{id}"
+    );
+    // Right after `Acceptance`, which `plan approve` added after the checksum.
+    assert!(
+        project
+            .read(SPEC)
+            .unwrap()
+            .contains(&format!("\nAcceptance: skipped\nApproval-id: {id}\n---\n")),
+        "{}",
+        project.read(SPEC).unwrap()
+    );
+    assert!(project.verify("dev@example.com", &key).status.success());
+}
+
+/// `decision record --type failed`: the reset of a failed cycle.
+fn fail(project: &Project) {
+    project
+        .invar(
+            &["decision", "record"],
+            &[
+                "--ticket",
+                "SHOP-214",
+                "--type",
+                "failed",
+                "-m",
+                "did not hold",
+            ],
+        )
+        .success()
+        .stdout(contains(format!("reset: {SIGNATURE} removed")));
+}
+
+#[test]
+fn a_failed_reset_clears_the_id_and_removes_the_signature() {
+    let project = Project::new(SIGNED);
+    let key = project.key("approver", "");
+    project.sign_with(&key.display().to_string());
+    project.approve(&["SHOP-214"]).success();
+    fail(&project);
+    assert_eq!(project.read(SIGNATURE), None);
+    assert_eq!(project.field("Status").as_deref(), Some("draft"));
+    assert_eq!(project.field("Approval-id").as_deref(), Some(""));
+}
+
+#[test]
+fn two_approvals_of_the_same_body_get_different_ids_and_signatures() {
+    // The same ticket and checksum, approved, reset, approved again: without the
+    // id, ed25519 would sign the same statement to the same signature, and the
+    // first could be put back after the reset (approval-signature.md D-7).
+    let project = Project::new(SIGNED);
+    let key = project.key("approver", "");
+    project.sign_with(&key.display().to_string());
+    project.approve(&["SHOP-214"]).success();
+    let (first_id, first_signature) = (
+        project.field("Approval-id").unwrap(),
+        project.read(SIGNATURE).unwrap(),
+    );
+    let checksum = project.field("Approved-checksum").unwrap();
+    fail(&project);
+    project.approve(&["SHOP-214"]).success();
+    assert_eq!(project.field("Approved-checksum").unwrap(), checksum);
+    assert_ne!(project.field("Approval-id").unwrap(), first_id);
+    assert_ne!(project.read(SIGNATURE).unwrap(), first_signature);
+    assert!(project.verify("dev@example.com", &key).status.success());
+}
+
+#[test]
 fn a_reapproval_replaces_the_signature() {
     let project = Project::new(SIGNED);
     let key = project.key("approver", "");
@@ -388,6 +475,8 @@ fn without_the_section_nothing_is_signed_as_before() {
         .stdout(contains("approved SHOP-214 checksum sha256:"));
     assert_eq!(project.read(SIGNATURE), None);
     assert!(project.read(SPEC).unwrap().contains("Status: approved\n"));
+    // An unsigned approval writes no `Approval-id`.
+    assert_eq!(project.field("Approval-id"), None);
 }
 
 // --- committed ---------------------------------------------------------------------
@@ -469,7 +558,33 @@ fn a_commit_that_fails_leaves_the_approval_and_says_so() {
         .stderr(contains(
             "the approval of SHOP-214 is recorded, and committing it failed",
         ))
+        .stderr(contains(format!(
+            "commit `{SPEC}` yourself, then ask the session to start Phase 2"
+        )))
         .stderr(contains("refused by the hook"));
     assert!(project.read(SPEC).unwrap().contains("Status: approved\n"));
     assert_eq!(project.git(&["rev-list", "--count", "HEAD"]).trim(), "1");
+    // A retry finds the approval current: it changes nothing, and starts nothing.
+    project
+        .approve(&["SHOP-214", "--commit", "Approve plan SHOP-214"])
+        .success()
+        .stdout(contains("already approved"))
+        .stdout(contains("approved SHOP-214 checksum").not());
+}
+
+#[test]
+fn a_signed_commit_that_fails_names_the_plan_and_its_signature() {
+    let project = Project::new(SIGNED);
+    let key = project.key("approver", "");
+    project.sign_with(&key.display().to_string());
+    let hook = project.root().join(".git/hooks/pre-commit");
+    fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    make_executable(&hook);
+    project
+        .approve(&["SHOP-214", "--commit", "Approve plan SHOP-214"])
+        .failure()
+        .stdout(contains("approved SHOP-214 checksum").not())
+        .stderr(contains(format!(
+            "commit `{SPEC}` and `{SIGNATURE}` yourself, then ask the session to start Phase 2"
+        )));
 }

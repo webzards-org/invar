@@ -25,7 +25,7 @@ use crate::format::config::Config;
 use crate::format::plan::{Acceptance, Mode};
 use crate::gate;
 use crate::gate::approval::Prior;
-use crate::gate::approve::{self, ApproveError, Decision};
+use crate::gate::approve::{self, ApproveError, Decision, Signed};
 use crate::git;
 use crate::signature::{self, Signer};
 
@@ -251,34 +251,48 @@ fn approve(args: Args) -> Result<()> {
 
     let ticket = pending.ticket().to_owned();
     let spec = pending.spec().to_owned();
-    let signature = match &signer {
+    let signed = match &signer {
         Some(signer) => {
+            // New for every approval, so that no two sign the same statement
+            // (approval-signature.md D-7).
+            let id = signature::new_approval_id()
+                .context("cannot read random bytes from /dev/urandom for the `Approval-id`")?;
             println!("signing with {} — answer its prompt if it asks", signer.key);
-            let statement = signature::statement(&ticket, pending.checksum());
-            Some(signer.sign(root.path(), &statement, signature::DEADLINE)?)
+            let statement = signature::statement(&ticket, pending.checksum(), &id);
+            let signature = signer.sign(root.path(), &statement, signature::DEADLINE)?;
+            Some(Signed { id, signature })
         }
         None => None,
     };
-    let approval = pending.commit_signed(by, at, signature.as_deref())?;
+    let approval = pending.commit_signed(by, at, signed.as_ref())?;
     println!("approved: {shown}");
     println!("  Approved-by: {}", approval.by);
     println!("  Approved-at: {}", approval.at);
     println!("  Approved-checksum: {}", approval.checksum);
     println!("  Acceptance: {}", approval.acceptance.as_str());
     let signature_file = approve::signature_path(&spec);
-    if signature.is_some() {
+    if let Some(id) = &approval.id {
+        println!("  Approval-id: {id}");
         println!("  Signature: {}", target::shown(&signature_file, &cwd));
     }
 
     if let Some(message) = commit_message(&args.commit, args.no_commit, &config, &ticket) {
         let mut paths = vec![spec.as_path()];
-        if signature.is_some() {
+        if signed.is_some() {
             paths.push(signature_file.as_path());
         }
         commit(&root, &paths, &message).with_context(|| {
+            // Approving again would find the approval current and change nothing,
+            // so the next step is named here (#168).
+            let files = paths
+                .iter()
+                .map(|path| format!("`{}`", target::shown(path, &cwd)))
+                .collect::<Vec<_>>()
+                .join(" and ");
             format!(
-                "the approval of {ticket} is recorded, and committing it failed; commit it \
-                 yourself, or approve with `--no-commit`"
+                "the approval of {ticket} is recorded, and committing it failed. Approving \
+                 again changes nothing, since the approval is current: commit {files} \
+                 yourself, then ask the session to start Phase 2"
             )
         })?;
         println!("  committed: {message}");

@@ -90,6 +90,12 @@ pub fn run(args: Args) -> Result<()> {
             shown(&spec, &cwd)
         );
     }
+    if let Some(signature) = &recorded.signature_removed {
+        println!(
+            "reset: {} removed, since it signed the approval that was reset",
+            shown(signature, &cwd)
+        );
+    }
     Ok(())
 }
 

@@ -19,15 +19,17 @@ pub(super) const APPROVED_AT: &str = "Approved-at";
 pub(super) const APPROVED_CHECKSUM: &str = "Approved-checksum";
 pub(super) const LOCKFILE_CHECKSUM: &str = "Lockfile-checksum";
 pub(super) const ACCEPTANCE: &str = "Acceptance";
+pub(super) const APPROVAL_ID: &str = "Approval-id";
 
 /// The keys only `plan approve` fills (§5, "Command only").
 /// `reset_to_draft` empties the same ones.
-pub const APPROVAL_KEYS: [&str; 5] = [
+pub const APPROVAL_KEYS: [&str; 6] = [
     APPROVED_BY,
     APPROVED_AT,
     APPROVED_CHECKSUM,
     LOCKFILE_CHECKSUM,
     ACCEPTANCE,
+    APPROVAL_ID,
 ];
 
 /// Keys that must be present, even with an empty value (§5, D-3).
@@ -42,7 +44,7 @@ const REQUIRED_KEYS: [&str; 6] = [
 
 /// Every key the contract defines. Anything else is an unknown key:
 /// permitted, preserved, and otherwise ignored (D-2).
-const KNOWN_KEYS: [&str; 8] = [
+const KNOWN_KEYS: [&str; 9] = [
     TICKET,
     MODULE,
     STATUS,
@@ -51,6 +53,7 @@ const KNOWN_KEYS: [&str; 8] = [
     APPROVED_CHECKSUM,
     LOCKFILE_CHECKSUM,
     ACCEPTANCE,
+    APPROVAL_ID,
 ];
 
 // --- the typed view ---------------------------------------------------------
@@ -110,6 +113,9 @@ pub struct Header {
     pub lockfile_checksum: Option<String>,
     /// Absent and empty both mean not decided yet (§5).
     pub acceptance: Option<Acceptance>,
+    /// 32 lowercase hex digits, written with a signed approval only; absent and
+    /// empty both mean an unsigned one (§5).
+    pub approval_id: Option<String>,
 }
 
 impl Header {
@@ -442,6 +448,19 @@ pub(super) fn parse(lines: &[Line], first_line: usize, found: &mut Diagnostics) 
         }
     }
 
+    if let Some((value, line)) = value_of(APPROVAL_ID)
+        && !value.is_empty()
+        && !is_approval_id(value)
+    {
+        found.at(
+            line,
+            format!(
+                "`Approval-id` must be 32 lowercase hex digits, or empty; found `{value}`. \
+                 `plan approve` writes it, so leave it out of a draft"
+            ),
+        );
+    }
+
     let acceptance = value_of(ACCEPTANCE).and_then(|(value, line)| match value {
         "" => None,
         "required" => Some(Acceptance::Required),
@@ -474,6 +493,7 @@ pub(super) fn parse(lines: &[Line], first_line: usize, found: &mut Diagnostics) 
             approved_checksum: filled(APPROVED_CHECKSUM),
             lockfile_checksum: filled(LOCKFILE_CHECKSUM),
             acceptance,
+            approval_id: filled(APPROVAL_ID),
         })
     } else {
         None
@@ -530,6 +550,14 @@ pub(super) fn is_date(value: &str) -> bool {
         _ => return false,
     };
     (1..=days).contains(&day)
+}
+
+/// 32 lowercase hex digits: 128 bits (§5).
+pub(super) fn is_approval_id(value: &str) -> bool {
+    value.len() == 32
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// `sha256:` + 64 lowercase hex.

@@ -9,11 +9,12 @@
 //! - **What is approved is what was shown.** The caller prints the acceptance
 //!   criteria between [`prepare`] and [`Pending::commit`], and the commit
 //!   refuses if the file changed in between.
-//! - **Only five values change** (plan-header.md §5.3): `Status`,
-//!   `Approved-by`, `Approved-at`, `Approved-checksum`, `Acceptance`. The write
-//!   is checked against the file read back: the body must be byte-identical.
-//!   With `approval.signed`, `approval.sig` is written beside it, first, and put
-//!   back as it was if the header cannot be written (approval-signature.md §5).
+//! - **Only six values change** (plan-header.md §5.3): `Status`,
+//!   `Approved-by`, `Approved-at`, `Approved-checksum`, `Acceptance` and
+//!   `Approval-id`. The write is checked against the file read back: the body
+//!   must be byte-identical. With `approval.signed`, `approval.sig` is written
+//!   beside it, first, and put back as it was if the header cannot be written
+//!   (approval-signature.md §5).
 //! - **A changed approval is never silently renewed** (D-12, resolving OQ-1).
 //!   An `approved` Plan that no longer matches its checksum — or whose approval
 //!   values are missing — is refused unless `--reapprove` is given.
@@ -352,6 +353,7 @@ impl Pending {
             at: at.to_owned(),
             checksum: self.checksum.clone(),
             acceptance: self.acceptance.value,
+            id: None,
         }
         .check()
         .map_err(ApproveError::Unwritable)
@@ -372,21 +374,22 @@ impl Pending {
         self.commit_signed(by, at, None)
     }
 
-    /// [`commit`](Self::commit), with `signature`, when there is one, written to
-    /// `approval.sig` beside the Plan first. If the header then cannot be
-    /// written, the earlier `approval.sig` is put back, or the new one removed
+    /// [`commit`](Self::commit), with `signed`, when there is one: its signature
+    /// written to `approval.sig` beside the Plan first, and its id to
+    /// `Approval-id`. If the header then cannot be written, the earlier
+    /// `approval.sig` is put back, or the new one removed
     /// (`approval-signature.md` §5, step 5).
     pub fn commit_signed(
         self,
         by: String,
         at: String,
-        signature: Option<&str>,
+        signed: Option<&Signed>,
     ) -> Result<Approval, ApproveError> {
         if read(&self.spec)? != self.original {
             return Err(ApproveError::ChangedMeanwhile { spec: self.spec });
         }
-        let Some(signature) = signature else {
-            return self.write(by, at);
+        let Some(Signed { id, signature }) = signed else {
+            return self.write(by, at, None);
         };
         let path = signature_path(&self.spec);
         let earlier = match std::fs::read(&path) {
@@ -398,7 +401,7 @@ impl Pending {
             spec: path.clone(),
             source,
         })?;
-        let written = self.write(by, at);
+        let written = self.write(by, at, Some(id.clone()));
         if written.is_err() {
             // Best effort: the header error is the one to report.
             let _ = match earlier {
@@ -409,13 +412,19 @@ impl Pending {
         written
     }
 
-    fn write(mut self, by: String, at: String) -> Result<Approval, ApproveError> {
+    fn write(
+        mut self,
+        by: String,
+        at: String,
+        id: Option<String>,
+    ) -> Result<Approval, ApproveError> {
         let body = self.plan.body().to_owned();
         let approval = Approval {
             by,
             at,
             checksum: self.checksum.clone(),
             acceptance: self.acceptance.value,
+            id,
         };
         self.plan
             .approve(approval.clone())
@@ -436,12 +445,21 @@ impl Pending {
                     && reread.header().status == Status::Approved
                     && reread.header().approved_checksum.as_deref() == Some(&self.checksum)
                     && reread.header().acceptance == Some(self.acceptance.value)
+                    && reread.header().approval_id == approval.id
             });
         if !preserved {
             return Err(ApproveError::NotPreserved { spec: self.spec });
         }
         Ok(approval)
     }
+}
+
+/// A signed approval, before it is written: the `Approval-id` its statement
+/// names, and the armored signature over it (approval-signature.md §3, §4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Signed {
+    pub id: String,
+    pub signature: String,
 }
 
 /// `approval.sig`, beside `spec`.

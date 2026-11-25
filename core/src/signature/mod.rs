@@ -47,10 +47,23 @@ pub const DEADLINE: Duration = Duration::from_secs(90);
 /// The first line of what the signing program writes (§4).
 const ARMOR: &str = "-----BEGIN SSH SIGNATURE-----";
 
-/// What is signed (§3): three lines, each ending with `\n`.
-pub fn statement(ticket: &str, approved_checksum: &str) -> String {
-    format!("invar-approval 1\nticket: {ticket}\napproved-checksum: {approved_checksum}\n")
+/// What is signed (§3): four lines, each ending with `\n`.
+pub fn statement(ticket: &str, approved_checksum: &str, approval_id: &str) -> String {
+    format!(
+        "invar-approval 1\nticket: {ticket}\napproved-checksum: {approved_checksum}\n\
+         approval-id: {approval_id}\n"
+    )
 }
+
+/// A new `Approval-id` (plan-header.md §5): 128 random bits from the operating
+/// system, as 32 lowercase hex digits. A new one for every signed approval, so
+/// that no two approvals sign the same statement (D-7).
+pub fn new_approval_id() -> io::Result<String> {
+    let mut bytes = [0u8; 16];
+    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
 
 /// The key and the program git signs with, as `git config` reads them in a
 /// project (§5, steps 1 and 2).

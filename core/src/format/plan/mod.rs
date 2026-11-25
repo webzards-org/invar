@@ -1,6 +1,6 @@
 //! The Plan: `.invar/plans/<TICKET>-<slug>/spec.md` (§4a).
 //!
-//! Implements `contracts/formats/plan-header.md` v1.8.0; section numbers and
+//! Implements `contracts/formats/plan-header.md` v1.10.0; section numbers and
 //! decision ids below (`§4.1`, `D-2`) point into it.
 //!
 //! **Reading** splits the file into four parts — opening delimiter, header,
@@ -285,21 +285,32 @@ impl Plan {
     // --- the command-written fields -----------------------------------------
 
     /// Mark the Plan approved (M1-9): `Status: approved`, the three approval
-    /// fields and `Acceptance`. Only those five values change, and an absent
-    /// `Acceptance` key is added right after `Approved-checksum` (§5.3); every
-    /// other byte of the file stays as it was.
+    /// fields, `Acceptance` and `Approval-id`. Only those six values change. An
+    /// absent `Acceptance` key is added right after `Approved-checksum`, and an
+    /// absent `Approval-id` key, for a signed approval, right after `Acceptance`
+    /// (§5.3); an unsigned approval empties an `Approval-id` an earlier one left.
+    /// Every other byte of the file stays as it was.
     pub fn approve(&mut self, approval: Approval) -> Result<(), String> {
         approval.check()?;
         self.set(header::STATUS, Status::Approved.as_str());
         self.set(header::APPROVED_BY, &approval.by);
         self.set(header::APPROVED_AT, &approval.at);
         self.set(header::APPROVED_CHECKSUM, &approval.checksum);
-        self.set_or_add_acceptance(approval.acceptance);
+        self.set_or_add_after(
+            header::ACCEPTANCE,
+            header::APPROVED_CHECKSUM,
+            approval.acceptance.as_str(),
+        );
+        match &approval.id {
+            Some(id) => self.set_or_add_after(header::APPROVAL_ID, header::ACCEPTANCE, id),
+            None => self.set(header::APPROVAL_ID, ""),
+        }
         self.header.status = Status::Approved;
         self.header.approved_by = Some(approval.by);
         self.header.approved_at = Some(approval.at);
         self.header.approved_checksum = Some(approval.checksum);
         self.header.acceptance = Some(approval.acceptance);
+        self.header.approval_id = approval.id;
         Ok(())
     }
 
@@ -317,20 +328,22 @@ impl Plan {
         self.header.approved_checksum = None;
         self.header.lockfile_checksum = None;
         self.header.acceptance = None;
+        self.header.approval_id = None;
     }
 
-    /// The one optional key a command adds: the planner does not write it, so
-    /// an approval usually finds it absent (§5.3).
-    fn set_or_add_acceptance(&mut self, value: Acceptance) {
-        let key = |wanted| {
+    /// The optional keys a command adds, `Acceptance` and `Approval-id`: the
+    /// planner writes neither, so an approval usually finds them absent (§5.3).
+    /// An absent `key` goes right after `after`.
+    fn set_or_add_after(&mut self, key: &str, after: &str, value: &str) {
+        let index_of = |wanted| {
             self.header_lines
                 .iter()
                 .position(|line| line.key() == Some(wanted))
         };
-        if key(header::ACCEPTANCE).is_some() {
-            self.set(header::ACCEPTANCE, value.as_str());
-        } else if let Some(index) = key(header::APPROVED_CHECKSUM) {
-            let line = self.header_lines[index].field_after(header::ACCEPTANCE, value.as_str());
+        if index_of(key).is_some() {
+            self.set(key, value);
+        } else if let Some(index) = index_of(after) {
+            let line = self.header_lines[index].field_after(key, value);
             self.header_lines.insert(index + 1, line);
         }
     }
@@ -520,6 +533,8 @@ pub struct Approval {
     pub checksum: String,
     /// What the digest covers along with the body.
     pub acceptance: Acceptance,
+    /// `Approval-id`, for a signed approval only (approval-signature.md §3).
+    pub id: Option<String>,
 }
 
 impl Approval {
@@ -548,6 +563,13 @@ impl Approval {
             return Err(format!(
                 "the checksum must be `sha256:` and 64 lowercase hex digits: {:?}",
                 self.checksum
+            ));
+        }
+        if let Some(id) = &self.id
+            && !header::is_approval_id(id)
+        {
+            return Err(format!(
+                "the approval id must be 32 lowercase hex digits: {id:?}"
             ));
         }
         Ok(())

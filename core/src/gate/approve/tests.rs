@@ -102,6 +102,7 @@ fn header(status: Status, by: Option<&str>, at: Option<&str>, checksum: Option<&
         approved_checksum: checksum.map(Into::into),
         lockfile_checksum: None,
         acceptance: None,
+        approval_id: None,
     }
 }
 
