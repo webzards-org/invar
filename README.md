@@ -258,9 +258,27 @@ the wording of their output. Every change is listed in
   tickets with `--no-acceptance`.
 - On disk, the approval is a checksum. It catches a careless or accidental
   change; it does not stop an agent with a shell that sets out to write an
-  approval itself, because anything that can run `invar` can compute one. A
-  signed approval, made with a key that asks you on each use, shows who
-  approved ([`docs/INSTALL.md`](docs/INSTALL.md#optional-signed-approvals)).
+  approval itself, because anything that can run `invar` can compute one.
+  What signed approvals add, and what they do not, is below.
+
+**What signed approvals guarantee, and what they do not.** With
+`approval.signed: true` on the base branch, and `invar approval verify`,
+`invar cycle check` and `invar config check` run in CI on the attested release
+binary, a pull request passes only when every approval of a Plan on it, every
+skip of the cycle and every weakened check was signed by a key the base
+branch's `.invar/approvers` lists, over exactly what it covers, and when no
+approval was put back from earlier on the branch or from any branch git still
+reaches. Who signed is the record, not `Approved-by`. What it does not
+guarantee is that a person meant it: a signature shows that the key was used.
+A key the agent can use without you, a file with no passphrase or a key
+unlocked in `ssh-agent`, signs for the agent too, and then a signature proves
+no more than the checksum. A key that asks on each use, a security key's touch
+or a confirmation, can still be made to ask by the agent, and the prompt does
+not say what is being signed. Nothing outside CI is a guarantee: on your
+machine the hooks and the checksum catch mistakes, not an agent set on getting
+past them
+([`docs/INSTALL.md`](docs/INSTALL.md#optional-signed-approvals),
+`contracts/formats/approval-signature.md` §7).
 - `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`, together and with the labels
   Invar adds, must stay under the binding limit: 9,000 characters by default,
   at most 10,000. Above it,

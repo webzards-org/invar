@@ -26,6 +26,8 @@ plugin/
 ├── skills/log/SKILL.md          /invar:log — drafts the decision entry
 ├── skills/log-approve/SKILL.md  /invar:log-approve — the developer records it
 ├── skills/done/SKILL.md         /invar:done — the developer closes the cycle
+├── skills/skip/SKILL.md         /invar:skip — the developer signs a skip of the cycle
+├── skills/config-accept/SKILL.md /invar:config-accept — the developer signs a weakened check
 ├── bin/invar                    the launcher: picks invar-<os>-<arch> and runs it
 ├── marketplace.json             what the `dist` branch lists (release.yml)
 ├── NOTES.md

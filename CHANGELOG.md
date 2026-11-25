@@ -4,6 +4,25 @@
 
 ### Added
 
+- **Signed `Invar-Skip` and `Invar-Config`.** With `approval.signed: true` on
+  the base, `invar cycle check` counts an `Invar-Skip:` trailer, and `invar
+  config check` an `Invar-Config:` trailer, only when an approver in the base's
+  `.invar/approvers` signed it, over exactly what it covers: the branch's
+  required changes with their content, or `invar.yaml` on the base and on the
+  branch. Sign one with `/invar:skip <reason>` or `/invar:config-accept
+  <reason>` (`invar cycle skip --reason`, `invar config accept --reason`), which
+  make an empty commit with the reason and a signature trailer, or print them
+  with `--print`. A later change to what it covers needs a new signature; a
+  `git rebase --signoff` keeps it. Both commands are the developer's: the guard
+  denies an agent running them. A key needs `invar-skip` or `invar-config` in
+  its `namespaces=`, or none (#168). Contracts `approval-signature.md` 1.0.0
+  (changed before release), `invar-yaml.md` 2.8.0.
+- **`invar pr-body <TICKET> --from-approval`** renders the PR description from
+  the Plan as it was at its last approval on the branch that `approval verify`
+  accepts, read from git, with a line naming who signed it (principal and key
+  fingerprint). It works after `invar done` has deleted the Plan, and is
+  refused, saying why, when there is no such approval (#168).
+
 - **`invar approval verify [--base <ref>]`: signed approvals checked in CI.**
   When `invar.yaml` on the base has `approval.signed: true`, it follows every
   Plan through each commit of the branch and refuses an approval with no
@@ -119,6 +138,11 @@
   compares with (#165).
 
 ### Changed
+
+- **With `approval.signed` on at the base, a bare `Invar-Skip:` or
+  `Invar-Config:` trailer no longer counts** in CI; sign it instead (#168).
+- **The README says what signed approvals guarantee, and what they do not**: a
+  key the agent can use proves no more than the checksum (#168).
 
 - **A signed approval has an id of its own.** `invar plan approve` with
   `approval.signed` writes `Approval-id`, 128 random bits, new on every
