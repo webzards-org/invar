@@ -215,6 +215,7 @@ steps:
   - uses: actions/checkout@v4
     with:
       fetch-depth: 0
+      ref: ${{ github.event.pull_request.head.sha }}
   - name: Install invar
     env:
       GH_TOKEN: ${{ github.token }}
@@ -230,10 +231,15 @@ steps:
     run: invar config check --base origin/${{ github.base_ref }}
   - name: Changes to required paths went through a cycle
     run: invar cycle check --base origin/${{ github.base_ref }}
+  - name: Approvals are signed by an approver
+    run: invar approval verify --base origin/${{ github.base_ref }}
 ```
 
-`fetch-depth: 0` is for `config check` and `cycle check`, which read the branch's history
-from its merge base. `acceptance verify` needs none. Each is described below.
+`fetch-depth: 0` is for `config check`, `cycle check` and `approval verify`, which read the
+branch's history from its merge base. `acceptance verify` needs none. `ref:` checks out the
+pull request's own head: by default `actions/checkout` checks out a merge commit onto the
+base, which holds the whole branch in one commit, and `approval verify` refuses it, since the
+branch's commits cannot be followed through it. Each step is described below.
 
 **Every step that compares the branch with a base passes `--base`**, the pull request's target.
 Without it, these commands use the branch `origin/HEAD` points to, else `main`, and never
@@ -502,14 +508,43 @@ To set it up:
 `plan approve` then signs every approval, within 90 seconds, and refuses one it
 cannot sign. Nothing else changes for the team: the agents never see the key.
 
+4. Check the approvals in CI, with the step in
+   [CI: install the released CLI](#ci-install-the-released-cli):
+
+   ```yaml
+   - name: Approvals are signed by an approver
+     run: invar approval verify --base origin/${{ github.base_ref }}
+   ```
+
+   It is on only once `approval.signed: true` and `.invar/approvers` are on the
+   base branch: it reads both from there, never from the pull request. Then it
+   follows every Plan through each commit of the pull request, and refuses an
+   approval that is not signed, or signed by a key the base does not list, or
+   that does not match its Plan; a Plan changed after its approval with no new
+   signed approval; a Plan deleted without one; and an approval put back from
+   earlier on the branch. For each approval it prints who signed it, the
+   principal in `.invar/approvers` and the key's fingerprint: that, and not
+   `Approved-by`, is the record of who approved. A pull request that turns
+   `approval.signed` off is checked all the same.
+
+**Adding an approver** is a change to `.invar/approvers` on the base branch, and
+nothing else. Open a pull request that adds the line, and have it reviewed and
+merged like any change to who may merge: `CODEOWNERS` for the file, and branch
+protection on the base. A pull request that adds its own key gets a note from
+`approval verify`, and its approvals with that key are refused until the line is
+on the base. The list is read each time the check runs: an open pull request's
+approvals with a new key count once the line is merged and CI runs again, and a
+key whose line is removed stops counting the same way.
+
 **Checking a signature by hand.** For a Plan as it is now, against the list on
 `origin/main`:
 
 ```bash
 spec=.invar/plans/SHOP-214-cancel-unpaid-order/spec.md
+field() { sed -n "s/^$1: //p" "$spec"; }
 git show origin/main:.invar/approvers > /tmp/approvers
-printf 'invar-approval 1\nticket: %s\napproved-checksum: %s\n' \
-  "$(sed -n 's/^Ticket: //p' "$spec")" "$(sed -n 's/^Approved-checksum: //p' "$spec")" |
+printf 'invar-approval 1\nticket: %s\napproved-checksum: %s\napproval-id: %s\n' \
+  "$(field Ticket)" "$(field Approved-checksum)" "$(field Approval-id)" |
   ssh-keygen -Y verify -f /tmp/approvers -I dev@example.com -n invar-approval \
     -s "$(dirname "$spec")/approval.sig"
 ```
@@ -517,8 +552,8 @@ printf 'invar-approval 1\nticket: %s\napproved-checksum: %s\n' \
 `Good "invar-approval" signature for dev@example.com` is the answer you want.
 `invar plan check` and `invar done` do not read the signature: they check the
 checksum, as before. A signature is a guarantee only where it is checked, and
-checked where the agent cannot change the answer: in CI, against the base branch's
-list.
+checked where the agent cannot change the answer: in CI, by `invar approval
+verify` on CI's own binary, against the base branch's list.
 
 ---
 

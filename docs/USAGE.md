@@ -220,7 +220,8 @@ Two more choices, both off unless you ask for them:
   the key asks for a touch, a passphrase or a confirmation, it asks after the
   criteria are printed; answer it within 90 seconds. If git has no SSH signing
   key, or the key does not sign, nothing is approved and the reason is printed.
-  Setting it up, and what it proves and does not prove, is in
+  CI checks the signatures with `invar approval verify`. Setting it up, and
+  what it proves and does not prove, is in
   [INSTALL.md](INSTALL.md#optional-signed-approvals).
 
 From now on the Plan is frozen. If anyone changes it, even by one character,
@@ -404,6 +405,7 @@ You never need them inside Claude Code. They are useful in a shell or in CI
 | `invar plan validate <TICKET>` | Checks the Plan's form |
 | `invar plan check <TICKET>` | Checks that the Plan is approved and unchanged, and the locks |
 | `invar plan approve <TICKET> [--acceptance\|--no-acceptance] [--reapprove] [--commit <MESSAGE>\|--no-commit]` | The approval, as `/invar:approve` runs it; signed with `approval.signed` |
+| `invar approval verify [--base <ref>]` | Checks, for CI, that every approval on the branch is signed by a key in the base's `.invar/approvers`, when the base has `approval.signed: true` |
 | `invar acceptance verify [<TICKET>] [--results <report>… [--report-root <dir>]]` | Checks the locks. Without a ticket: the whole test directory, for CI. With `--results`, also that every locked test passed in your JUnit reports |
 | `invar acceptance run <TICKET>` | Runs the ticket's locked tests, and says per criterion whether they pass |
 | `invar acceptance unlock <TICKET> <file>…` | What `/invar:relock` runs |

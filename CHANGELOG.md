@@ -4,6 +4,23 @@
 
 ### Added
 
+- **`invar approval verify [--base <ref>]`: signed approvals checked in CI.**
+  When `invar.yaml` on the base has `approval.signed: true`, it follows every
+  Plan through each commit of the branch and refuses an approval with no
+  `approval.sig`, one signed by a key that is not in the base's
+  `.invar/approvers` (a key the branch adds to the list does not count until it
+  is on the base), a signature over another approval, a Plan changed while
+  approved with no signed approval, reset or deletion after it, a Plan deleted
+  with no signed approval before it, and an approval replayed from earlier on
+  the branch. It names who signed each approval, the principal and the key's
+  fingerprint, and notes when `Approved-by` says otherwise. A branch that turns
+  `approval.signed` off is checked all the same. Every problem is listed in one
+  run; the last line is `approval verify: off | passed | failed`. It needs the
+  pull request's own head with full history: a shallow clone, and the merge
+  commit `actions/checkout` makes by default, are refused. `docs/INSTALL.md` has
+  the CI step (#168). Contracts `approval-signature.md` 1.0.0 (changed before
+  release), `invar-yaml.md` 2.7.0.
+
 - **Invariant ids: the gate shows which invariants a Plan leaves out.** Start
   each item under `## Invariants` in `BUSINESS_CONTEXT.md` with an id,
   `- INV-1: …`. A Plan then names an invariant in Implementation context as
@@ -101,6 +118,19 @@
 
 ### Changed
 
+- **A signed approval has an id of its own.** `invar plan approve` with
+  `approval.signed` writes `Approval-id`, 128 random bits, new on every
+  approval, into the header, and signs it with the ticket and the checksum: the
+  statement is four lines. Two approvals of the same Plan no longer have the
+  same signature, so one undone by a `failed` entry cannot be put back from
+  history. `invar plan guard` denies an agent writing the key, as for the other
+  approval values. A Plan signed by an earlier build of this release has no id,
+  and has to be approved again (#168). Contracts `plan-header.md` 1.10.0,
+  `approval-signature.md` 1.0.0 (changed before release).
+- **A `failed` entry removes the Plan's `approval.sig`**, and clears
+  `Approval-id` with the other approval values (#168). Contract
+  `decision-entry.md` 1.4.1.
+
 - **The CI commands no longer take their base from the branch.**
   `config check`, `cycle check` and `acceptance verify <TICKET>` use `--base`,
   else `origin/HEAD`, else `main`, and never `git.base_branch`: a branch that set
@@ -115,6 +145,11 @@
   a key that asks you on each use, shows who approved (#154).
 
 ### Fixed
+
+- **`plan approve --commit` that fails says what to do next.** The approval is
+  written; approving again would only say it is current. The error now names
+  the files to commit yourself, the Plan and its `approval.sig`, and tells you
+  to ask the session to start Phase 2 (#168).
 
 - **An agent can no longer approve a draft Plan by editing it.** `invar plan
   guard` now also judges the header a `Write` or `Edit` would leave in a
