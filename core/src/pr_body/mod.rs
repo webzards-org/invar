@@ -47,7 +47,8 @@ const SECTIONS: [&str; 6] = [
 ];
 
 /// Render `plan` as a PR description for `ticket`, with what `tests` found of
-/// its acceptance tests, and which of `invariants` it names.
+/// its acceptance tests, and which of `invariants` it names. `signed` is the line
+/// that says who signed the approval, for `--from-approval`.
 ///
 /// Does not look at the approval: a caller decides whether a Plan may be
 /// rendered. Both callers — `invar done` and the standalone `pr-body` command
@@ -60,6 +61,7 @@ pub fn render(
     with_ticket: bool,
     tests: &Tests,
     invariants: &Invariants,
+    signed: Option<&str>,
 ) -> String {
     let header = plan.header();
     let mut out = String::new();
@@ -71,6 +73,9 @@ pub fn render(
         header.approved_by.as_deref().unwrap_or("(not approved)"),
         header.approved_at.as_deref().unwrap_or("(not approved)"),
     );
+    if let Some(signed) = signed {
+        let _ = writeln!(out, "{signed}");
+    }
     write_acceptance(&mut out, plan, ticket, tests);
     write_invariants(&mut out, plan, invariants);
 
