@@ -289,9 +289,17 @@ fn the_statement_names_the_approval_id_written_in_the_header() {
     let project = Project::new(SIGNED);
     let key = project.key("approver", "");
     project.sign_with(&key.display().to_string());
-    project.approve(&["SHOP-214"]).success();
+    let assert = project.approve(&["SHOP-214"]).success();
     let id = project.field("Approval-id").unwrap();
     assert_eq!(id.len(), 32, "{id}");
+    // Printed with the other approval fields, so that a replay message can be matched.
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(
+        stdout.contains(&format!(
+            "  Acceptance: skipped\n  Approval-id: {id}\n  Signature: "
+        )),
+        "{stdout}"
+    );
     assert!(
         id.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
