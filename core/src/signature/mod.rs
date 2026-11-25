@@ -39,7 +39,7 @@ mod verify;
 #[cfg(test)]
 mod tests;
 
-pub use verify::{Approvers, Verified};
+pub use verify::{Approvers, Refused, Verified};
 
 /// The SSH signature namespace of an approval (§4). A signature made for a git
 /// commit (`-n git`) is not one.
@@ -50,6 +50,33 @@ pub const DEADLINE: Duration = Duration::from_secs(90);
 
 /// The first line of what the signing program writes (§4).
 const ARMOR: &str = "-----BEGIN SSH SIGNATURE-----";
+
+/// Its last line.
+const ARMOR_END: &str = "-----END SSH SIGNATURE-----";
+
+/// An armored signature as one line of base64, for a trailer (§6.5, D-10): without
+/// its first and last lines and without line breaks.
+pub fn one_line(armored: &str) -> String {
+    armored
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && *line != ARMOR && *line != ARMOR_END)
+        .collect()
+}
+
+/// [`one_line`] undone: the armor back, 70 characters a line, as `ssh-keygen` writes
+/// it.
+pub fn armored(one_line: &str) -> String {
+    let mut out = format!("{ARMOR}\n");
+    let chars: Vec<char> = one_line.chars().collect();
+    for line in chars.chunks(70) {
+        out.extend(line);
+        out.push('\n');
+    }
+    out.push_str(ARMOR_END);
+    out.push('\n');
+    out
+}
 
 /// What is signed (§3): four lines, each ending with `\n`.
 pub fn statement(ticket: &str, approved_checksum: &str, approval_id: &str) -> String {
@@ -118,10 +145,23 @@ impl Signer {
         })
     }
 
-    /// Sign `statement` in `dir`, within `deadline`: the armored signature.
+    /// Sign `statement` in `dir`, within `deadline`: the armored signature of an
+    /// approval.
     pub fn sign(
         &self,
         dir: &Path,
+        statement: &str,
+        deadline: Duration,
+    ) -> Result<String, SignError> {
+        self.sign_in(dir, NAMESPACE, statement, deadline)
+    }
+
+    /// [`sign`](Self::sign) in `namespace`: `invar-skip` or `invar-config` for the
+    /// trailers of §6.5.
+    pub fn sign_in(
+        &self,
+        dir: &Path,
+        namespace: &str,
         statement: &str,
         deadline: Duration,
     ) -> Result<String, SignError> {
@@ -137,7 +177,7 @@ impl Signer {
         };
         let mut command = Command::new(&self.program);
         command
-            .args(["-Y", "sign", "-n", NAMESPACE, "-f"])
+            .args(["-Y", "sign", "-n", namespace, "-f"])
             .arg(key)
             .current_dir(dir)
             .stdin(Stdio::piped())

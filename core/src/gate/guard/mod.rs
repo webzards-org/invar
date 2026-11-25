@@ -644,7 +644,22 @@ const HUMAN_ONLY: &[HumanOnly] = &[
         words: &["acceptance", "unlock"],
         reason: acceptance_unlock_reason,
     },
+    HumanOnly {
+        words: &["cycle", "skip"],
+        reason: cycle_skip_reason,
+    },
 ];
+
+fn cycle_skip_reason(_: &str) -> String {
+    format!(
+        "`invar cycle skip` is the developer's decision, not yours: it signs, with their key, \
+         that this branch changes paths that need a cycle and goes without one. Do not run it, \
+         and do not look for another way to record the same thing. Tell the developer which \
+         required paths the change touches and wait: they skip it themselves, with \
+         `/invar:skip <reason>`, or the change goes through a cycle. {}",
+        mention("cycle skip")
+    )
+}
 
 /// How every reason ends: what to do when the command was only mentioned.
 fn mention(words: &str) -> String {
@@ -793,10 +808,11 @@ fn skip_trailer_reason() -> String {
          check` in CI that this branch changes a path that needs a cycle and goes without one, \
          and why. Do not write it, in a commit message, a `--trailer` or any other way. Commit \
          without it, tell the developer that the change touches a path `cycle.required_paths` \
-         names, and that the pull request needs either a cycle closed with /invar:done or an \
-         `{key}: <reason>` trailer they write themselves: `git commit --amend --trailer \
-         \"{key}: <reason>\"`. If you only meant to mention the trailer, leave the key out of \
-         a command that runs `git commit`.",
+         names, and that the pull request needs either a cycle closed with /invar:done or a \
+         skip they make themselves: `/invar:skip <reason>` when approvals are signed, else an \
+         `{key}: <reason>` trailer, `git commit --amend --trailer \"{key}: <reason>\"`. If you \
+         only meant to mention the trailer, leave the key out of a command that runs \
+         `git commit`.",
         key = crate::cycle::SKIP_TRAILER
     )
 }

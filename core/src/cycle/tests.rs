@@ -28,6 +28,8 @@ fn report() -> Report {
         open: Vec::new(),
         skips: Vec::new(),
         empty_skips: Vec::new(),
+        signed: false,
+        not_counted: Vec::new(),
     }
 }
 
@@ -79,6 +81,7 @@ fn a_required_change_needs_every_commit_covered_or_a_skip() {
     skipped.skips.push(Skip {
         commit: "abc".to_owned(),
         reason: "a typo".to_owned(),
+        signed_by: None,
     });
     assert!(skipped.passes());
 

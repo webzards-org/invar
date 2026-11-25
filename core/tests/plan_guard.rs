@@ -1364,3 +1364,21 @@ fn a_git_commit_writing_the_config_trailer_is_denied() {
     ));
     passes_silently(bash(&project.root(), "git log --grep Invar-Config"));
 }
+
+#[test]
+fn signing_a_skip_from_a_shell_is_denied() {
+    let project = Project::new(APPROVED);
+    let assert = guard(bash(
+        &project.root(),
+        "invar cycle skip --reason \"a typo\"",
+    ))
+    .code(2)
+    .stderr(contains(
+        "`invar cycle skip` is the developer's decision, not yours",
+    ));
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("`/invar:skip <reason>`"), "{stdout}");
+    // `cycle check` and `cycle required` stay the agent's to run.
+    guard(bash(&project.root(), "invar cycle check --base main")).code(0);
+    guard(bash(&project.root(), "invar cycle required app/x.php")).code(0);
+}

@@ -209,6 +209,54 @@ pub fn commit_paths(dir: &Path, paths: &[&Path], message: &str) -> Result<(), Gi
     Ok(())
 }
 
+/// An empty commit with `message` and `trailers`, `(key, value)` each, leaving
+/// whatever is staged as it is: `git commit --only --allow-empty --trailer …`. The full
+/// name of the commit made.
+pub fn commit_empty(
+    dir: &Path,
+    message: &str,
+    trailers: &[(&str, &str)],
+) -> Result<String, GitError> {
+    const COMMAND: &str = "git commit --allow-empty";
+    let trailers: Vec<String> = trailers
+        .iter()
+        .map(|(key, value)| format!("{key}: {value}"))
+        .collect();
+    let mut args = vec![
+        "commit",
+        "--quiet",
+        "--only",
+        "--allow-empty",
+        "-m",
+        message,
+    ];
+    for trailer in &trailers {
+        args.extend(["--trailer", trailer.as_str()]);
+    }
+    let output = run(dir, &args)?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    commit_of(dir, "HEAD")
+}
+
+/// The git object id of `path` (relative to `dir`) at `rev`, or `None` when no file
+/// is there.
+pub fn blob_id_at(dir: &Path, rev: &str, path: &str) -> Result<Option<String>, GitError> {
+    const COMMAND: &str = "git ls-tree";
+    let output = run(dir, &["ls-tree", "-z", rev, "--", path])?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    // `<mode> <type> <oid>\t<path>`.
+    let entry = String::from_utf8_lossy(&output.stdout);
+    let mut fields = entry.split_whitespace();
+    Ok(match (fields.nth(1), fields.next()) {
+        (Some("blob"), Some(oid)) => Some(oid.to_owned()),
+        _ => None,
+    })
+}
+
 /// Stage `paths` (relative to `dir`): `git add -- <paths>`. A new file has to be
 /// known to git before `git commit --only` can take it.
 pub fn stage(dir: &Path, paths: &[&Path]) -> Result<(), GitError> {

@@ -7,12 +7,16 @@
 //! the history git keeps: a branch that changes a path the base branch's
 //! `cycle.required_paths` names passes only when every commit of it that touched the
 //! path was made while the Plan of a cycle closed on the branch was approved (D-17), or
-//! with an `Invar-Skip: <reason>` trailer a person wrote. It reads git and writes nothing.
+//! with an `Invar-Skip: <reason>` trailer a person wrote. With `approval.signed` on at the
+//! base, the trailer counts only signed by an approver (`approval-signature.md` §6.5). It
+//! reads git and writes nothing; `invar cycle skip`, the developer's, signs a skip.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 use std::path::Path;
 
+use crate::approval_verify::APPROVERS;
+use crate::attestation::{self, Change, Judged, Kind};
 use crate::format::config::{self, ConfigError, FILE_NAME};
 use crate::format::glob;
 use crate::format::plan::Mode;
@@ -20,6 +24,7 @@ use crate::fs::ProjectRoot;
 use crate::fs::plans::{SPEC_FILE, parse_dir_name};
 use crate::gate::check;
 use crate::git::{self, GitError};
+use crate::signature::{Approvers, Verified};
 
 #[cfg(test)]
 mod tests;
@@ -53,10 +58,14 @@ pub struct Report {
     pub required: Vec<Required>,
     pub closed: Vec<Closed>,
     pub open: Vec<Open>,
-    /// Each `Invar-Skip:` trailer with a reason.
+    /// Each `Invar-Skip:` trailer that counts: with a reason, and signed when `signed`.
     pub skips: Vec<Skip>,
     /// The commits with an `Invar-Skip:` trailer and no reason: they count for nothing.
     pub empty_skips: Vec<String>,
+    /// Whether `approval.signed` is on at the base, so that a skip counts only signed.
+    pub signed: bool,
+    /// The trailers that do not count, with why, when `signed`.
+    pub not_counted: Vec<Judged>,
 }
 
 /// A path in the branch's net change that a pattern of the base's list matches.
@@ -102,6 +111,8 @@ pub struct Open {
 pub struct Skip {
     pub commit: String,
     pub reason: String,
+    /// Who signed it, when the base asks for a signature.
+    pub signed_by: Option<Verified>,
 }
 
 /// The patterns a branch adds to or removes from the base's list.
@@ -131,8 +142,9 @@ impl Report {
         if self.required.iter().all(Required::is_covered) {
             return "every required change is covered by a closed cycle".to_owned();
         }
+        let signed = if self.signed { "signed " } else { "" };
         format!(
-            "skipped by `{SKIP_TRAILER}:` ({} trailer(s))",
+            "skipped by `{SKIP_TRAILER}:` ({} {signed}trailer(s))",
             self.skips.len()
         )
     }
@@ -161,6 +173,14 @@ impl Report {
         if self.off.is_some() {
             let _ = writeln!(out, "cycle check: off: {}", self.why());
             return out;
+        }
+        if self.signed && !self.required.is_empty() {
+            let _ = writeln!(
+                out,
+                "note: `approval.signed` is on at {}, so `{SKIP_TRAILER}:` counts only signed by \
+                 an approver: `invar cycle skip --reason \"<reason>\"`",
+                self.base
+            );
         }
         if let Some(fork) = &self.fork {
             let _ = writeln!(out, "merge base: {}", short(fork));
@@ -209,16 +229,24 @@ impl Report {
             );
         }
         let _ = writeln!(out, "skips:");
-        if self.skips.is_empty() {
+        if self.skips.is_empty() && self.not_counted.is_empty() {
             let _ = writeln!(out, "  none");
         }
         for skip in &self.skips {
+            let signed = skip.signed_by.as_ref().map_or_else(String::new, |by| {
+                format!(" (signed by {}, {})", by.principal, by.fingerprint)
+            });
             let _ = writeln!(
                 out,
-                "  {}: {SKIP_TRAILER}: {}",
+                "  {}: {SKIP_TRAILER}: {}{signed}",
                 short(&skip.commit),
                 skip.reason
             );
+        }
+        for judged in &self.not_counted {
+            if let Judged::NotCounted { commit, .. } = judged {
+                let _ = writeln!(out, "  {}: {SKIP_TRAILER}: {judged}", short(commit));
+            }
         }
         for commit in &self.empty_skips {
             let _ = writeln!(
@@ -259,11 +287,14 @@ pub fn short(commit: &str) -> String {
 pub struct NotCovered {
     /// Only the required changes that are not covered.
     pub required: Vec<Required>,
+    /// Whether a skip has to be signed.
+    pub signed: bool,
 }
 
 impl NotCovered {
     pub fn of(report: &Report) -> Self {
         Self {
+            signed: report.signed,
             required: report
                 .required
                 .iter()
@@ -295,11 +326,21 @@ impl fmt::Display for NotCovered {
             f,
             "\nA commit is covered when, at its parent, the Plan of a cycle closed on this branch \
              is approved. Either make the change while a Plan is approved and close the cycle \
-             with /invar:done; or, if it needs no Plan, the developer adds a trailer to a \
-             commit of the branch: \
-             `git commit --amend --trailer \"{SKIP_TRAILER}: <reason>\"`, or the same on a new \
-             commit"
-        )
+             with /invar:done; or, if it needs no Plan, "
+        )?;
+        if self.signed {
+            write!(
+                f,
+                "the developer signs a skip, which makes a commit with the trailers: `invar \
+                 cycle skip --reason \"<reason>\"`, or /invar:skip <reason>"
+            )
+        } else {
+            write!(
+                f,
+                "the developer adds a trailer to a commit of the branch: `git commit --amend \
+                 --trailer \"{SKIP_TRAILER}: <reason>\"`, or the same on a new commit"
+            )
+        }
     }
 }
 
@@ -311,15 +352,11 @@ pub fn check(root: &ProjectRoot, base: Option<&str>) -> Result<Report, CycleErro
     let given = base;
     let (base, base_commit) = resolve_base(dir, given)?;
 
-    let base_list = match git::file_at(dir, &base_commit, FILE_NAME).map_err(CycleError::Git)? {
-        None => None,
-        Some(bytes) => {
-            let shown = format!("{base}:{FILE_NAME}");
-            let loaded = config::parse_bytes(&bytes, Path::new(&shown))
-                .map_err(|source| CycleError::BaseConfig { source })?;
-            Some(loaded.config.cycle.required_paths)
-        }
-    };
+    let base_config = base_config(dir, &base, &base_commit)?;
+    let signed = base_config
+        .as_ref()
+        .is_some_and(|config| config.approval.signed);
+    let base_list = base_config.map(|config| config.cycle.required_paths);
     let head_list = git::file_at(dir, "HEAD", FILE_NAME)
         .ok()
         .flatten()
@@ -354,6 +391,8 @@ pub fn check(root: &ProjectRoot, base: Option<&str>) -> Result<Report, CycleErro
         open: Vec::new(),
         skips: Vec::new(),
         empty_skips: Vec::new(),
+        signed,
+        not_counted: Vec::new(),
     };
     match &base_list {
         None => {
@@ -376,16 +415,10 @@ pub fn check(root: &ProjectRoot, base: Option<&str>) -> Result<Report, CycleErro
     cycles(root, &base_commit, &mut report)?;
 
     let mut covering = Covering::default();
-    for path in git::committed_changes(dir, &fork).map_err(CycleError::Git)? {
-        if path == INVAR_DIR || path.starts_with(&format!("{INVAR_DIR}/")) {
-            continue;
-        }
-        let Some(pattern) = glob::first_match(&patterns, &path) else {
-            continue;
-        };
+    for (path, pattern) in required_changes(dir, &fork, &patterns)? {
         let mut required = Required {
             path: path.clone(),
-            pattern: pattern.to_owned(),
+            pattern,
             covered_by: Vec::new(),
             uncovered: Vec::new(),
         };
@@ -403,9 +436,151 @@ pub fn check(root: &ProjectRoot, base: Option<&str>) -> Result<Report, CycleErro
         report.required.push(required);
     }
 
-    (report.skips, report.empty_skips) = trailers(dir, &base_commit, SKIP_TRAILER)?;
+    let (skips, empty_skips) = trailers(dir, &base_commit, SKIP_TRAILER)?;
+    report.empty_skips = empty_skips;
+    if signed {
+        let paths: Vec<String> = report.required.iter().map(|r| r.path.clone()).collect();
+        let changes = attestation::changes(dir, &fork, &paths).map_err(CycleError::Git)?;
+        let approvers = base_approvers(dir, &base_commit)?;
+        let list_shown = format!("{base}:{APPROVERS}");
+        for trailers in attestation::read(dir, &base_commit, Kind::Skip).map_err(CycleError::Git)? {
+            let judged = attestation::judge(
+                Kind::Skip,
+                &trailers,
+                approvers.as_ref(),
+                &list_shown,
+                |reason| attestation::skip_statement(reason, &changes),
+            )
+            .map_err(CycleError::SshKeygen)?;
+            match judged {
+                Judged::Counted {
+                    commit,
+                    reason,
+                    verified,
+                } => report.skips.push(Skip {
+                    commit,
+                    reason,
+                    signed_by: Some(verified),
+                }),
+                not_counted => report.not_counted.push(not_counted),
+            }
+        }
+    } else {
+        report.skips = skips;
+    }
     report.fork = Some(fork);
     Ok(report)
+}
+
+/// `invar.yaml` at the base, when it has one.
+pub fn base_config(
+    dir: &Path,
+    base: &str,
+    base_commit: &str,
+) -> Result<Option<config::Config>, CycleError> {
+    match git::file_at(dir, base_commit, FILE_NAME).map_err(CycleError::Git)? {
+        None => Ok(None),
+        Some(bytes) => {
+            let shown = format!("{base}:{FILE_NAME}");
+            let loaded = config::parse_bytes(&bytes, Path::new(&shown))
+                .map_err(|source| CycleError::BaseConfig { source })?;
+            Ok(Some(loaded.config))
+        }
+    }
+}
+
+/// `<base>:.invar/approvers` in a temporary file for `ssh-keygen`, when the base has
+/// one (`approval-signature.md` §2).
+pub fn base_approvers(dir: &Path, base_commit: &str) -> Result<Option<Approvers>, CycleError> {
+    let Some(list) = git::file_at(dir, base_commit, APPROVERS).map_err(CycleError::Git)? else {
+        return Ok(None);
+    };
+    Approvers::write(&list)
+        .map(Some)
+        .map_err(|(_, source)| CycleError::SshKeygen(source))
+}
+
+/// The branch's required changes: every path that differs between `fork` and `HEAD`,
+/// committed, `.invar/` left out, that one of `patterns` matches, with the first pattern
+/// that does.
+pub fn required_changes(
+    dir: &Path,
+    fork: &str,
+    patterns: &[String],
+) -> Result<Vec<(String, String)>, CycleError> {
+    let mut found = Vec::new();
+    for path in git::committed_changes(dir, fork).map_err(CycleError::Git)? {
+        if path == INVAR_DIR || path.starts_with(&format!("{INVAR_DIR}/")) {
+            continue;
+        }
+        if let Some(pattern) = glob::first_match(patterns, &path) {
+            found.push((path.clone(), pattern.to_owned()));
+        }
+    }
+    Ok(found)
+}
+
+/// A skip ready to sign: what `invar cycle skip` shows, and the statement it signs
+/// (`approval-signature.md` §6.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedSkip {
+    pub base: String,
+    pub reason: String,
+    /// Each required change, with the pattern that requires it.
+    pub changes: Vec<(Change, String)>,
+    pub statement: String,
+}
+
+/// Prepare a signed skip of the branch's required changes, against `base` found by the
+/// CI rule (§3.3.1): refused when the base does not ask for signed skips, when nothing
+/// is required, or when a path cannot be written into the statement.
+pub fn prepare_skip(
+    root: &ProjectRoot,
+    base: Option<&str>,
+    reason: &str,
+) -> Result<PreparedSkip, CycleError> {
+    let dir = root.path();
+    let reason = attestation::reason(reason).map_err(CycleError::CannotSign)?;
+    let (base, base_commit) = resolve_base(dir, base)?;
+    let config = base_config(dir, &base, &base_commit)?;
+    if !config.as_ref().is_some_and(|config| config.approval.signed) {
+        return Err(CycleError::CannotSign(format!(
+            "{base}:{FILE_NAME} does not set `approval.signed: true`, so a skip is not signed: \
+             add the trailer to a commit of the branch, `git commit --amend --trailer \
+             \"{SKIP_TRAILER}: <reason>\"`"
+        )));
+    }
+    let patterns = config
+        .map(|config| config.cycle.required_paths)
+        .unwrap_or_default();
+    let fork = merge_base(dir, &base)?;
+    let required = required_changes(dir, &fork, &patterns)?;
+    if required.is_empty() {
+        return Err(CycleError::CannotSign(format!(
+            "this branch changes no path that {base}:{FILE_NAME} requires a cycle for, so there \
+             is nothing to skip"
+        )));
+    }
+    if let Some((path, _)) = required
+        .iter()
+        .find(|(path, _)| path.contains(['\n', '\r']))
+    {
+        return Err(CycleError::CannotSign(format!(
+            "the path {path:?} holds a line break, and cannot be written into the statement"
+        )));
+    }
+    let paths: Vec<String> = required.iter().map(|(path, _)| path.clone()).collect();
+    let blobs = attestation::changes(dir, &fork, &paths).map_err(CycleError::Git)?;
+    let statement = attestation::skip_statement(&reason, &blobs);
+    Ok(PreparedSkip {
+        base,
+        reason,
+        changes: blobs
+            .into_iter()
+            .zip(required.into_iter().map(|(_, pattern)| pattern))
+            .collect(),
+        statement,
+    })
 }
 
 /// The base a CI command compares a branch with, and its commit: `--base`, else the
@@ -478,6 +653,7 @@ pub fn trailers(dir: &Path, from: &str, key: &str) -> Result<(Vec<Skip>, Vec<Str
                 with_reason.push(Skip {
                     commit: commit.clone(),
                     reason: reason.to_owned(),
+                    signed_by: None,
                 });
                 counted = true;
             }
@@ -601,6 +777,10 @@ pub enum CycleError {
         base: String,
         said: String,
     },
+    /// `ssh-keygen` could not be run to verify a signed trailer.
+    SshKeygen(std::io::Error),
+    /// `invar cycle skip` or `invar config accept` refused to sign, and why.
+    CannotSign(String),
 }
 
 impl fmt::Display for CycleError {
@@ -617,6 +797,12 @@ impl fmt::Display for CycleError {
                  merge base with this branch, so the branch's history cannot be read: {said}. {}",
                 git::shallow_advice(base)
             ),
+            Self::SshKeygen(source) => write!(
+                f,
+                "cannot run `ssh-keygen` to verify the signed trailers: {source}. Install \
+                 OpenSSH's ssh-keygen"
+            ),
+            Self::CannotSign(why) => write!(f, "{why}"),
         }
     }
 }

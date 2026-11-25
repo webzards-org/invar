@@ -2,13 +2,17 @@
 //!
 //! `check` is for CI and decides on the branch's history; `required` is for the main
 //! session, which asks it of the paths it changed when it skipped the cycle (L-9). Both
-//! write nothing.
+//! write nothing. `skip` is the developer's: it signs a skip and commits it
+//! (`approval-signature.md` §6.5).
 
 use anyhow::Result;
 use clap::Subcommand;
 
-use crate::cycle::{self, NotCovered};
-use crate::fs;
+use crate::attestation::Kind;
+use crate::cycle::{self, NotCovered, short};
+use crate::fs::{self, ProjectRoot};
+use crate::git;
+use crate::signature::{self, Signer};
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -43,6 +47,38 @@ pub enum Command {
         #[arg(long, value_name = "REF")]
         base: Option<String>,
     },
+    /// Sign a skip of the cycle for this branch's required changes, and commit it. The
+    /// developer's, never an agent's.
+    ///
+    /// For a project whose base has `approval.signed: true`, where `cycle check` counts an
+    /// `Invar-Skip:` trailer only with a signature by a key in the base's
+    /// `.invar/approvers`. Lists each required change, signs a statement of them with
+    /// their contents at the merge base and at HEAD, and the reason, with the SSH key git
+    /// signs with, within 90 seconds, then makes one empty commit with the trailers
+    /// `Invar-Skip: <reason>` and `Invar-Skip-Signature: <signature>`. What else is staged
+    /// stays staged; nothing is pushed.
+    ///
+    /// The signature covers the required changes as they are: a later change to one of
+    /// them, or a new one, needs a new skip. It survives `git rebase --signoff`.
+    Skip {
+        /// Why the change needs no cycle, in one line: the value of `Invar-Skip:`.
+        #[arg(long)]
+        reason: String,
+
+        /// The branch the pull request targets, as `cycle check` takes it: without it,
+        /// the branch `origin/HEAD` points to, else `main`.
+        #[arg(long, value_name = "REF")]
+        base: Option<String>,
+
+        /// Print the two trailers instead of committing them.
+        #[arg(long)]
+        print: bool,
+
+        /// Report as `/invar:skip` needs it: a refusal is printed on stdout as
+        /// `error: …`, and the exit code is 0.
+        #[arg(long)]
+        skill: bool,
+    },
     /// Say which of the given paths `cycle.required_paths` requires a cycle for.
     ///
     /// For the main session, when it skipped the cycle: it names the files it changed.
@@ -69,6 +105,12 @@ pub fn run(command: Command) -> Result<()> {
                 Err(NotCovered::of(&report).into())
             }
         }
+        Command::Skip {
+            reason,
+            base,
+            print,
+            skill,
+        } => super::for_skill(skill, skip(&root, &reason, base.as_deref(), print)),
         Command::Required { paths } => {
             let patterns = &config.cycle.required_paths;
             let found = cycle::required(patterns, &paths);
@@ -89,4 +131,43 @@ pub fn run(command: Command) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// `invar cycle skip`: show, sign, then commit or print.
+fn skip(root: &ProjectRoot, reason: &str, base: Option<&str>, print: bool) -> Result<()> {
+    let prepared = cycle::prepare_skip(root, base, reason)?;
+    // Before anything is shown, as `plan approve` does: a missing key is known now.
+    let signer = Signer::from_git(root.path())?;
+    println!(
+        "Required changes this skip covers, against {}:",
+        prepared.base
+    );
+    for (change, pattern) in &prepared.changes {
+        println!("  {} ({pattern})", change.path);
+    }
+    println!();
+    println!("Invar-Skip: {}", prepared.reason);
+    println!();
+    println!("signing with {} — answer its prompt if it asks", signer.key);
+    let armored = signer.sign_in(
+        root.path(),
+        Kind::Skip.namespace(),
+        &prepared.statement,
+        signature::DEADLINE,
+    )?;
+    let one_line = signature::one_line(&armored);
+    let trailers = [
+        (Kind::Skip.reason_key(), prepared.reason.as_str()),
+        (Kind::Skip.signature_key(), one_line.as_str()),
+    ];
+    if print {
+        for (key, value) in trailers {
+            println!("{key}: {value}");
+        }
+        return Ok(());
+    }
+    let commit = git::commit_empty(root.path(), "chore: skip the cycle", &trailers)?;
+    println!("committed: {} chore: skip the cycle", short(&commit));
+    println!("skip signed: {} required change(s)", prepared.changes.len());
+    Ok(())
 }
