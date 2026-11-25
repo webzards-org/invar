@@ -560,6 +560,110 @@ pub fn first_parent(dir: &Path, commit: &str) -> Result<Option<String>, GitError
     ))
 }
 
+/// Every commit in `fork..HEAD`, along every parent: the branch's commits, and what
+/// it merged in from elsewhere that the base does not have.
+pub fn range_commits(dir: &Path, fork: &str) -> Result<Vec<String>, GitError> {
+    const COMMAND: &str = "git rev-list";
+    let range = format!("{fork}..HEAD");
+    let output = run(dir, &["rev-list", &range, "--"])?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(text(COMMAND, &output.stdout)?
+        .lines()
+        .map(str::to_owned)
+        .collect())
+}
+
+/// Every line starting with `prefix` that a commit reachable from any ref added to a
+/// file matching `pathspec`, with the commit and the file's path relative to `dir`:
+/// `(commit, path, rest of the line)`. One `git log --all -p`, limited by `-G` to the
+/// commits that add or remove such a line. A merge shows no patch, so a line is found
+/// at the commit that wrote it.
+pub fn added_lines_on_any_ref(
+    dir: &Path,
+    pathspec: &str,
+    prefix: &str,
+) -> Result<Vec<(String, String, String)>, GitError> {
+    const COMMAND: &str = "git log --all -p";
+    let pattern = format!("-G^{prefix}");
+    let output = run(
+        dir,
+        &[
+            "-c",
+            "log.showSignature=false",
+            "log",
+            "--all",
+            "--no-color",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--relative",
+            "--unified=0",
+            "-p",
+            "--format=%x00%H",
+            &pattern,
+            "--",
+            pathspec,
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut found = Vec::new();
+    for record in text.split('\0').skip(1) {
+        let mut lines = record.lines();
+        let Some(commit) = lines.next().map(str::trim) else {
+            continue;
+        };
+        let mut path: Option<&str> = None;
+        for line in lines {
+            if let Some(name) = line.strip_prefix("+++ ") {
+                path = name.strip_prefix("b/");
+            } else if let (Some(path), Some(rest)) = (
+                path,
+                line.strip_prefix('+')
+                    .and_then(|added| added.strip_prefix(prefix)),
+            ) {
+                found.push((commit.to_owned(), path.to_owned(), rest.to_owned()));
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// Whether `ancestor` is reachable from `commit`: `git merge-base --is-ancestor`.
+pub fn is_ancestor(dir: &Path, ancestor: &str, commit: &str) -> Result<bool, GitError> {
+    let output = run(dir, &["merge-base", "--is-ancestor", ancestor, commit])?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(failed("git merge-base --is-ancestor", &output)),
+    }
+}
+
+/// The first ref, by name, that reaches `commit`, shortened: a branch before a
+/// remote-tracking branch before a tag. `None` when no ref does.
+pub fn ref_containing(dir: &Path, commit: &str) -> Result<Option<String>, GitError> {
+    const COMMAND: &str = "git for-each-ref --contains";
+    let output = run(
+        dir,
+        &[
+            "for-each-ref",
+            "--count=1",
+            "--format=%(refname:short)",
+            "--contains",
+            commit,
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    let name = text(COMMAND, &output.stdout)?.trim();
+    Ok((!name.is_empty()).then(|| name.to_owned()))
+}
+
 /// The commits from `fork` (excluded) to `HEAD` along first parents, oldest first:
 /// the branch's own line of history, without what a merge brought in from elsewhere.
 pub fn first_parent_commits(dir: &Path, fork: &str) -> Result<Vec<String>, GitError> {

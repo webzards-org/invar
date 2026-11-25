@@ -77,8 +77,11 @@ impl Project {
         (project, key)
     }
 
+    /// The repository, beside the keys and the git config so that no commit holds them.
     fn root(&self) -> PathBuf {
-        self.dir.path().canonicalize().unwrap()
+        let root = self.dir.path().join("repo");
+        fs::create_dir_all(&root).unwrap();
+        root.canonicalize().unwrap()
     }
 
     fn keys(&self) -> PathBuf {
@@ -704,6 +707,58 @@ fn a_merge_of_the_base_into_the_branch_is_followed_along_the_branch() {
     project.code("chore: main moves on");
     project.git(&["checkout", "-q", BRANCH]);
     project.git(&["merge", "-q", "--no-ff", "-m", "Merge main", "main"]);
+    project.done();
+    let assert = project.verify().success();
+    assert!(
+        last_line(&assert).starts_with("approval verify: passed: 1 signed approval(s)"),
+        "{}",
+        stdout(&assert)
+    );
+}
+
+// --- replay from outside the branch (§6.3, rule 6) --------------------------------
+
+/// Branch `a`: the Plan, a signed approval at commit A, then a `failed` reset. Then
+/// branch `b` from `main`, checked out. Returns commit A.
+fn failed_on_another_branch(project: &Project) -> String {
+    project.git(&["checkout", "-q", "-B", "feat/SHOP-214-a", "main"]);
+    project.draft();
+    project.approve(&["--commit", "chore: approve SHOP-214"]);
+    let approved = project.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    project.fail();
+    project.git(&["checkout", "-q", "-B", "feat/SHOP-214-b", "main"]);
+    approved
+}
+
+#[test]
+fn an_approval_copied_from_another_branch_is_refused_naming_its_commit() {
+    let (project, _) = Project::signed();
+    let approved = failed_on_another_branch(&project);
+    // The approval of A, put back on a new branch for the same ticket.
+    for path in [SPEC, SIGNATURE] {
+        let bytes = project.git(&["show", &format!("{approved}:{path}")]);
+        project.write(path, &bytes);
+    }
+    project.commit_all("chore: approve SHOP-214");
+    let assert = failed(&project);
+    let out = stdout(&assert);
+    assert!(
+        out.contains(&format!(
+            "this approval is replayed: its `Approval-id` {} is the one of the approved Plan \
+             {SPEC} at {} (chore: approve SHOP-214), on feat/SHOP-214-a, outside this branch",
+            project.field("Approval-id"),
+            &approved[..12]
+        )),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_new_approval_on_a_new_branch_after_a_failed_one_passes() {
+    let (project, _) = Project::signed();
+    failed_on_another_branch(&project);
+    project.draft();
+    project.approve(&["--commit", "chore: approve SHOP-214 again"]);
     project.done();
     let assert = project.verify().success();
     assert!(

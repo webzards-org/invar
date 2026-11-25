@@ -12,7 +12,8 @@
 //! first parent: an approval is checked when it is made (rule 1), a body changed
 //! under it must be settled before `HEAD` (rule 2), and a deletion needs a signed
 //! approval before it with nothing unsettled in between (rule 3). An `Approval-id`
-//! seen in an earlier approval of the branch is a replay (D-7). At `HEAD`, an
+//! seen in an earlier approval of the branch, or in an approved Plan at a commit any
+//! ref reaches outside it, is a replay (rule 6, D-7). At `HEAD`, an
 //! approved Plan that no commit of the branch approved is checked as it stands
 //! (rule 5).
 
@@ -203,8 +204,12 @@ pub fn check(dir: &Path, base: Option<&str>) -> Result<Report, VerifyError> {
         ));
     }
 
+    let outside = outside_ids(dir, &fork)?;
     let mut walk = Walk {
         dir,
+        base: &base,
+        fork: &fork,
+        outside,
         mode: Mode::of(&base_config),
         approvers: &approvers,
         list_shown: format!("{base}:{APPROVERS}"),
@@ -330,6 +335,11 @@ struct Track {
 
 struct Walk<'a> {
     dir: &'a Path,
+    base: &'a str,
+    fork: &'a str,
+    /// Every `Approval-id` written at a commit a ref reaches outside the branch, with
+    /// where: candidates for rule 6, each checked when an approval has its id.
+    outside: HashMap<String, Vec<(String, String)>>,
     mode: Mode,
     approvers: &'a Approvers,
     list_shown: String,
@@ -473,6 +483,11 @@ impl Walk<'_> {
                 }
                 None => {
                     self.ids.insert(id.clone(), commit.to_owned());
+                    if let Some(replayed) = self.replayed_from_outside(id)? {
+                        let mut problems = result.err().unwrap_or_default();
+                        problems.push(replayed);
+                        result = Err(problems);
+                    }
                 }
             }
         }
@@ -498,6 +513,50 @@ impl Walk<'_> {
             }
         }
         Ok(())
+    }
+
+    /// Rule 6 outside the branch: the first commit a ref reaches, not on the branch,
+    /// whose Plan was approved with `id`, said with a ref that holds it.
+    fn replayed_from_outside(&mut self, id: &str) -> Result<Option<String>, VerifyError> {
+        let Some(places) = self.outside.get(id).cloned() else {
+            return Ok(None);
+        };
+        for (commit, spec) in places {
+            if !self.approved_with(&commit, &spec, id)? {
+                continue;
+            }
+            // On the base's history, the base is the ref to name: a ref that holds it may
+            // be this very branch.
+            let on = if git::is_ancestor(self.dir, &commit, self.fork)? {
+                Some(self.base.to_owned())
+            } else {
+                git::ref_containing(self.dir, &commit)?
+            };
+            let on = on.map_or_else(String::new, |name| format!(", on {name}"));
+            let subject = self.subject(&commit)?;
+            return Ok(Some(format!(
+                "this approval is replayed: its `Approval-id` {id} is the one of the approved \
+                 Plan {spec} at {} ({subject}){on}, outside this branch, and every approval \
+                 has a new one (approval-signature.md §6.3, rule 6). Approve the Plan again",
+                short(&commit)
+            )));
+        }
+        Ok(None)
+    }
+
+    /// Whether the Plan at `spec` is approved with `id` at `commit`.
+    fn approved_with(&self, commit: &str, spec: &str, id: &str) -> Result<bool, VerifyError> {
+        let Some(bytes) = git::file_at(self.dir, commit, spec)? else {
+            return Ok(false);
+        };
+        let checked = Plan::check(&String::from_utf8_lossy(&bytes), self.mode);
+        let has = |key: &str, value: &str| {
+            checked
+                .approval_values
+                .iter()
+                .any(|(k, v)| *k == key && v == value)
+        };
+        Ok(checked.status == Some(Status::Approved) && has("Approval-id", id))
     }
 
     /// Rule 1: what the approval holds, and its signature against the base's list.
@@ -628,6 +687,29 @@ impl Walk<'_> {
         self.subjects.insert(commit.to_owned(), subject.clone());
         Ok(subject)
     }
+}
+
+/// Every `Approval-id` a commit that a ref reaches, and that is not in `fork..HEAD`,
+/// wrote into a Plan: one search of every ref (§6.3, rule 6). The base's history is
+/// in it, and every other branch; commits no ref reaches are not.
+fn outside_ids(
+    dir: &Path,
+    fork: &str,
+) -> Result<HashMap<String, Vec<(String, String)>>, VerifyError> {
+    let branch: HashSet<String> = git::range_commits(dir, fork)?.into_iter().collect();
+    let mut outside: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    let pathspec = format!("{PLANS}/*/{SPEC_FILE}");
+    for (commit, spec, value) in git::added_lines_on_any_ref(dir, &pathspec, "Approval-id:")? {
+        let id = value.trim();
+        if id.is_empty() || branch.contains(&commit) {
+            continue;
+        }
+        outside
+            .entry(id.to_owned())
+            .or_default()
+            .push((commit, spec));
+    }
+    Ok(outside)
 }
 
 /// `approval.sig`, beside `spec`.
