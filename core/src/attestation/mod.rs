@@ -25,6 +25,8 @@ use crate::signature::{self, Approvers, Refused, Verified};
 pub enum Kind {
     /// `Invar-Skip`: required paths changed without a cycle (`invar-yaml.md` §3.8).
     Skip,
+    /// `Invar-Config`: a change that weakens a check (`invar-yaml.md` §3.9).
+    Config,
 }
 
 impl Kind {
@@ -33,6 +35,7 @@ impl Kind {
     pub fn namespace(self) -> &'static str {
         match self {
             Self::Skip => "invar-skip",
+            Self::Config => "invar-config",
         }
     }
 
@@ -40,6 +43,7 @@ impl Kind {
     pub fn reason_key(self) -> &'static str {
         match self {
             Self::Skip => "Invar-Skip",
+            Self::Config => "Invar-Config",
         }
     }
 
@@ -47,12 +51,14 @@ impl Kind {
     pub fn signature_key(self) -> &'static str {
         match self {
             Self::Skip => "Invar-Skip-Signature",
+            Self::Config => "Invar-Config-Signature",
         }
     }
 
     fn first_line(self) -> &'static str {
         match self {
             Self::Skip => "invar-skip 1",
+            Self::Config => "invar-config 1",
         }
     }
 }
@@ -85,6 +91,17 @@ pub fn skip_statement(reason: &str, changes: &[Change]) -> String {
         ));
     }
     out
+}
+
+/// What a configuration change signs (§6.5): its reason, and `invar.yaml` at the base
+/// and at `HEAD`.
+pub fn config_statement(reason: &str, base: &Option<String>, head: &Option<String>) -> String {
+    format!(
+        "{}\nreason: {reason}\nconfig: {} {}\n",
+        Kind::Config.first_line(),
+        blob(base),
+        blob(head)
+    )
 }
 
 /// Each of `paths` with its blob at `fork` and at `HEAD`.

@@ -648,7 +648,22 @@ const HUMAN_ONLY: &[HumanOnly] = &[
         words: &["cycle", "skip"],
         reason: cycle_skip_reason,
     },
+    HumanOnly {
+        words: &["config", "accept"],
+        reason: config_accept_reason,
+    },
 ];
+
+fn config_accept_reason(_: &str) -> String {
+    format!(
+        "`invar config accept` is the developer's decision, not yours: it signs, with their \
+         key, that this branch weakens what invar checks, in invar.yaml, on purpose. Do not run \
+         it, and do not look for another way to record the same thing. Tell the developer what \
+         the branch changes in invar.yaml and why, and wait: they accept it themselves, with \
+         `/invar:config-accept <reason>`, or the keys go back. {}",
+        mention("config accept")
+    )
+}
 
 fn cycle_skip_reason(_: &str) -> String {
     format!(
@@ -795,9 +810,10 @@ fn config_trailer_reason() -> String {
         "an `{key}:` trailer is the developer's decision, not yours: it tells `invar config \
          check` in CI that this branch weakens what invar checks, in invar.yaml, on purpose, \
          and why. Do not write it, in a commit message, a `--trailer` or any other way. Tell \
-         the developer what the branch changes in invar.yaml and why; they write it \
-         themselves: `git commit --amend --trailer \"{key}: <reason>\"`. If you only meant \
-         to mention the trailer, leave the key out of a command that runs `git commit`.",
+         the developer what the branch changes in invar.yaml and why; they sign it \
+         themselves, with `/invar:config-accept <reason>` when approvals are signed, else \
+         `git commit --amend --trailer \"{key}: <reason>\"`. If you only meant to mention the \
+         trailer, leave the key out of a command that runs `git commit`.",
         key = crate::config_check::CONFIG_TRAILER
     )
 }

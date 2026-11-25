@@ -7,13 +7,18 @@
 //! with one edit. `plan guard` denies that edit in the edit tools; this is the boundary,
 //! in CI: `invar.yaml` at `HEAD` is compared with `invar.yaml` at the base, by the
 //! contract's closed list, and a weakening passes only with an `Invar-Config: <reason>`
-//! trailer a person wrote. It reads git and writes nothing.
+//! trailer a person wrote, signed by an approver when the base has `approval.signed`
+//! (`approval-signature.md` §6.5). It reads git and writes nothing; `invar config
+//! accept`, the developer's, signs a configuration change.
 
 use std::fmt::{self, Write as _};
 use std::path::Path;
 
+use crate::approval_verify::APPROVERS;
+use crate::attestation::{self, Judged, Kind};
 use crate::cycle::{self, CycleError, Skip, short};
 use crate::format::config::{self, ConfigError, FILE_NAME, Weakening};
+use crate::fs::ProjectRoot;
 use crate::git;
 
 /// The trailer a person writes to say that a branch weakens the checks on purpose (§3.9).
@@ -32,6 +37,10 @@ pub struct Report {
     pub trailers: Vec<Skip>,
     /// The commits with an `Invar-Config:` trailer and no reason.
     pub empty_trailers: Vec<String>,
+    /// Whether `approval.signed` is on at the base, so that a trailer counts only signed.
+    pub signed: bool,
+    /// The trailers that do not count, with why, when `signed`.
+    pub not_counted: Vec<Judged>,
 }
 
 impl Report {
@@ -59,16 +68,24 @@ impl Report {
             let _ = writeln!(out, "  {weakening}");
         }
         let _ = writeln!(out, "trailers:");
-        if self.trailers.is_empty() {
+        if self.trailers.is_empty() && self.not_counted.is_empty() {
             let _ = writeln!(out, "  none");
         }
         for trailer in &self.trailers {
+            let signed = trailer.signed_by.as_ref().map_or_else(String::new, |by| {
+                format!(" (signed by {}, {})", by.principal, by.fingerprint)
+            });
             let _ = writeln!(
                 out,
-                "  {}: {CONFIG_TRAILER}: {}",
+                "  {}: {CONFIG_TRAILER}: {}{signed}",
                 short(&trailer.commit),
                 trailer.reason
             );
+        }
+        for judged in &self.not_counted {
+            if let Judged::NotCounted { commit, .. } = judged {
+                let _ = writeln!(out, "  {}: {CONFIG_TRAILER}: {judged}", short(commit));
+            }
         }
         for commit in &self.empty_trailers {
             let _ = writeln!(
@@ -80,9 +97,10 @@ impl Report {
         if self.weakenings.is_empty() {
             let _ = writeln!(out, "config check: passed: no check is weakened");
         } else if self.passes() {
+            let signed = if self.signed { "signed " } else { "" };
             let _ = writeln!(
                 out,
-                "config check: passed: weakened with `{CONFIG_TRAILER}:` ({} trailer(s))",
+                "config check: passed: weakened with `{CONFIG_TRAILER}:` ({} {signed}trailer(s))",
                 self.trailers.len()
             );
         } else {
@@ -96,6 +114,8 @@ impl Report {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Weakened {
     pub weakenings: Vec<Weakening>,
+    /// Whether the trailer has to be signed.
+    pub signed: bool,
 }
 
 impl fmt::Display for Weakened {
@@ -109,12 +129,21 @@ impl fmt::Display for Weakened {
         for weakening in &self.weakenings {
             write!(f, "\n  {weakening}")?;
         }
-        write!(
-            f,
-            "\nPut the keys back, or, if the developer means it, they add a trailer to a commit \
-             of the branch: `git commit --amend --trailer \"{CONFIG_TRAILER}: <reason>\"`, or the \
-             same on a new commit"
-        )
+        if self.signed {
+            write!(
+                f,
+                "\nPut the keys back, or, if the developer means it, they sign it, which makes a \
+                 commit with the trailers: `invar config accept --reason \"<reason>\"`, or \
+                 /invar:config-accept <reason>"
+            )
+        } else {
+            write!(
+                f,
+                "\nPut the keys back, or, if the developer means it, they add a trailer to a \
+                 commit of the branch: `git commit --amend --trailer \"{CONFIG_TRAILER}: \
+                 <reason>\"`, or the same on a new commit"
+            )
+        }
     }
 }
 
@@ -133,6 +162,8 @@ pub fn check(dir: &Path, base: Option<&str>) -> Result<Report, ConfigCheckError>
         weakenings: Vec::new(),
         trailers: Vec::new(),
         empty_trailers: Vec::new(),
+        signed: false,
+        not_counted: Vec::new(),
     };
 
     let at = |rev: &str| git::file_at(dir, rev, FILE_NAME).map_err(CycleError::Git);
@@ -167,8 +198,99 @@ pub fn check(dir: &Path, base: Option<&str>) -> Result<Report, ConfigCheckError>
             shown(&new.git.base_branch)
         ));
     }
-    (report.trailers, report.empty_trailers) = cycle::trailers(dir, &base_commit, CONFIG_TRAILER)?;
+    let (trailers, empty_trailers) = cycle::trailers(dir, &base_commit, CONFIG_TRAILER)?;
+    report.empty_trailers = empty_trailers;
+    report.signed = old.approval.signed;
+    if report.signed {
+        let blobs = (
+            git::blob_id_at(dir, &base_commit, FILE_NAME).map_err(CycleError::Git)?,
+            git::blob_id_at(dir, "HEAD", FILE_NAME).map_err(CycleError::Git)?,
+        );
+        let approvers = cycle::base_approvers(dir, &base_commit)?;
+        let list_shown = format!("{base}:{APPROVERS}");
+        for found in attestation::read(dir, &base_commit, Kind::Config).map_err(CycleError::Git)? {
+            let judged = attestation::judge(
+                Kind::Config,
+                &found,
+                approvers.as_ref(),
+                &list_shown,
+                |reason| attestation::config_statement(reason, &blobs.0, &blobs.1),
+            )
+            .map_err(CycleError::SshKeygen)?;
+            match judged {
+                Judged::Counted {
+                    commit,
+                    reason,
+                    verified,
+                } => report.trailers.push(Skip {
+                    commit,
+                    reason,
+                    signed_by: Some(verified),
+                }),
+                not_counted => report.not_counted.push(not_counted),
+            }
+        }
+    } else {
+        report.trailers = trailers;
+    }
     Ok(report)
+}
+
+/// A configuration change ready to sign: what `invar config accept` shows, and the
+/// statement it signs (`approval-signature.md` §6.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedAccept {
+    pub base: String,
+    pub reason: String,
+    pub weakenings: Vec<Weakening>,
+    pub statement: String,
+}
+
+/// Prepare a signed acceptance of what this branch weakens in `invar.yaml`, against
+/// `base` found by the CI rule (§3.3.1): refused when the base does not ask for a
+/// signature, or nothing is weakened.
+pub fn prepare_accept(
+    root: &ProjectRoot,
+    base: Option<&str>,
+    reason: &str,
+) -> Result<PreparedAccept, ConfigCheckError> {
+    let dir = root.path();
+    let reason = attestation::reason(reason).map_err(CycleError::CannotSign)?;
+    let (base, base_commit) = cycle::resolve_base(dir, base)?;
+    let old = cycle::base_config(dir, &base, &base_commit)?;
+    let Some(old) = old.filter(|config| config.approval.signed) else {
+        return Err(CycleError::CannotSign(format!(
+            "{base}:{FILE_NAME} does not set `approval.signed: true`, so a configuration \
+             change is not signed: add the trailer to a commit of the branch, `git commit \
+             --amend --trailer \"{CONFIG_TRAILER}: <reason>\"`"
+        ))
+        .into());
+    };
+    let new = git::file_at(dir, "HEAD", FILE_NAME)
+        .map_err(CycleError::Git)?
+        .unwrap_or_default();
+    let new = config::parse_bytes(&new, Path::new(&format!("HEAD:{FILE_NAME}")))
+        .map_err(|source| ConfigCheckError::Config { source })?
+        .config;
+    let weakenings = config::weakenings(&old, &new);
+    if weakenings.is_empty() {
+        return Err(CycleError::CannotSign(format!(
+            "this branch weakens nothing in {FILE_NAME} against {base}, so there is nothing to \
+             accept"
+        ))
+        .into());
+    }
+    let statement = attestation::config_statement(
+        &reason,
+        &git::blob_id_at(dir, &base_commit, FILE_NAME).map_err(CycleError::Git)?,
+        &git::blob_id_at(dir, "HEAD", FILE_NAME).map_err(CycleError::Git)?,
+    );
+    Ok(PreparedAccept {
+        base,
+        reason,
+        weakenings,
+        statement,
+    })
 }
 
 #[derive(Debug)]

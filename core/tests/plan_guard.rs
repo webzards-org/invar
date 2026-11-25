@@ -1382,3 +1382,22 @@ fn signing_a_skip_from_a_shell_is_denied() {
     guard(bash(&project.root(), "invar cycle check --base main")).code(0);
     guard(bash(&project.root(), "invar cycle required app/x.php")).code(0);
 }
+
+#[test]
+fn signing_a_configuration_change_from_a_shell_is_denied() {
+    let project = Project::new(APPROVED);
+    let assert = guard(bash(
+        &project.root(),
+        "invar config accept --reason \"on purpose\"",
+    ))
+    .code(2)
+    .stderr(contains(
+        "`invar config accept` is the developer's decision, not yours",
+    ));
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(
+        stdout.contains("`/invar:config-accept <reason>`"),
+        "{stdout}"
+    );
+    guard(bash(&project.root(), "invar config check --base main")).code(0);
+}
