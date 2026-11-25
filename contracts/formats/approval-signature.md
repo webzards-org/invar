@@ -209,8 +209,22 @@ passes.
    branch without one is refused.
 4. A **reset** needs no signature. Nor does a draft.
 5. At `HEAD`, a Plan that is approved passes rule 1 as it stands.
-6. **No replay.** An approval whose `Approval-id` appeared in an earlier
-   approval of the branch is refused as replayed, whatever its signature (D-7).
+6. **No replay.** An approval is refused as replayed, whatever its
+   signature, when its `Approval-id` appeared before (D-7):
+   - in an earlier approval of the branch;
+   - in an approved Plan, a `.invar/plans/*/spec.md` with `Status: approved`,
+     at any commit that a ref of the repository reaches (`git log --all`) and
+     that is not in `<merge base>..HEAD`: the base's history and every other
+     branch, tag and remote-tracking branch included;
+   - in a `failed` entry under `.invar/decisions/` at `<base>`, whose
+     `approval-id` records the approval it cancelled (`decision-entry.md` §7).
+
+   The refusal names the commit, and a ref that holds it where git can tell,
+   or the entry. Only commits a ref reaches are searched: a commit of a branch
+   that was deleted, or never fetched (a shallow or single-branch fetch), is
+   not seen, and a `failed` entry survives a deleted branch only if it was
+   merged to the base. So the verifier needs a checkout that fetched every
+   branch: `fetch-depth: 0`, with which `actions/checkout` fetches them all.
 
 A branch that has no Plan at any commit passes, with a note that there was
 nothing to verify. A branch that changes `.invar/approvers` passes or fails as
@@ -247,10 +261,13 @@ Plan. Two cases matter:
 What a verifier adds over `Approved-checksum` holds only where the agent cannot
 change it: in CI, with the list read from the base branch.
 
-The replay rule (§6.3, rule 6) looks at one branch. An approval taken from
-another branch's history, for the same ticket and the same body, is a person's
-approval of that Plan, and is not refused here. A closed ticket's Plan is gone
-from the base, and a ticket reopened with its old Plan is the review's to catch.
+The replay rule (§6.3, rule 6) sees what a ref reaches, and the base's
+`failed` entries. An approval taken from a branch that was deleted without being
+merged, whose `failed` entry was never merged either, is not refused. A ref that
+holds an earlier version of the branch being checked, such as the pushed branch
+before a rebase is pushed, or a branch stacked on it, holds its approvals too,
+and an honest approval then reads as a replay: run the check on the branch as it
+is pushed, as CI does.
 
 ## 8. Decisions and their reasons
 
@@ -300,6 +317,15 @@ back is one the branch has already seen, and rule 6 refuses it. 128 bits from
 the operating system, because the id must not be guessed ahead of a signature,
 and no counter or date in the repository can promise that.
 
+Looking at the branch alone was not enough (found in review of PR #169). After a
+failed cycle the usual path is a new branch for the same ticket, from the base,
+and an approval copied there from the failed branch (`git show <commit>:<path>`)
+is new to that branch's history. So a verifier also searches every commit a ref
+reaches outside the branch, in one `git log --all` over the Plans, and the base's
+`failed` entries, which record the id they cancel and outlive the branch once
+merged. Neither can see a commit no ref reaches: that is the limit, stated in
+rule 6 and §7, and the reason CI fetches every branch.
+
 **D-8 — The branch's own head, not CI's merge commit** (1.0.0, #168). For a pull
 request, `actions/checkout` checks out a merge commit whose first parent is the
 base. Its merge base with the base is the base itself, so the commits of §6.2
@@ -337,11 +363,17 @@ Not yet released, so changed in place again with the verifier (#168):
   approved. §6.3: rule 1 needs an `Approval-id`; rule 3 says which approval a
   deletion follows; new rule 6 refuses a replayed approval; the last line of
   the output. §7: what the replay rule does not cover.
+- In review of PR #169, §6.3 rule 6 and D-7: a replay is also an `Approval-id`
+  in an approved Plan at a commit any ref reaches outside `<merge base>..HEAD`,
+  or in a `failed` entry at the base; the limit, a commit no ref reaches. §7
+  says what that leaves.
 
 **Why:** the review of #162 found that a reset approval could be replayed from
 history with every rule of §6 passing it (D-7), and that §6.1 read the
 approvers list from the base but not the switch. Building the verifier showed
-that the default pull-request checkout hides the branch from §6.2 (D-8).
+that the default pull-request checkout hides the branch from §6.2 (D-8). The
+review of PR #169 replayed an approval from a failed branch onto a new branch
+for the same ticket, and the branch-only rule passed it (D-7).
 
 **Compatibility:** none needed. 1.0.0 has not been released. An approval signed
 by a build of `main` from before this change has no `Approval-id`, and the
