@@ -34,8 +34,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::git::{self, GitError};
 
+mod verify;
+
 #[cfg(test)]
 mod tests;
+
+pub use verify::{Approvers, Verified};
 
 /// The SSH signature namespace of an approval (§4). A signature made for a git
 /// commit (`-n git`) is not one.
@@ -63,7 +67,6 @@ pub fn new_approval_id() -> io::Result<String> {
     File::open("/dev/urandom")?.read_exact(&mut bytes)?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
-
 
 /// The key and the program git signs with, as `git config` reads them in a
 /// project (§5, steps 1 and 2).
@@ -127,7 +130,8 @@ impl Signer {
         let key: &Path = match &self.key {
             Key::File(path) => path,
             Key::Literal(key) => {
-                temp = TempKey::write(key)?;
+                temp = TempFile::write("signing-key", "pub", format!("{key}\n").as_bytes())
+                    .map_err(|(path, source)| SignError::TempKey { path, source })?;
                 temp.path()
             }
         };
@@ -317,35 +321,34 @@ fn run_with_deadline(
     }))
 }
 
-/// A public key written to a file of its own for the signing program, removed
-/// when dropped.
-struct TempKey {
+/// A file of its own in the temporary directory, removed when dropped: a public key
+/// for the signing program, or the approvers list and a signature for the verifier.
+struct TempFile {
     path: PathBuf,
 }
 
-impl TempKey {
-    fn write(key: &str) -> Result<Self, SignError> {
+impl TempFile {
+    /// `.invar-<tag>-<pid>-<nanos>-<n>.<extension>`, created new, never replacing a
+    /// file. The path is given back with the error.
+    fn write(tag: &str, extension: &str, bytes: &[u8]) -> Result<Self, (PathBuf, io::Error)> {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |since| since.subsec_nanos());
+        let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            ".invar-signing-key-{}-{nanos}.pub",
+            ".invar-{tag}-{}-{nanos}-{count}.{extension}",
             std::process::id()
         ));
         let mut file: File = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&path)
-            .map_err(|source| SignError::TempKey {
-                path: path.clone(),
-                source,
-            })?;
-        file.write_all(format!("{key}\n").as_bytes())
-            .map_err(|source| SignError::TempKey {
-                path: path.clone(),
-                source,
-            })?;
-        Ok(Self { path })
+            .map_err(|source| (path.clone(), source))?;
+        let temp = Self { path };
+        file.write_all(bytes)
+            .map_err(|source| (temp.path.clone(), source))?;
+        Ok(temp)
     }
 
     fn path(&self) -> &Path {
@@ -353,7 +356,7 @@ impl TempKey {
     }
 }
 
-impl Drop for TempKey {
+impl Drop for TempFile {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
     }

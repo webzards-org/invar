@@ -560,6 +560,49 @@ pub fn first_parent(dir: &Path, commit: &str) -> Result<Option<String>, GitError
     ))
 }
 
+/// The commits from `fork` (excluded) to `HEAD` along first parents, oldest first:
+/// the branch's own line of history, without what a merge brought in from elsewhere.
+pub fn first_parent_commits(dir: &Path, fork: &str) -> Result<Vec<String>, GitError> {
+    const COMMAND: &str = "git rev-list --first-parent --reverse";
+    let range = format!("{fork}..HEAD");
+    let output = run(
+        dir,
+        &["rev-list", "--first-parent", "--reverse", &range, "--"],
+    )?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(text(COMMAND, &output.stdout)?
+        .lines()
+        .map(str::to_owned)
+        .collect())
+}
+
+/// Every parent of `commit`, first parent first: none for a root commit, two or more
+/// for a merge.
+pub fn parents(dir: &Path, commit: &str) -> Result<Vec<String>, GitError> {
+    const COMMAND: &str = "git rev-list --parents -n 1";
+    let output = run(
+        dir,
+        &[
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            "--end-of-options",
+            commit,
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(failed(COMMAND, &output));
+    }
+    Ok(text(COMMAND, &output.stdout)?
+        .split_whitespace()
+        .skip(1)
+        .map(str::to_owned)
+        .collect())
+}
+
 /// The subject line of `commit`'s message.
 pub fn subject(dir: &Path, commit: &str) -> Result<String, GitError> {
     const COMMAND: &str = "git log -1 --format=%s";
