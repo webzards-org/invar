@@ -19,7 +19,9 @@ plugin/
 ├── .claude-plugin/icon.png      the plugin directory's listing icon (NOTES §13)
 ├── hooks/hooks.json             the hooks, each one `invar` call
 ├── agents/planner.md            Phase 1: a ticket becomes a draft Plan
+├── agents/plan-auditor.md       an optional check of a draft Plan against the code
 ├── skills/invar/SKILL.md        the cycle, as the main session lives it
+├── skills/plan-audit/SKILL.md   /invar:plan-audit — the developer audits a draft Plan
 ├── skills/approve/SKILL.md      /invar:approve — the developer's gate
 ├── skills/relock/SKILL.md       /invar:relock — the developer unlocks a wrong test
 ├── skills/review/SKILL.md       /invar:review — the advisory review

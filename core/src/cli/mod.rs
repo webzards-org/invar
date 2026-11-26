@@ -225,13 +225,16 @@ fn for_skill(skill: bool, result: Result<()>) -> Result<()> {
     }
 }
 
-/// Whether a command line clap refused was `plan approve … --skill` or `acceptance
-/// unlock … --skill`, the commands whose argument errors have to reach a skill (see
-/// `for_skill`): a typo in `/invar:approve T --acceptence` is a refusal like any other.
-/// Nothing after a `--` is a flag.
+/// Whether a command line clap refused was `plan approve … --skill`, `plan audit begin …
+/// --skill` or `acceptance unlock … --skill`, the commands whose argument errors have to
+/// reach a skill (see `for_skill`): a typo in `/invar:approve T --acceptence` is a
+/// refusal like any other. Nothing after a `--` is a flag.
 pub fn reports_argument_errors_for_skill(args: &[OsString]) -> bool {
     args.len() >= 2
         && ((args[0] == "plan" && args[1] == "approve")
+            || (args[0] == "plan"
+                && args[1] == "audit"
+                && args.get(2).is_some_and(|a| a == "begin"))
             || (args[0] == "acceptance" && args[1] == "unlock"))
         && args[2..]
             .iter()
@@ -269,6 +272,8 @@ mod tests {
         assert!(for_skill("plan approve --skill T --acceptence"));
         assert!(for_skill("plan approve T --acceptence --skill"));
         assert!(for_skill("acceptance unlock --skill T f --bogus"));
+        assert!(for_skill("plan audit begin --skill"));
+        assert!(!for_skill("plan audit report --skill"));
 
         assert!(!for_skill("plan approve T --acceptence"));
         assert!(!for_skill("plan approve T -- --skill"));

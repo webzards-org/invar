@@ -8,6 +8,7 @@ use clap::Subcommand;
 use super::mode;
 
 mod approve;
+mod audit;
 mod check;
 mod guard;
 mod subagent_stop;
@@ -42,8 +43,12 @@ pub enum Command {
     /// Approve a Plan: the human gate.
     ///
     /// Validates the Plan, prints its acceptance criteria, every invariant of
-    /// `BUSINESS_CONTEXT.md` marked named or NOT NAMED when they have ids, and
-    /// whether the ticket needs acceptance tests, then sets `Status: approved` and records
+    /// `BUSINESS_CONTEXT.md` marked named or NOT NAMED when they have ids, the line of
+    /// a Plan audit, computed again from its baseline and findings (READY or NOT READY,
+    /// for this version of the Plan or changed after it, `not run`, or `findings
+    /// unreadable`, and a line for each section changed since it began that the auditor
+    /// may not edit), which refuses nothing, and whether the ticket needs acceptance tests,
+    /// then sets `Status: approved` and records
     /// `Approved-by` (`git config user.name`), `Approved-at` (today),
     /// `Approved-checksum` (the digest of the body and that decision) and
     /// `Acceptance`. Only those five values change; the body stays
@@ -100,7 +105,11 @@ pub enum Command {
     /// The project's `invar.yaml` is denied an edit that would weaken what invar checks
     /// (invar-yaml.md §3.9), and `.claude/settings.json` one that takes out the deny rule
     /// for `.invar/decisions/**`. A `git commit` that writes an `Invar-Skip:` or
-    /// `Invar-Config:` trailer is denied: those are the developer's. `invar config check`
+    /// `Invar-Config:` trailer is denied: those are the developer's. The baseline and the
+    /// report of a Plan audit (`.invar/out/<TICKET>-audit/baseline.md`, `report.txt`) are
+    /// denied too: only `plan audit begin` and `report` write them, and `findings.md`
+    /// beside them is the auditor's. A shell write of either gets past the guard, as for
+    /// the other files (plan-audit.md §7.2). `invar config check`
     /// and `invar cycle check` in CI are the boundaries there.
     ///
     /// Known limits, which no guard closes. The plugin's binary, its `hooks.json` and the
@@ -111,6 +120,12 @@ pub enum Command {
     /// is not seen. The boundary is CI, running its own released binary, and for
     /// approvals the signature of #154.
     Guard(guard::Args),
+
+    /// Audit a draft Plan against the code, with an agent: `begin`, the developer's;
+    /// `input`, what the plan-auditor reads; `report`, what changed and READY or NOT
+    /// READY (`contracts/formats/plan-audit.md`). Advisory: nothing waits for it.
+    #[command(subcommand)]
+    Audit(audit::Command),
 }
 
 pub fn run(command: Command) -> Result<ExitCode> {
@@ -123,5 +138,6 @@ pub fn run(command: Command) -> Result<ExitCode> {
         Command::Approve(args) => done(approve::run(args)),
         Command::Check(args) => done(check::run(args)),
         Command::Guard(args) => guard::run(args),
+        Command::Audit(command) => done(audit::run(command)),
     }
 }

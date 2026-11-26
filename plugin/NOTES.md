@@ -2680,3 +2680,113 @@ validates it against a `BUSINESS_CONTEXT.md` that defines it.
 **Not yet tried on real tickets.** Whether the planner names the right ids, and whether a
 developer reads the `NOT NAMED` lines rather than scrolling past them, is learned by running
 it. Record what changes here.
+
+## 23. The Plan audit (#167)
+
+**The gap.** The gate is only as good as the developer's reading of the Plan (DESIGN §4a),
+and `plan validate` checks form, not facts. A Plan that names a column the code does not
+have, or a controller under a slightly wrong name, reaches the coder, which spends a cycle
+and answers `BLOCKED`. The review checks facts too, but only after the code exists.
+
+**Validity and quality are kept apart.** Validity is mechanical: `plan validate` and the
+checksum. Quality is a judgement; an agent can help with it, and the developer decides at
+`/invar:approve`. So the audit is advisory, like the review (§16): no hook runs it, and
+`plan approve` and `done` neither wait for it nor refuse because of it. The words are
+READY and NOT READY, never "valid" or "passed", and the line after them says every time
+that this is an agent's assessment and approving is the developer's (`plan-audit.md` D-1).
+
+**What is built.**
+- `plan-audit.md` 1.0.0: the files under `.invar/out/<TICKET>-audit/` (`baseline.md`,
+  `findings.md`, `report.txt`), the line-oriented grammar of `findings.md`, the closed
+  list of six blocking kinds, the commands and the line at the gate.
+- `invar plan audit begin` (the developer's, on `HUMAN_ONLY`), `input` (what the auditor
+  reads: the Plan, the binding context, the invariant ids, the rules; nothing from the
+  decision log), and `report`.
+- `report` compares the Plan with the baseline. Any change outside the text under
+  `## Implementation context` and `## Scope` — the header, a section added, removed,
+  moved or repeated, text outside every section, any other section — refuses the report,
+  naming each, and restores nothing. Otherwise it prints a line diff per section (an LCS
+  written in the core, no crate), each hunk with the auditor's reason paired by order,
+  `plan validate`'s result, the findings, the body digest and the verdict, and writes
+  the same bytes to `report.txt`.
+- `plan approve` computes its audit line again from `baseline.md`, `findings.md` and the
+  Plan (see "Found in review" below); `report.txt` is never read back.
+- `agents/plan-auditor.md` and `/invar:plan-audit`, whose shell block is
+  `invar plan audit begin --skill $ARGUMENTS` alone, allowed by name, as for approve.
+- `eval/plan-audit-seeds.sh`: a draft Plan with a wrong column and a misspelled Scope
+  path (expected as edits), a criterion that cannot pass and an unnamed touched
+  invariant (expected as blocking findings).
+
+**The CLI lists the edits, not the agent** (D-2). An agent's account of what it changed
+is its word; the diff from the baseline is a fact. The agent gives only a reason per
+change, in a fixed form, and the report pairs reasons with hunks in order: a hunk without
+one shows as `edited without a reason`, a reason without a hunk as `reason with no
+change`. The verdict is computed from severities alone, and `blocking` is accepted only
+on a kind of the closed list, so the agent can neither invent a gate nor remove one by
+renaming a kind.
+
+**Why `begin` is the developer's, and refuses a second time** (D-3). The baseline is
+what the report compares with. An agent that had edited `## Acceptance criteria` and then
+ran `begin` again would move the baseline past its own edit, and the report would show
+nothing. So `begin` is on `HUMAN_ONLY` (the guard denies it to an agent's Bash; its
+`--help`, `input` and `report` are not denied), it refuses when a baseline exists, and
+only `--restart`, from the developer, takes a new one. The baseline is the whole
+`spec.md`, header included, because the header must not change either. It sits in
+`.invar/out/`, which an agent with a shell can still rewrite: like the guard, this stops
+the ordinary case, and the report is advisory.
+
+**The model: `fable`.** The planner writes on `opus`. Two agents on the same model are
+likelier to miss the same things (DESIGN §13d), and the auditor exists to catch what the
+planner missed, so it runs on a strong model that is not the planner's.
+`claude plugin validate --strict` accepts `model: fable` (Claude Code 2.1.309,
+2026-11-26), and `plugin_prompts.rs` allows it and asserts it differs from the planner's;
+as §17 records, the validator accepts any string, so whether the account can use it is
+learned on the first run. If it is not available there, the protocol skill's rule for an
+unavailable model applies: say so, never switch silently.
+
+**Decided while building.**
+- **The auditor runs `report` itself, once, at the end.** There is no other way for it
+  to learn that a line of `findings.md` is malformed before the developer does. If the
+  report refuses because the auditor changed what it may not, it puts its own change
+  back; the core still restores nothing.
+- **`/invar:plan-audit` stops on `BLOCKED`** and shows the line; it runs `report` only
+  after `AUDITED`, since a `BLOCKED` auditor wrote no findings and the report would only
+  say so.
+- **The protocol skill mentions the audit once**, as optional before `/invar:approve`,
+  with no row in its command table: the main session is not to present it as a step.
+- **A CRLF-for-LF change in a section is no change**, since the diff reads lines; the
+  header is compared byte for byte.
+
+**Found in review (#171), and fixed before release.** Two ways for an agent to make
+the audit say what it did not:
+- **The baseline could be rewritten with one `Write`.** After `begin`, editing AC1 and
+  copying `spec.md` over `baseline.md` (and emptying `findings.md`) made the report
+  READY and silent about the criterion. D-3 had closed a second `begin`, not a direct
+  write. `plan guard` now denies `Write` and `Edit` of `baseline.md` and `report.txt`
+  under `.invar/out/<TICKET>-audit/`, existing or not, and allows `findings.md`. A shell
+  write still gets past it (§8 of these notes): the contract says so in §7.2, and
+  `plan guard --help` does too.
+- **The gate line trusted `report.txt`.** A hand-written READY with the current body's
+  digest made `/invar:approve` print `READY, for this version of the Plan`. The line is
+  now computed with the report's own load, comparison and pairing. Two consequences:
+  - **"This version" changed meaning.** It was "the body digest equals `report.txt`'s".
+    From the three files the moment `report` ran cannot be recovered (and an agent may
+    rerun `report` at will anyway), so the developer chose: "every change since `begin` is
+    one the audit accounts for": the same sections, nothing outside them changed, only
+    the two sections changed, and every hunk has its edit. A hunk with no reason is
+    "changed after it". The one case it misses: a later edit that rewrites a hunk that
+    already has a reason. The header is not compared at the gate, since approving writes
+    it.
+  - **A forbidden section that changed gets its own line**,
+    `plan audit: the <section> changed since the audit began`, and a structural change
+    one `the sections changed …` line, so the gate says so even when the report would
+    refuse.
+
+**Not yet run on real tickets.** Whether the auditor keeps to facts with one right answer,
+leaves the criteria alone when it finds one that cannot pass, and finds the unnamed
+invariant, is learned by running `eval/plan-audit-seeds.sh` and then real drafts. Record
+what changes here.
+
+### Iteration log
+
+(none yet)

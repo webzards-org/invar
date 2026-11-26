@@ -1,0 +1,110 @@
+=== Plan audit input: SHOP-214 ===
+
+=== The Plan, .invar/plans/SHOP-214-cancel-unpaid-order/spec.md ===
+
+---
+Ticket: SHOP-214
+Module: orders
+Status: draft
+Approved-by:
+Approved-at:
+Approved-checksum:
+---
+
+## Ticket
+SHOP-214 — Customers cancel their own unpaid orders.
+
+## Intent
+Customers cancel their own unpaid orders.
+
+## Scope
+- app/Http/Controllers/OrdersController.php
+- app/Models/Order.php
+
+## Open questions / answers
+None were needed.
+
+## Rejected alternatives
+None considered.
+
+## Acceptance criteria
+
+- AC1: Given an unpaid order, when its customer cancels it, then it is cancelled.
+
+## Implementation context
+- AI_CONTEXT: controllers stay thin
+- The order records the time in `canceled_at`.
+
+=== Binding context ===
+
+=== invar: binding context ===
+The team's own decisions for this project, delivered at the start of every session. Follow them: a Plan or a change that contradicts them is wrong.
+
+=== AI_CONTEXT.md — this project's own conventions; binding ===
+
+# AI context
+
+## Conventions
+
+- Controllers stay thin.
+
+=== end of AI_CONTEXT.md ===
+
+=== BUSINESS_CONTEXT.md — business rules the application must obey; binding ===
+
+# Business context
+
+## Invariants
+
+- INV-1: every tenant-scoped query is filtered by the account
+- INV-2: cancelling an order releases its reserved stock
+
+=== end of BUSINESS_CONTEXT.md ===
+
+=== Invariant ids in BUSINESS_CONTEXT.md ===
+
+INV-1: every tenant-scoped query is filtered by the account
+INV-2: cancelling an order releases its reserved stock
+
+=== What you may change ===
+
+This Plan is a draft. You may edit two sections of it, and in them only facts with one
+right answer in the code, each from a line of the repository you have read:
+
+- `## Implementation context`: a class, method, route, column, config key or mechanism
+  named differently in the code; a wrong `INV-<n>`.
+- `## Scope`: a path that does not exist or is misspelled.
+
+Never edit `## Ticket`, `## Intent`, `## Open questions / answers`, `## Rejected
+alternatives`, `## Acceptance criteria`, what `## Scope` covers (adding or removing
+anything from it), any other section, or the header between the `---` lines. Report
+everything else as a finding. `invar plan audit report` refuses an audit that changed
+anything else.
+
+=== .invar/out/SHOP-214-audit/findings.md ===
+
+One entry per line; blank lines and `#` comments are ignored:
+
+  edit: <section> | <evidence> | <reason>
+  finding: <kind> | <severity> | <section> | <evidence> | <text>
+
+- One `edit` for each change you made, in the order of the changes in its section, top
+  to bottom. <section> is `Implementation context` or `Scope`.
+- <section> of a finding: Ticket, Intent, Scope, Open questions / answers, Rejected
+  alternatives, Acceptance criteria, or Implementation context.
+- <evidence>: `<path>:<line>` or `<path>:<line>-<line>`, a file of the repository
+  relative to the project root, or `ticket` for a sentence of `## Ticket`.
+- <kind>: lowercase words joined by `-`. <severity>: `blocking` or `note`; `blocking`
+  only for a kind below.
+- <reason> and <text> are the rest of the line, not empty.
+
+=== Blocking kinds ===
+
+criterion-cannot-pass: a criterion cannot pass as written, against the code
+criteria-contradict: two criteria cannot both pass
+ticket-sentence-uncovered: a sentence of the ticket that no criterion covers
+criterion-without-ground: a criterion with no ground in the ticket
+invariant-not-named: an invariant the ticket plainly touches, not named in Implementation context; its INV-<n> in the text when BUSINESS_CONTEXT.md has ids
+fact-contradicted: a fact in Implementation context the code contradicts, which the auditor could not correct
+
+Any other kind is a note; `blocking` on it is an error.

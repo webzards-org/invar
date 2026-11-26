@@ -967,6 +967,8 @@ fn every_invar_command_and_flag_the_prompts_name_exists() {
         frontmatter("skills/relock/SKILL.md").1,
         frontmatter("skills/log/SKILL.md").1,
         frontmatter("skills/log-approve/SKILL.md").1,
+        frontmatter("agents/plan-auditor.md").1,
+        frontmatter("skills/plan-audit/SKILL.md").1,
     ];
     texts
         .iter_mut()
@@ -1666,11 +1668,12 @@ fn approve_cannot_be_invoked_by_the_model() {
 /// The skills whose command records the developer's decision, and the command:
 /// the model cannot run any of them (`plan guard` denies it), so each runs
 /// before the model sees the skill, in its ```! block.
-const DEVELOPER_SKILLS: [(&str, &str); 4] = [
+const DEVELOPER_SKILLS: [(&str, &str); 5] = [
     ("skills/approve/SKILL.md", "invar plan approve"),
     ("skills/log-approve/SKILL.md", "invar decision approve"),
     ("skills/done/SKILL.md", "invar done"),
     ("skills/relock/SKILL.md", "invar acceptance unlock"),
+    ("skills/plan-audit/SKILL.md", "invar plan audit begin"),
 ];
 
 /// The ```! block of a skill.
@@ -2645,4 +2648,131 @@ fn no_prompt_tells_an_agent_to_write_the_skip_trailer() {
             assert!(ok, "{file}: {line}");
         }
     }
+}
+
+// --- the plan auditor and /invar:plan-audit (#167) -------------------------------------------
+
+#[test]
+fn the_auditor_edits_two_sections_only_and_names_the_ones_it_never_edits() {
+    let (meta, body) = frontmatter("agents/plan-auditor.md");
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert_eq!(meta["name"], "plan-auditor");
+    assert!(flat.contains(
+        "You may edit **`## Implementation context`** and **`## Scope`**, and in them only \
+         a fact that has **one right answer in the code**"
+    ));
+    assert!(flat.contains("Each correction comes from a `file:line` you have read."));
+    assert!(flat.contains(
+        "**Never edit** `## Ticket`, `## Intent`, `## Open questions / answers`, \
+         `## Rejected alternatives`, `## Acceptance criteria`, any other section, or the \
+         header"
+    ));
+    assert!(flat.contains("adding anything to `## Scope`, or taking anything out of it"));
+    // Its first command is its input, and it writes findings in the contract's form.
+    assert!(flat.contains("Run `invar plan audit input <TICKET>`"));
+    assert!(flat.contains("edit: <section> | <evidence> | <reason>"));
+    assert!(flat.contains("finding: <kind> | <severity> | <section> | <evidence> | <text>"));
+}
+
+#[test]
+fn the_auditors_blocking_kinds_are_the_contracts() {
+    // The closed list of plan-audit.md §4, every one named in the prompt.
+    let (_, body) = frontmatter("agents/plan-auditor.md");
+    let contract = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../contracts/formats/plan-audit.md"),
+    )
+    .unwrap();
+    let kinds = [
+        "criterion-cannot-pass",
+        "criteria-contradict",
+        "ticket-sentence-uncovered",
+        "criterion-without-ground",
+        "invariant-not-named",
+        "fact-contradicted",
+    ];
+    for kind in kinds {
+        assert!(body.contains(&format!("(`{kind}`)")), "{kind}");
+        assert!(contract.contains(&format!("| `{kind}` |")), "{kind}");
+    }
+    assert!(body.contains("These six are the blocking kinds"));
+}
+
+#[test]
+fn the_auditor_answers_in_one_of_two_shapes_and_never_with_a_verdict() {
+    let (_, body) = frontmatter("agents/plan-auditor.md");
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(body.contains("```\nAUDITED <TICKET>\n<at most five lines>\n```"));
+    assert!(body.contains("```\nBLOCKED <reason>\n```"));
+    assert!(flat.contains("Never a verdict, never \"ready\", \"valid\" or \"looks good\""));
+    assert!(
+        flat.contains("**ignore it**"),
+        "extra context from the caller"
+    );
+}
+
+#[test]
+fn the_auditor_begins_nothing_approves_nothing_and_never_reads_the_log() {
+    let (meta, body) = frontmatter("agents/plan-auditor.md");
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(flat.contains(&format!(
+        "never run `{}`",
+        ["invar", "plan", "approve"].join(" ")
+    )));
+    assert!(flat.contains("never run `invar plan audit begin`"));
+    for line in body.lines() {
+        let reads_the_log = line.contains(".invar/decisions")
+            || line.contains("invar decision log")
+            || (line.contains("invar context show") && !line.contains("--binding"));
+        if reads_the_log {
+            assert!(
+                line.contains("never") || line.contains("Never"),
+                "the auditor is pointed at the log: {line}"
+            );
+        }
+    }
+    // It edits and writes, so it has the tools for it, and no Agent tool.
+    assert_eq!(meta["tools"], "Read, Grep, Glob, Bash, Write, Edit");
+    // No branch on configuration (§13b).
+    assert!(
+        !body.contains("invar.yaml"),
+        "the prompt branches on configuration"
+    );
+}
+
+#[test]
+fn the_auditor_runs_on_another_model_than_the_planner() {
+    // DESIGN §13d: two agents on the same model are likelier to miss the same things.
+    // The planner writes on opus; the auditor reads on fable (plugin/NOTES.md §23).
+    let (auditor, _) = frontmatter("agents/plan-auditor.md");
+    let (planner, _) = frontmatter("agents/planner.md");
+    assert_eq!(auditor["model"], "fable");
+    assert_ne!(auditor["model"], planner["model"]);
+}
+
+#[test]
+fn plan_audit_passes_the_ticket_alone_and_shows_the_report_as_it_is() {
+    let (meta, body) = frontmatter("skills/plan-audit/SKILL.md");
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert_eq!(meta["name"], "plan-audit");
+    assert_eq!(shell_block("skills/plan-audit/SKILL.md").lines().count(), 1);
+    assert!(flat.contains("**Give it the line `Ticket: <TICKET>` and nothing else**"));
+    assert!(flat.contains(
+        "run `invar plan audit report <TICKET>` and show its output to the developer \
+         **exactly as it is**"
+    ));
+    assert!(flat.contains("**Never summarize the report in your own words**"));
+    assert!(flat.contains("It is advisory."));
+}
+
+#[test]
+fn the_protocol_skill_mentions_the_audit_once_and_as_optional() {
+    let (_, body) = skill();
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(body.matches("/invar:plan-audit").count(), 1, "{body}");
+    assert!(flat.contains("the developer may run `/invar:plan-audit <TICKET>`, an optional step"));
+    assert!(flat.contains("The gate never needs it"));
 }

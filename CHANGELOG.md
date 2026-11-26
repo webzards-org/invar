@@ -4,6 +4,25 @@
 
 ### Added
 
+- **`/invar:plan-audit <TICKET>`: an optional audit of a draft Plan against the
+  code**, before approval. The new `plan-auditor` agent corrects facts that have
+  one right answer in the code (a name, a path, a column, an `INV-<n>`), in
+  *Implementation context* and *Scope* only, each cited `file:line`, and reports
+  the rest as findings: a criterion that cannot pass, criteria that contradict, a
+  ticket sentence no criterion covers, an unnamed invariant the ticket touches.
+  `invar plan audit report` computes the report: the changes as a diff against the
+  Plan as the audit began, each with the auditor's reason, `plan validate`, the
+  findings, and `READY` or `NOT READY — <n> blocking finding(s)`, followed by
+  "this is an agent's assessment of the Plan, not a check; approving is yours."
+  It refuses, naming each, an audit that changed any other section or the header,
+  and restores nothing. `/invar:approve` shows one line from it (`READY`, `NOT
+  READY (<n> blocking)`, for this version of the Plan or changed after it, or `not
+  run`, or `findings unreadable`), computed again from the audit's baseline and
+  findings, never read from `report.txt`, plus a line for each section the auditor
+  may not edit that changed since the audit began; it refuses nothing new.
+  `invar plan audit begin` is the developer's: the guard denies it to an agent, and
+  denies an agent's `Write` or `Edit` of the audit's `baseline.md` and `report.txt`
+  (#167). New contract `plan-audit.md` 1.0.0.
 - **Signed `Invar-Skip` and `Invar-Config`.** With `approval.signed: true` on
   the base, `invar cycle check` counts an `Invar-Skip:` trailer, and `invar
   config check` an `Invar-Config:` trailer, only when an approver in the base's

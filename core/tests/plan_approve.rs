@@ -1469,6 +1469,8 @@ fn the_gate_lists_every_invariant_named_or_not_after_the_criteria() {
         \n\
         1 invariant is not named: approving says none of them applies to this ticket.\n\
         \n\
+        plan audit: not run\n\
+        \n\
         Acceptance: ";
     let at = out
         .find(list)

@@ -1401,3 +1401,55 @@ fn signing_a_configuration_change_from_a_shell_is_denied() {
     );
     guard(bash(&project.root(), "invar config check --base main")).code(0);
 }
+
+#[test]
+fn beginning_a_plan_audit_from_a_shell_is_denied_and_its_help_is_not() {
+    let project = Project::new(APPROVED);
+    let assert = guard(bash(&project.root(), "invar plan audit begin SHOP-214"))
+        .code(2)
+        .stderr(contains(
+            "`invar plan audit begin` is the developer's, not yours",
+        ));
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("`/invar:plan-audit SHOP-214`"), "{stdout}");
+    guard(bash(&project.root(), "invar plan audit begin --help")).code(0);
+    guard(bash(&project.root(), "invar plan audit input SHOP-214")).code(0);
+    guard(bash(&project.root(), "invar plan audit report SHOP-214")).code(0);
+}
+
+// --- the files of a Plan audit (#167) -------------------------------------------------
+
+#[test]
+fn a_write_or_edit_of_the_audit_baseline_or_report_is_denied_and_findings_pass() {
+    let project = Project::new(APPROVED);
+    let root = project.root();
+    let dir = ".invar/out/SHOP-214-audit";
+    fs::create_dir_all(root.join(dir)).unwrap();
+    for file in ["baseline.md", "report.txt"] {
+        let path = format!("{dir}/{file}");
+        fs::write(root.join(&path), "before\n").unwrap();
+        for stdin in [write(&root, &path), edit(&root, &path)] {
+            let assert = guard(stdin)
+                .code(2)
+                .stderr(contains(format!("{path} is the")))
+                .stderr(contains(
+                    "Only `findings.md` in that directory is the auditor's",
+                ));
+            let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+            assert!(
+                stdout.contains("\"permissionDecision\":\"deny\""),
+                "{stdout}"
+            );
+        }
+        // Not there yet: denied all the same.
+        fs::remove_file(root.join(&path)).unwrap();
+        guard(write(&root, &path)).code(2);
+    }
+    let findings = format!("{dir}/findings.md");
+    guard(write(&root, &findings)).code(0).stdout("");
+    fs::write(root.join(&findings), "# none\n").unwrap();
+    guard(edit(&root, &findings)).code(0).stdout("");
+    // Elsewhere under .invar/out/, the same names are not an audit's.
+    guard(write(&root, ".invar/out/baseline.md")).code(0);
+    guard(write(&root, ".invar/out/SHOP-214-pr.md")).code(0);
+}

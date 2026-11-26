@@ -104,6 +104,11 @@ whether the ticket gets acceptance tests: `--acceptance` or `--no-acceptance`,
 otherwise what `invar.yaml` says. That decision is theirs too; do not suggest one
 unless they ask.
 
+Before approving, the developer may run `/invar:plan-audit <TICKET>`, an optional
+step: an agent checks the draft against the code, corrects names and paths in
+Implementation context and Scope, and reports the rest. The gate never needs it, so
+never present it as one; `/invar:approve` shows its line either way.
+
 **Stop and wait.** Never run `invar plan approve` yourself: a hook denies it, and you
 must not look for another way to record an approval.
 
