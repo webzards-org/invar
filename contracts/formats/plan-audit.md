@@ -5,8 +5,10 @@
 **Implements:** #167 (an agent corrects a draft Plan's facts against the code, and reports
 what it cannot correct); builds on `plan-header.md` (sections, criterion and invariant ids)
 and `business-context.md` (invariant ids)
-**Read by:** the core (`invar plan audit begin | input | report`, and `invar plan approve`,
-which shows the audit line); the plan-auditor agent (as prose); any later reimplementation
+**Read by:** the core (`invar plan audit begin | input | report`; `invar plan approve`,
+which computes the audit line; `invar plan guard`, which keeps an agent's `Write` and `Edit`
+off the files only commands write); the plan-auditor agent (as prose); any later
+reimplementation
 
 > Changing this file is a **public-contract change** (§14.3). It is made deliberately, in
 > its own PR, with the reason recorded, the version bumped, and every reader updated in the
@@ -38,9 +40,13 @@ Under `.invar/out/<TICKET>-audit/`, which `invar init` already ignores (`.invar/
 |---|---|---|
 | `baseline.md` | `plan audit begin` | the Plan's `spec.md` exactly as it was when the audit began, header included (D-3) |
 | `findings.md` | the auditor | its edits and findings (§3) |
-| `report.txt` | `plan audit report` | what the report printed, byte for byte (§7) |
+| `report.txt` | `plan audit report` | what the report printed, byte for byte (§7); the developer's copy, which nothing reads back (§8, D-4) |
 
 `<TICKET>` is the Plan header's `Ticket`.
+
+`findings.md` is the only one of the three the auditor writes. `plan guard` denies an
+agent's `Write` and `Edit` of `baseline.md` and `report.txt`, and allows `findings.md`
+(§7.2, D-3).
 
 ## 3. `findings.md`
 
@@ -200,21 +206,56 @@ this is an agent's assessment of the Plan, not a check; approving is yours.
 `report.txt` holds the same bytes. The exit code is 0 for `READY` and for `NOT READY`: it
 is a report, not a gate. Byte-identical for the same baseline, Plan and findings.
 
+### 7.2 What protects the files, and what does not
+
+`plan guard` denies a `Write` or `Edit` of `.invar/out/<TICKET>-audit/baseline.md` and of
+`.invar/out/<TICKET>-audit/report.txt`, naming the file and saying that only `findings.md`
+is the auditor's; a `Write` or `Edit` of `findings.md` passes. Like every other file the
+guard holds, a write through the shell (`cp`, `sed -i`, a heredoc) gets past it: a hook on
+`Write|Edit` never sees one. A baseline rewritten that way makes the report, and the line
+of §8, compare the Plan with the rewritten text. Nothing closes that here: the audit is
+advisory (D-4), and the developer reads the Plan at the gate.
+
 ## 8. The line in `plan approve`
 
 When it is about to record an approval, after the acceptance criteria and the invariants
-and before the `Acceptance:` line, `plan approve` prints exactly one of:
+and before the `Acceptance:` line, `plan approve` prints the audit's line. It **computes**
+it, with the comparison of §6 and the pairing of §7.1 that `plan audit report` uses, from
+`baseline.md`, `findings.md` and the Plan now. It **never reads `report.txt`** (D-4).
+
+First, exactly one of:
 
 ```
+plan audit: not run
+plan audit: findings unreadable
 plan audit: READY, for this version of the Plan
 plan audit: NOT READY (<n> blocking), for this version of the Plan
 plan audit: <READY | NOT READY (<n> blocking)>, but the Plan changed after it
-plan audit: not run
 ```
 
-"This version" means the body digest of the Plan now equals the `body:` line of
-`report.txt`. `not run` is no `report.txt`, or one whose last lines cannot be read. The same
-line appears with `--skill`. It refuses nothing.
+- **`not run`:** no `baseline.md`, a `baseline.md` that is not a Plan, or no `findings.md`.
+- **`findings unreadable`:** a `findings.md` that is not valid (§3).
+- **The verdict** is the report's: `NOT READY` with the number of blocking findings when
+  there are any, `READY` otherwise (§4).
+- **"This version"** means every change from the baseline to the Plan now is one the
+  audit accounts for: the sections are the same, in the same order, text outside every
+  section is the same, no section but `## Implementation context` and `## Scope` changed,
+  and every hunk of those two has its edit (§7.1). Otherwise **the Plan changed after
+  it**: a hunk without a reason is a change the auditor did not explain, so it is one made
+  after the audit, or one the auditor would not own up to. The header is not compared here:
+  approving writes it.
+
+Then, on a line of its own, for each section other than the two that differs from the
+baseline, in Plan order:
+
+```
+plan audit: the <section> changed since the audit began
+```
+
+and, once, when a section was added, removed, renamed or moved, or text outside every
+section changed: `plan audit: the sections changed since the audit began`.
+
+The same lines appear with `--skill`. They refuse nothing.
 
 ## 9. Decisions and their reasons
 
@@ -233,13 +274,26 @@ of each change, which it pairs by order. A change with no reason shows as one.
 must not change, so the baseline holds it. `begin` refuses a second time without
 `--restart`, and an agent's Bash cannot run it, because a fresh baseline taken after a
 forbidden edit would hide that edit from the report. The baseline sits in `.invar/out/`,
-where an agent with a shell can still rewrite it: like the guard, this stops the ordinary
-case, and the report is advisory.
+where an agent with a shell can still rewrite it. `plan guard` denies a `Write` or `Edit`
+of it, and of `report.txt`, so that copying the Plan over the baseline is not one tool call
+away (§7.2); a shell write still gets past it. Like the guard elsewhere, this stops the
+ordinary case, and the report is advisory.
 
-**D-4 — Advisory, like the review** (1.0.0). The developer reads the Plan at
-`/invar:approve`; the audit is one more thing to read there, never a condition. A gate on an
-agent's judgement would move the decision to the agent.
+**D-4 — Advisory, like the review, and computed at the gate** (1.0.0). The developer
+reads the Plan at `/invar:approve`; the audit is one more thing to read there, never a
+condition. A gate on an agent's judgement would move the decision to the agent. The line
+the gate shows is computed again from the baseline, the findings and the Plan now, never
+read back from `report.txt`: a file any tool could write would let a hand-written `READY`
+stand in for the audit. `report.txt` stays as the developer's copy of the text. "This
+version" is therefore what the files can show, that every change since `begin` is one the
+audit accounts for, not the moment `report` ran, which an agent could repeat at will. A
+section the auditor may not edit that changed since `begin`, the acceptance criteria above
+all, gets a line of its own, so that the gate says so even when the report would refuse.
 
 ## 10. Version history
 
-**1.0.0** — initial version (#167).
+**1.0.0** — initial version (#167). Amended before release, after review: `plan guard`
+denies `Write` and `Edit` of `baseline.md` and `report.txt` (§2, §7.2, D-3), and the line of
+§8 is computed from the baseline, the findings and the Plan now instead of read from
+`report.txt`, with `findings unreadable`, "this version" as every change accounted for,
+and a line for each section changed that the auditor may not edit (D-4).
