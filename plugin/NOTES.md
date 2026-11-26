@@ -2709,9 +2709,8 @@ that this is an agent's assessment and approving is the developer's (`plan-audit
   written in the core, no crate), each hunk with the auditor's reason paired by order,
   `plan validate`'s result, the findings, the body digest and the verdict, and writes
   the same bytes to `report.txt`.
-- `plan approve` prints one line from `report.txt`: the verdict, and whether it is for
-  this version of the Plan (the body digest matches) or the Plan changed after it, or
-  `plan audit: not run`.
+- `plan approve` computes its audit line again from `baseline.md`, `findings.md` and the
+  Plan (see "Found in review" below); `report.txt` is never read back.
 - `agents/plan-auditor.md` and `/invar:plan-audit`, whose shell block is
   `invar plan audit begin --skill $ARGUMENTS` alone, allowed by name, as for approve.
 - `eval/plan-audit-seeds.sh`: a draft Plan with a wrong column and a misspelled Scope
@@ -2757,6 +2756,31 @@ unavailable model applies: say so, never switch silently.
   with no row in its command table: the main session is not to present it as a step.
 - **A CRLF-for-LF change in a section is no change**, since the diff reads lines; the
   header is compared byte for byte.
+
+**Found in review (#171), and fixed before release.** Two ways for an agent to make
+the audit say what it did not:
+- **The baseline could be rewritten with one `Write`.** After `begin`, editing AC1 and
+  copying `spec.md` over `baseline.md` (and emptying `findings.md`) made the report
+  READY and silent about the criterion. D-3 had closed a second `begin`, not a direct
+  write. `plan guard` now denies `Write` and `Edit` of `baseline.md` and `report.txt`
+  under `.invar/out/<TICKET>-audit/`, existing or not, and allows `findings.md`. A shell
+  write still gets past it (§8 of these notes): the contract says so in §7.2, and
+  `plan guard --help` does too.
+- **The gate line trusted `report.txt`.** A hand-written READY with the current body's
+  digest made `/invar:approve` print `READY, for this version of the Plan`. The line is
+  now computed with the report's own load, comparison and pairing. Two consequences:
+  - **"This version" changed meaning.** It was "the body digest equals `report.txt`'s".
+    From the three files the moment `report` ran cannot be recovered (and an agent may
+    rerun `report` at will anyway), so the developer chose: "every change since `begin` is
+    one the audit accounts for": the same sections, nothing outside them changed, only
+    the two sections changed, and every hunk has its edit. A hunk with no reason is
+    "changed after it". The one case it misses: a later edit that rewrites a hunk that
+    already has a reason. The header is not compared at the gate, since approving writes
+    it.
+  - **A forbidden section that changed gets its own line**,
+    `plan audit: the <section> changed since the audit began`, and a structural change
+    one `the sections changed …` line, so the gate says so even when the report would
+    refuse.
 
 **Not yet run on real tickets.** Whether the auditor keeps to facts with one right answer,
 leaves the criteria alone when it finds one that cannot pass, and finds the unnamed

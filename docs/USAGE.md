@@ -221,7 +221,10 @@ this is an agent's assessment of the Plan, not a check; approving is yours.
 ```
 
 `READY` means only that the auditor reported no blocking finding. **It is not a
-check**, and a `NOT READY` blocks nothing. If the auditor changed anything outside
+check**, and a `NOT READY` blocks nothing. The audit's baseline and report, in
+`.invar/out/SHOP-214-audit/`, are written only by these commands: an agent's `Write`
+or `Edit` of them is refused, and only `findings.md` there is the auditor's. A
+write through the shell still gets past that, as with every guarded file. If the auditor changed anything outside
 the two sections, there is no report: it names the change and restores nothing,
 and `git diff` shows it. What to keep is up to you. To have the draft revised
 because of a finding, ask the planner, as for any change. To audit again after a
@@ -252,11 +255,20 @@ the Plan's *Implementation context* and gives it a criterion that cites it
 (`- AC3 (INV-3): Given …`). `plan validate` already makes sure that every
 invariant the Plan names has such a criterion.
 
-Then comes one line about the [audit](#optional-audit-the-plan-against-the-code):
+Then comes a line about the [audit](#optional-audit-the-plan-against-the-code),
+worked out again from the audit's files rather than read from the report:
 `plan audit: READY, for this version of the Plan`, with `NOT READY (2 blocking)` in
-place of `READY` when the auditor reported blocking findings, `…, but the Plan
-changed after it` when the Plan was edited after the report, or `plan audit: not
-run`. It refuses nothing, and the decision is yours either way.
+place of `READY` when the auditor reported blocking findings. It says `…, but the
+Plan changed after it` when the Plan has a change since the audit began that the
+auditor did not explain, `plan audit: not run` when there is no audit, and `plan
+audit: findings unreadable` when the auditor's findings are malformed. If a section
+the auditor may not touch changed since the audit began, a line of its own names it:
+
+```
+plan audit: the Acceptance criteria changed since the audit began
+```
+
+Nothing here refuses anything, and the decision is yours either way.
 
 Approving also records whether this ticket gets **locked acceptance tests**:
 

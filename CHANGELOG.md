@@ -17,8 +17,12 @@
   It refuses, naming each, an audit that changed any other section or the header,
   and restores nothing. `/invar:approve` shows one line from it (`READY`, `NOT
   READY (<n> blocking)`, for this version of the Plan or changed after it, or `not
-  run`) and refuses nothing new. `invar plan audit begin` is the developer's: the
-  guard denies it to an agent (#167). New contract `plan-audit.md` 1.0.0.
+  run`, or `findings unreadable`), computed again from the audit's baseline and
+  findings, never read from `report.txt`, plus a line for each section the auditor
+  may not edit that changed since the audit began; it refuses nothing new.
+  `invar plan audit begin` is the developer's: the guard denies it to an agent, and
+  denies an agent's `Write` or `Edit` of the audit's `baseline.md` and `report.txt`
+  (#167). New contract `plan-audit.md` 1.0.0.
 - **Signed `Invar-Skip` and `Invar-Config`.** With `approval.signed: true` on
   the base, `invar cycle check` counts an `Invar-Skip:` trailer, and `invar
   config check` an `Invar-Config:` trailer, only when an approver in the base's
