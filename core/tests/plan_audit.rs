@@ -83,6 +83,26 @@ impl Project {
             .assert()
     }
 
+    /// The gate's command, `plan approve`, as a developer named Rade, with a git config
+    /// of its own.
+    fn approve(&self, args: &[&str]) -> assert_cmd::assert::Assert {
+        let gitconfig = self.root().join(".test-gitconfig");
+        fs::write(&gitconfig, "[user]\n\tname = Rade\n").unwrap();
+        Command::cargo_bin("invar")
+            .unwrap()
+            .current_dir(self.root())
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("XDG_CONFIG_HOME")
+            .env("GIT_CONFIG_GLOBAL", &gitconfig)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("HOME", self.root())
+            .env("GIT_COMMITTER_DATE", "2026-10-05T00:30:00+02:00")
+            .args(["plan", "approve"])
+            .args(args)
+            .assert()
+    }
+
     fn audit(&self, args: &[&str]) -> assert_cmd::assert::Assert {
         let mut all = vec!["plan", "audit"];
         all.extend_from_slice(args);
@@ -501,4 +521,94 @@ fn malformed_findings_are_refused_each_with_its_line() {
         .stderr(contains(format!("{FINDINGS}:2:")))
         .stderr(contains("not a blocking kind"));
     assert!(!project.exists(REPORT));
+}
+
+// --- the line at the gate -----------------------------------------------------------
+
+/// The lines from the audit line to `Acceptance:`: where the gate shows it.
+fn gate(out: &str) -> &str {
+    let start = out
+        .find("plan audit: ")
+        .unwrap_or_else(|| panic!("no audit line in:\n{out}"));
+    let end = out[start..].find("Acceptance: ").unwrap() + start;
+    &out[start..end]
+}
+
+#[test]
+fn the_gate_says_not_run_when_there_is_no_report() {
+    let project = Project::new(&draft());
+    let out = stdout(&project.approve(&["SHOP-214"]).success());
+    assert_eq!(gate(&out), "plan audit: not run\n\n");
+    // After the criteria and the invariants.
+    assert!(
+        out.find("INV-2").unwrap() < out.find("plan audit: ").unwrap(),
+        "{out}"
+    );
+    assert!(out.contains("approved SHOP-214 checksum sha256:"), "{out}");
+
+    // An audit begun and never reported is not run either, and nor is a report.txt
+    // whose last lines are not a report's.
+    let project = Project::new(&draft());
+    project.audit(&["begin", "SHOP-214"]).success();
+    project.write(REPORT, "plan audit SHOP-214: READY\n");
+    let out = stdout(&project.approve(&["SHOP-214"]).success());
+    assert_eq!(gate(&out), "plan audit: not run\n\n");
+}
+
+#[test]
+fn the_gate_says_ready_for_this_version_of_the_plan() {
+    let project = audited(&corrected(), TWO_EDITS);
+    project.audit(&["report", "SHOP-214"]).success();
+    let out = stdout(&project.approve(&["SHOP-214"]).success());
+    assert_eq!(
+        gate(&out),
+        "plan audit: READY, for this version of the Plan\n\n"
+    );
+}
+
+#[test]
+fn the_gate_says_not_ready_and_approves_all_the_same() {
+    let project = audited(
+        &draft(),
+        "finding: criterion-cannot-pass | blocking | Acceptance criteria | a.php:1 | no\n\
+         finding: invariant-not-named | blocking | Implementation context | BUSINESS_CONTEXT.md:7 | INV-2\n",
+    );
+    project.audit(&["report", "SHOP-214"]).success();
+    let out = stdout(&project.approve(&["SHOP-214", "--skill"]).success());
+    assert_eq!(
+        gate(&out),
+        "plan audit: NOT READY (2 blocking), for this version of the Plan\n\n"
+    );
+    assert!(out.contains("approved SHOP-214 checksum sha256:"), "{out}");
+    assert!(project.read(SPEC).unwrap().contains("Status: approved"));
+}
+
+#[test]
+fn the_gate_says_when_the_plan_changed_after_the_audit() {
+    let project = audited(
+        &draft(),
+        "finding: criteria-contradict | blocking | Acceptance criteria | ticket | AC1 and AC1\n",
+    );
+    project.audit(&["report", "SHOP-214"]).success();
+    project.write(
+        SPEC,
+        &draft().replace("None considered.", "A queue, rejected."),
+    );
+    let out = stdout(&project.approve(&["SHOP-214"]).success());
+    assert_eq!(
+        gate(&out),
+        "plan audit: NOT READY (1 blocking), but the Plan changed after it\n\n"
+    );
+
+    let project = audited(&draft(), "");
+    project.audit(&["report", "SHOP-214"]).success();
+    project.write(
+        SPEC,
+        &draft().replace("None considered.", "A queue, rejected."),
+    );
+    let out = stdout(&project.approve(&["SHOP-214"]).success());
+    assert_eq!(
+        gate(&out),
+        "plan audit: READY, but the Plan changed after it\n\n"
+    );
 }

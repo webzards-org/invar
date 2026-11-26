@@ -27,6 +27,7 @@ use crate::gate;
 use crate::gate::approval::Prior;
 use crate::gate::approve::{self, ApproveError, Decision, Signed};
 use crate::git;
+use crate::plan_audit;
 use crate::signature::{self, Signer};
 
 use crate::fs::{self, ProjectRoot, plans::SPEC_FILE};
@@ -240,6 +241,10 @@ fn approve(args: Args) -> Result<()> {
         print!("{invariants}");
         println!();
     }
+    // Advisory (plan-audit.md §8, D-4): whether an agent's audit of this version of the
+    // Plan found anything blocking. It refuses nothing.
+    println!("{}", plan_audit::gate_line(&root, pending.plan()));
+    println!();
     println!("Acceptance: {}", pending.acceptance());
     if pending.required_without_section() {
         eprintln!(

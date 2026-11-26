@@ -329,6 +329,11 @@ impl Pending {
         self.plan.header().recorded_acceptance()
     }
 
+    /// The Plan about to be approved, as it was read.
+    pub fn plan(&self) -> &Plan {
+        &self.plan
+    }
+
     /// Where the Plan names and cites invariants, for the list the gate shows (#158).
     pub fn invariant_refs(&self) -> crate::format::plan::InvariantRefs {
         self.plan.invariant_refs()

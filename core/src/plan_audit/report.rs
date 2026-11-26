@@ -1,4 +1,4 @@
-//! `invar plan audit report` (§6, §7).
+//! `invar plan audit report` (§6, §7) and the line `plan approve` shows from it (§8).
 //!
 //! **What changed is computed, not told** (D-2). The Plan now is compared with the
 //! baseline: a change anywhere but the text under `## Implementation context` and
@@ -6,12 +6,14 @@
 //! gives only the reason of each change, paired with the hunks in order.
 //!
 //! **The verdict comes from the findings' severities alone** (§4, D-1). It is a report,
-//! not a gate: `READY` and `NOT READY` both exit 0.
+//! not a gate: `READY` and `NOT READY` both exit 0, and the line `plan approve` reads
+//! back from `report.txt` refuses nothing (D-4).
 
 use std::fs;
 use std::io;
 use std::path::Path;
 
+use crate::digest;
 use crate::format::audit::{self, EDITABLE, Finding, Findings, NOT_A_CHECK, Severity};
 use crate::format::plan::{Mode, Plan, Status};
 use crate::fs::ProjectRoot;
@@ -270,4 +272,86 @@ fn listed(findings: &[&Finding]) -> String {
             )
         })
         .collect()
+}
+
+/// The line `plan approve` prints (§8), for `plan` as it is about to be approved.
+/// `not run` when there is no `report.txt`, or its last lines cannot be read.
+pub fn gate_line(root: &ProjectRoot, plan: &Plan) -> String {
+    let ticket = &plan.header().ticket;
+    let files = Files::of(root, ticket);
+    let verdict = fs::read(&files.report)
+        .ok()
+        .and_then(|bytes| digest::canonicalize_bytes(&bytes).ok())
+        .and_then(|text| recorded(&text, ticket));
+    let Some((verdict, body)) = verdict else {
+        return "plan audit: not run".to_owned();
+    };
+    if body == approval::approval_digest(plan, None) {
+        format!("plan audit: {verdict}, for this version of the Plan")
+    } else {
+        format!("plan audit: {verdict}, but the Plan changed after it")
+    }
+}
+
+/// The verdict as the gate words it, `READY` or `NOT READY (<n> blocking)`, and the body
+/// digest, from a report's last three lines.
+fn recorded(text: &str, ticket: &str) -> Option<(String, String)> {
+    let lines: Vec<&str> = text.lines().collect();
+    let [.., body, verdict, last] = lines.as_slice() else {
+        return None;
+    };
+    if *last != NOT_A_CHECK {
+        return None;
+    }
+    let body = body.strip_prefix(BODY)?;
+    let verdict = verdict.strip_prefix(&format!("plan audit {ticket}: "))?;
+    let verdict = if verdict == "READY" {
+        "READY".to_owned()
+    } else {
+        let count: usize = verdict
+            .strip_prefix("NOT READY — ")?
+            .strip_suffix(" blocking finding(s)")?
+            .parse()
+            .ok()
+            .filter(|count| *count > 0)?;
+        format!("NOT READY ({count} blocking)")
+    };
+    Some((verdict, body.to_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::recorded;
+
+    const LAST: &str =
+        "this is an agent's assessment of the Plan, not a check; approving is yours.";
+
+    #[test]
+    fn the_last_lines_of_a_report_are_read_back() {
+        let text = format!("…\nbody: sha256:ab\nplan audit SHOP-214: READY\n{LAST}\n");
+        assert_eq!(
+            recorded(&text, "SHOP-214"),
+            Some(("READY".to_owned(), "sha256:ab".to_owned()))
+        );
+        let text = format!(
+            "body: sha256:cd\nplan audit SHOP-214: NOT READY — 2 blocking finding(s)\n{LAST}\n"
+        );
+        assert_eq!(
+            recorded(&text, "SHOP-214"),
+            Some(("NOT READY (2 blocking)".to_owned(), "sha256:cd".to_owned()))
+        );
+    }
+
+    #[test]
+    fn last_lines_that_are_not_a_report_s_are_not_read() {
+        let ok = format!("body: sha256:ab\nplan audit SHOP-214: READY\n{LAST}\n");
+        assert!(recorded(&ok, "SHOP-215").is_none());
+        assert!(recorded("plan audit SHOP-214: READY\n", "SHOP-214").is_none());
+        assert!(recorded(&ok.replace(LAST, "approved."), "SHOP-214").is_none());
+        let zero = format!(
+            "body: sha256:ab\nplan audit SHOP-214: NOT READY — 0 blocking finding(s)\n{LAST}\n"
+        );
+        assert!(recorded(&zero, "SHOP-214").is_none());
+        assert!(recorded(&ok.replace("body: ", "digest: "), "SHOP-214").is_none());
+    }
 }

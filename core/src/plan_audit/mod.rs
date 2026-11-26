@@ -26,7 +26,7 @@ use crate::gate::validate::{self, Report as Validation};
 mod diff;
 mod report;
 
-pub use report::report;
+pub use report::{gate_line, report};
 
 /// The files of one ticket's audit (§2).
 #[derive(Debug, Clone, PartialEq, Eq)]
