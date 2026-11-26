@@ -103,7 +103,11 @@ pub enum Command {
     /// The project's `invar.yaml` is denied an edit that would weaken what invar checks
     /// (invar-yaml.md §3.9), and `.claude/settings.json` one that takes out the deny rule
     /// for `.invar/decisions/**`. A `git commit` that writes an `Invar-Skip:` or
-    /// `Invar-Config:` trailer is denied: those are the developer's. `invar config check`
+    /// `Invar-Config:` trailer is denied: those are the developer's. The baseline and the
+    /// report of a Plan audit (`.invar/out/<TICKET>-audit/baseline.md`, `report.txt`) are
+    /// denied too: only `plan audit begin` and `report` write them, and `findings.md`
+    /// beside them is the auditor's. A shell write of either gets past the guard, as for
+    /// the other files (plan-audit.md §7.2). `invar config check`
     /// and `invar cycle check` in CI are the boundaries there.
     ///
     /// Known limits, which no guard closes. The plugin's binary, its `hooks.json` and the

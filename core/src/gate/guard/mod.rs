@@ -52,7 +52,11 @@
 //! - the path is the project's `invar.yaml`, and the file the call would leave weakens
 //!   the checks against the one there now, by the list of `invar-yaml.md` §3.9;
 //! - the path is the project's `.claude/settings.json`, and the call would take out the
-//!   deny rule `invar init` writes for `.invar/decisions/**`.
+//!   deny rule `invar init` writes for `.invar/decisions/**`;
+//! - the path is the baseline or the report of a Plan audit,
+//!   `.invar/out/<TICKET>-audit/baseline.md` or `report.txt`, whether or not it exists
+//!   yet. Only `invar plan audit begin` and `report` write them; `findings.md` beside them
+//!   is the auditor's, and passes (`plan-audit.md` §7.2).
 //!
 //! Only files under `acceptance.dir` are judged for a lock line, because anywhere else
 //! `invar-lock:` is just text, such as in invar's own contract. Likewise only a Plan's
@@ -171,6 +175,9 @@ fn judge(path: &Path, tool: &str, payload: &Value) -> Verdict {
         }
         if relative == Path::new(SETTINGS_FILE) {
             return judge_settings(path, &relative, payload);
+        }
+        if let Some(reason) = audit_file(&relative) {
+            return Verdict::Deny { reason };
         }
     }
     if plan_dir_name(&relative, UNLOCK_FILE).is_some() {
@@ -350,6 +357,41 @@ fn plan_dir_name(relative: &Path, file: &str) -> Option<String> {
         [".invar", "plans", name, last] if *last == file => Some((*name).to_owned()),
         _ => None,
     }
+}
+
+/// The reason a `Write` or `Edit` of `relative` is denied, when it is the baseline or the
+/// report of a Plan audit (`plan-audit.md` §2, §7.2).
+fn audit_file(relative: &Path) -> Option<String> {
+    let parts: Vec<&str> = relative
+        .components()
+        .map(|part| match part {
+            Component::Normal(name) => name.to_str(),
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
+    let [".invar", "out", dir, file] = parts.as_slice() else {
+        return None;
+    };
+    dir.strip_suffix("-audit")
+        .filter(|ticket| !ticket.is_empty())?;
+    let what = match *file {
+        "baseline.md" => {
+            "the baseline of a Plan audit: the Plan as it was when the developer began the \
+             audit, which the report compares the Plan with. Only `invar plan audit begin` \
+             writes it"
+        }
+        "report.txt" => {
+            "the report of a Plan audit. Only `invar plan audit report` writes it, from the \
+             baseline, the findings and the Plan"
+        }
+        _ => return None,
+    };
+    Some(format!(
+        "{} is {what}, so it is not written through any tool. Only `findings.md` in that \
+         directory is the auditor's: write your edits and findings there, and run `invar plan \
+         audit report` to see the result (plan-audit.md §7.2)",
+        relative.display()
+    ))
 }
 
 // --- locked acceptance tests ---------------------------------------------------
