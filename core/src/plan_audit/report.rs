@@ -1,4 +1,4 @@
-//! `invar plan audit report` (§6, §7) and the line `plan approve` shows from it (§8).
+//! `invar plan audit report` (§6, §7) and the lines `plan approve` computes (§8).
 //!
 //! **What changed is computed, not told** (D-2). The Plan now is compared with the
 //! baseline: a change anywhere but the text under `## Implementation context` and
@@ -6,15 +6,18 @@
 //! gives only the reason of each change, paired with the hunks in order.
 //!
 //! **The verdict comes from the findings' severities alone** (§4, D-1). It is a report,
-//! not a gate: `READY` and `NOT READY` both exit 0, and the line `plan approve` reads
-//! back from `report.txt` refuses nothing (D-4).
+//! not a gate: `READY` and `NOT READY` both exit 0.
+//!
+//! **The gate computes, and never reads back** (§8, D-4). `report.txt` is the developer's
+//! copy of the text, and any tool can write a file: the lines `plan approve` shows come
+//! from the same reading, comparison and pairing as the report, run again on the
+//! baseline, the findings and the Plan as it is about to be approved.
 
 use std::fs;
 use std::io;
 use std::path::Path;
 
-use crate::digest;
-use crate::format::audit::{self, EDITABLE, Finding, Findings, NOT_A_CHECK, Severity};
+use crate::format::audit::{self, EDITABLE, Edit, Finding, Findings, NOT_A_CHECK, Severity};
 use crate::format::plan::{Mode, Plan, Status};
 use crate::fs::ProjectRoot;
 use crate::gate::approval;
@@ -41,40 +44,21 @@ pub fn report(root: &ProjectRoot, spec: &Path, mode: Mode) -> Result<Report, Aud
         .ok_or_else(|| AuditError::NoTicket {
             spec: spec.to_owned(),
         })?;
-    let files = Files::of(root, &ticket);
-    if !files.baseline.exists() {
-        return Err(AuditError::NoBaseline {
-            ticket,
-            baseline: files.baseline,
-        });
-    }
-    let baseline_text = read(&files.baseline)?;
-    let baseline =
-        Plan::read_anyway(&baseline_text, mode).ok_or_else(|| AuditError::BaselineUnreadable {
-            ticket: ticket.clone(),
-            baseline: files.baseline.clone(),
-        })?;
-    let findings = match fs::read_to_string(&files.findings) {
-        Ok(text) => audit::parse(&text).map_err(|problems| AuditError::FindingsInvalid {
-            findings: shown(root, &files.findings),
-            problems,
-        })?,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            return Err(AuditError::NoFindings {
-                ticket,
-                findings: shown(root, &files.findings),
-            });
-        }
-        Err(source) => {
-            return Err(AuditError::Io {
-                path: files.findings,
-                source,
-            });
-        }
-    };
+    let Audit {
+        files,
+        baseline,
+        findings,
+    } = load(root, &ticket, mode)?;
 
     let now = Plan::read_anyway(&text, mode);
-    let refusals = compare(&baseline, now.as_ref());
+    let refusals = match &now {
+        Some(now) => compare(&baseline, now).refusals(),
+        None => vec![
+            "the header changed: it can no longer be read as a Plan header, between two `---` \
+             lines"
+                .to_owned(),
+        ],
+    };
     let Some(now) = now.filter(|_| refusals.is_empty()) else {
         return Err(AuditError::Changed {
             ticket,
@@ -127,29 +111,117 @@ pub fn report(root: &ProjectRoot, spec: &Path, mode: Mode) -> Result<Report, Aud
 
 const BODY: &str = "body: ";
 
-/// Everything that refuses the report (§6), each named. Empty when the Plan changed only
-/// where an audit may change it.
-fn compare(baseline: &Plan, now: Option<&Plan>) -> Vec<String> {
-    let Some(now) = now else {
-        return vec![
-            "the header changed: it can no longer be read as a Plan header, between two `---` \
-             lines"
-                .to_owned(),
-        ];
+/// The files of one audit, read: what the report and the gate both start from.
+struct Audit {
+    files: Files,
+    baseline: Plan,
+    findings: Findings,
+}
+
+/// Read the baseline and the findings of `ticket`'s audit (§7): refused without a
+/// baseline, with one that is not a Plan, without `findings.md`, and with one that is not
+/// valid.
+fn load(root: &ProjectRoot, ticket: &str, mode: Mode) -> Result<Audit, AuditError> {
+    let files = Files::of(root, ticket);
+    if !files.baseline.exists() {
+        return Err(AuditError::NoBaseline {
+            ticket: ticket.to_owned(),
+            baseline: files.baseline,
+        });
+    }
+    let baseline_text = read(&files.baseline)?;
+    let baseline =
+        Plan::read_anyway(&baseline_text, mode).ok_or_else(|| AuditError::BaselineUnreadable {
+            ticket: ticket.to_owned(),
+            baseline: files.baseline.clone(),
+        })?;
+    let findings = match fs::read_to_string(&files.findings) {
+        Ok(text) => audit::parse(&text).map_err(|problems| AuditError::FindingsInvalid {
+            findings: shown(root, &files.findings),
+            problems,
+        })?,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            return Err(AuditError::NoFindings {
+                ticket: ticket.to_owned(),
+                findings: shown(root, &files.findings),
+            });
+        }
+        Err(source) => {
+            return Err(AuditError::Io {
+                path: files.findings,
+                source,
+            });
+        }
     };
-    let mut refusals = Vec::new();
-    if now.header().status != Status::Draft {
-        refusals.push(
-            "the Plan is no longer a draft: an audit is of a draft, and an agent never \
-             approves"
-                .to_owned(),
-        );
+    Ok(Audit {
+        files,
+        baseline,
+        findings,
+    })
+}
+
+/// How the Plan now differs from its baseline (§6).
+struct Comparison {
+    not_draft: bool,
+    header_changed: bool,
+    /// A section added, removed, renamed, moved or repeated, each named. When there is
+    /// any, the sections are not compared one by one.
+    structure: Vec<String>,
+    outside_changed: bool,
+    /// The headings of the sections other than the two that changed, in Plan order.
+    forbidden: Vec<String>,
+}
+
+impl Comparison {
+    /// Everything that refuses the report, each named. Empty when the Plan changed only
+    /// where an audit may change it.
+    fn refusals(&self) -> Vec<String> {
+        let mut refusals = Vec::new();
+        if self.not_draft {
+            refusals.push(
+                "the Plan is no longer a draft: an audit is of a draft, and an agent never \
+                 approves"
+                    .to_owned(),
+            );
+        }
+        if self.header_changed {
+            refusals.push(
+                "the header changed, between the two `---` lines: an audit never changes it"
+                    .to_owned(),
+            );
+        }
+        refusals.extend(self.structure.iter().cloned());
+        if self.outside_changed {
+            refusals.push(
+                "text outside every section changed: a heading, or a line before the first \
+                 section"
+                    .to_owned(),
+            );
+        }
+        for heading in &self.forbidden {
+            refusals.push(format!(
+                "`## {heading}` changed, and an audit changes only `## Implementation context` \
+                 and `## Scope`"
+            ));
+        }
+        refusals
     }
-    if now.header_text() != baseline.header_text() {
-        refusals.push(
-            "the header changed, between the two `---` lines: an audit never changes it".to_owned(),
-        );
+
+    /// Whether the sections are the same, in the same order, with the same text outside
+    /// them: what pairing the sections one by one needs.
+    fn same_sections(&self) -> bool {
+        self.structure.is_empty() && !self.outside_changed
     }
+}
+
+fn compare(baseline: &Plan, now: &Plan) -> Comparison {
+    let mut comparison = Comparison {
+        not_draft: now.header().status != Status::Draft,
+        header_changed: now.header_text() != baseline.header_text(),
+        structure: Vec::new(),
+        outside_changed: false,
+        forbidden: Vec::new(),
+    };
     let headings = |plan: &Plan| -> Vec<String> {
         plan.sections()
             .iter()
@@ -158,43 +230,34 @@ fn compare(baseline: &Plan, now: Option<&Plan>) -> Vec<String> {
     };
     let (before, after) = (headings(baseline), headings(now));
     if before != after {
-        let named = refusals.len();
+        let structure = &mut comparison.structure;
         for heading in after.iter().filter(|heading| !before.contains(heading)) {
-            refusals.push(format!("a section was added: `## {heading}`"));
+            structure.push(format!("a section was added: `## {heading}`"));
         }
         for heading in before.iter().filter(|heading| !after.contains(heading)) {
-            refusals.push(format!("a section was removed or renamed: `## {heading}`"));
+            structure.push(format!("a section was removed or renamed: `## {heading}`"));
         }
         let common = |of: &[String], other: &[String]| -> Vec<String> {
             of.iter().filter(|h| other.contains(h)).cloned().collect()
         };
         // A heading repeated or dropped where it also stays elsewhere is neither added
         // nor removed by name, so the two lists are shown.
-        if common(&before, &after) != common(&after, &before) || refusals.len() == named {
-            refusals.push(format!(
+        if common(&before, &after) != common(&after, &before) || structure.is_empty() {
+            structure.push(format!(
                 "the sections were moved or repeated: they were {}, and are {}",
                 listing(&before),
                 listing(&after)
             ));
         }
-        return refusals;
+        return comparison;
     }
-    if now.outside_sections() != baseline.outside_sections() {
-        refusals.push(
-            "text outside every section changed: a heading, or a line before the first \
-             section"
-                .to_owned(),
-        );
-    }
+    comparison.outside_changed = now.outside_sections() != baseline.outside_sections();
     for ((heading, then), (_, text)) in baseline.section_texts().iter().zip(now.section_texts()) {
         if !EDITABLE.contains(heading) && !same_lines(then, text) {
-            refusals.push(format!(
-                "`## {heading}` changed, and an audit changes only `## Implementation context` \
-                 and `## Scope`"
-            ));
+            comparison.forbidden.push((*heading).to_owned());
         }
     }
-    refusals
+    comparison
 }
 
 fn listing(headings: &[String]) -> String {
@@ -211,33 +274,55 @@ fn same_lines(a: &str, b: &str) -> bool {
     a.lines().eq(b.lines())
 }
 
-/// The `changes:` part (§7.1): each section of the two that changed or has an edit, in
-/// Plan order, its hunks paired with its edits in order.
-fn changes(baseline: &Plan, now: &Plan, findings: &Findings) -> String {
-    let mut out = String::new();
-    for ((heading, then), (_, text)) in baseline.section_texts().iter().zip(now.section_texts()) {
-        if !EDITABLE.contains(heading) {
+/// One of the two sections an audit may edit, with its hunks and the edits paired with
+/// them in order (§7.1).
+struct Paired<'a> {
+    heading: &'a str,
+    hunks: Vec<(Hunk, Option<&'a Edit>)>,
+    /// Edits left over once every hunk has one.
+    unpaired: Vec<&'a Edit>,
+}
+
+/// Each of the two sections that changed or has an edit, in Plan order. The sections of
+/// the two Plans must be the same (`Comparison::same_sections`).
+fn pair<'a>(baseline: &'a Plan, now: &'a Plan, findings: &'a Findings) -> Vec<Paired<'a>> {
+    let mut paired = Vec::new();
+    for ((heading, then), (_, text)) in baseline
+        .section_texts()
+        .into_iter()
+        .zip(now.section_texts())
+    {
+        if !EDITABLE.contains(&heading) {
             continue;
         }
         let hunks = diff::hunks(then, text);
-        let edits: Vec<_> = findings
-            .edits
-            .iter()
-            .filter(|edit| edit.section == *heading)
-            .collect();
-        if hunks.is_empty() && edits.is_empty() {
-            continue;
+        let mut edits = findings.edits.iter().filter(|edit| edit.section == heading);
+        let hunks: Vec<_> = hunks.into_iter().map(|hunk| (hunk, edits.next())).collect();
+        let unpaired: Vec<_> = edits.collect();
+        if !hunks.is_empty() || !unpaired.is_empty() {
+            paired.push(Paired {
+                heading,
+                hunks,
+                unpaired,
+            });
         }
-        out.push_str(&format!("  ## {heading}\n"));
-        let mut edits = edits.into_iter();
-        for Hunk { removed, added } in &hunks {
+    }
+    paired
+}
+
+/// The `changes:` part (§7.1).
+fn changes(baseline: &Plan, now: &Plan, findings: &Findings) -> String {
+    let mut out = String::new();
+    for section in pair(baseline, now, findings) {
+        out.push_str(&format!("  ## {}\n", section.heading));
+        for (Hunk { removed, added }, edit) in &section.hunks {
             for line in removed {
                 out.push_str(&format!("    -{line}\n"));
             }
             for line in added {
                 out.push_str(&format!("    +{line}\n"));
             }
-            match edits.next() {
+            match edit {
                 Some(edit) => out.push_str(&format!(
                     "      reason: {} ({})\n",
                     edit.reason, edit.evidence
@@ -245,7 +330,7 @@ fn changes(baseline: &Plan, now: &Plan, findings: &Findings) -> String {
                 None => out.push_str("      edited without a reason\n"),
             }
         }
-        for edit in edits {
+        for edit in &section.unpaired {
             out.push_str(&format!(
                 "    reason with no change: {} ({})\n",
                 edit.reason, edit.evidence
@@ -274,84 +359,43 @@ fn listed(findings: &[&Finding]) -> String {
         .collect()
 }
 
-/// The line `plan approve` prints (§8), for `plan` as it is about to be approved.
-/// `not run` when there is no `report.txt`, or its last lines cannot be read.
-pub fn gate_line(root: &ProjectRoot, plan: &Plan) -> String {
-    let ticket = &plan.header().ticket;
-    let files = Files::of(root, ticket);
-    let verdict = fs::read(&files.report)
-        .ok()
-        .and_then(|bytes| digest::canonicalize_bytes(&bytes).ok())
-        .and_then(|text| recorded(&text, ticket));
-    let Some((verdict, body)) = verdict else {
-        return "plan audit: not run".to_owned();
+/// The lines `plan approve` prints (§8), for `plan`, the Plan about to be approved:
+/// computed from the baseline, the findings and `plan`, never read from `report.txt`. One
+/// line, then one for each section the auditor may not edit that changed since `begin`.
+/// It refuses nothing.
+pub fn gate_lines(root: &ProjectRoot, plan: &Plan, mode: Mode) -> String {
+    let audit = match load(root, &plan.header().ticket, mode) {
+        Ok(audit) => audit,
+        Err(AuditError::FindingsInvalid { .. }) => {
+            return "plan audit: findings unreadable".to_owned();
+        }
+        Err(_) => return "plan audit: not run".to_owned(),
     };
-    if body == approval::approval_digest(plan, None) {
+    let blocking = audit.findings.blocking();
+    let verdict = if blocking == 0 {
+        "READY".to_owned()
+    } else {
+        format!("NOT READY ({blocking} blocking)")
+    };
+    let comparison = compare(&audit.baseline, plan);
+    // The header is not compared: approving writes it.
+    let accounted = comparison.same_sections()
+        && comparison.forbidden.is_empty()
+        && pair(&audit.baseline, plan, &audit.findings)
+            .iter()
+            .all(|section| section.hunks.iter().all(|(_, edit)| edit.is_some()));
+    let mut lines = vec![if accounted {
         format!("plan audit: {verdict}, for this version of the Plan")
     } else {
         format!("plan audit: {verdict}, but the Plan changed after it")
+    }];
+    if !comparison.same_sections() {
+        lines.push("plan audit: the sections changed since the audit began".to_owned());
     }
-}
-
-/// The verdict as the gate words it, `READY` or `NOT READY (<n> blocking)`, and the body
-/// digest, from a report's last three lines.
-fn recorded(text: &str, ticket: &str) -> Option<(String, String)> {
-    let lines: Vec<&str> = text.lines().collect();
-    let [.., body, verdict, last] = lines.as_slice() else {
-        return None;
-    };
-    if *last != NOT_A_CHECK {
-        return None;
+    for heading in &comparison.forbidden {
+        lines.push(format!(
+            "plan audit: the {heading} changed since the audit began"
+        ));
     }
-    let body = body.strip_prefix(BODY)?;
-    let verdict = verdict.strip_prefix(&format!("plan audit {ticket}: "))?;
-    let verdict = if verdict == "READY" {
-        "READY".to_owned()
-    } else {
-        let count: usize = verdict
-            .strip_prefix("NOT READY — ")?
-            .strip_suffix(" blocking finding(s)")?
-            .parse()
-            .ok()
-            .filter(|count| *count > 0)?;
-        format!("NOT READY ({count} blocking)")
-    };
-    Some((verdict, body.to_owned()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::recorded;
-
-    const LAST: &str =
-        "this is an agent's assessment of the Plan, not a check; approving is yours.";
-
-    #[test]
-    fn the_last_lines_of_a_report_are_read_back() {
-        let text = format!("…\nbody: sha256:ab\nplan audit SHOP-214: READY\n{LAST}\n");
-        assert_eq!(
-            recorded(&text, "SHOP-214"),
-            Some(("READY".to_owned(), "sha256:ab".to_owned()))
-        );
-        let text = format!(
-            "body: sha256:cd\nplan audit SHOP-214: NOT READY — 2 blocking finding(s)\n{LAST}\n"
-        );
-        assert_eq!(
-            recorded(&text, "SHOP-214"),
-            Some(("NOT READY (2 blocking)".to_owned(), "sha256:cd".to_owned()))
-        );
-    }
-
-    #[test]
-    fn last_lines_that_are_not_a_report_s_are_not_read() {
-        let ok = format!("body: sha256:ab\nplan audit SHOP-214: READY\n{LAST}\n");
-        assert!(recorded(&ok, "SHOP-215").is_none());
-        assert!(recorded("plan audit SHOP-214: READY\n", "SHOP-214").is_none());
-        assert!(recorded(&ok.replace(LAST, "approved."), "SHOP-214").is_none());
-        let zero = format!(
-            "body: sha256:ab\nplan audit SHOP-214: NOT READY — 0 blocking finding(s)\n{LAST}\n"
-        );
-        assert!(recorded(&zero, "SHOP-214").is_none());
-        assert!(recorded(&ok.replace("body: ", "digest: "), "SHOP-214").is_none());
-    }
+    lines.join("\n")
 }

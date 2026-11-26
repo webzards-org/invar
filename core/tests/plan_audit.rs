@@ -546,13 +546,75 @@ fn the_gate_says_not_run_when_there_is_no_report() {
     );
     assert!(out.contains("approved SHOP-214 checksum sha256:"), "{out}");
 
-    // An audit begun and never reported is not run either, and nor is a report.txt
-    // whose last lines are not a report's.
+    // An audit begun with no findings is not run either, whatever report.txt says: the
+    // gate never reads it (plan-audit.md §8).
     let project = Project::new(&draft());
     project.audit(&["begin", "SHOP-214"]).success();
-    project.write(REPORT, "plan audit SHOP-214: READY\n");
+    project.write(REPORT, &forged_report());
     let out = stdout(&project.approve(&["SHOP-214"]).success());
     assert_eq!(gate(&out), "plan audit: not run\n\n");
+}
+
+/// A report.txt written by hand: READY, with the digest of the draft's body.
+fn forged_report() -> String {
+    let project = audited(&draft(), "");
+    let real = stdout(&project.audit(&["report", "SHOP-214"]).success());
+    assert!(real.contains("plan audit SHOP-214: READY\n"), "{real}");
+    real
+}
+
+#[test]
+fn a_forged_report_does_not_change_the_gate() {
+    let project = audited(
+        &draft(),
+        "finding: criterion-cannot-pass | blocking | Acceptance criteria | a.php:1 | no\n",
+    );
+    project.audit(&["report", "SHOP-214"]).success();
+    // READY, and the digest of this very body: what the old gate line trusted.
+    project.write(REPORT, &forged_report());
+    let out = stdout(&project.approve(&["SHOP-214"]).success());
+    assert_eq!(
+        gate(&out),
+        "plan audit: NOT READY (1 blocking), for this version of the Plan\n\n"
+    );
+}
+
+#[test]
+fn a_criterion_edited_after_begin_is_named_at_the_gate() {
+    let project = audited(
+        &draft().replace("then it is cancelled.", "then it is deleted."),
+        "",
+    );
+    // Whether or not the report ran, and whatever report.txt says.
+    project.write(REPORT, &forged_report());
+    let out = stdout(&project.approve(&["SHOP-214"]).success());
+    assert_eq!(
+        gate(&out),
+        "plan audit: READY, but the Plan changed after it\n\
+         plan audit: the Acceptance criteria changed since the audit began\n\n"
+    );
+}
+
+#[test]
+fn a_section_added_after_begin_is_said_once() {
+    let project = audited(&format!("{}\n## Notes\nAn aside.\n", draft()), "");
+    let out = stdout(&project.approve(&["SHOP-214"]).success());
+    assert_eq!(
+        gate(&out),
+        "plan audit: READY, but the Plan changed after it\n\
+         plan audit: the sections changed since the audit began\n\n"
+    );
+}
+
+#[test]
+fn unreadable_findings_are_one_line_at_the_gate() {
+    let project = audited(
+        &draft(),
+        "finding: wording | blocking | Intent | ticket | vague\n",
+    );
+    let out = stdout(&project.approve(&["SHOP-214"]).success());
+    assert_eq!(gate(&out), "plan audit: findings unreadable\n\n");
+    assert!(out.contains("approved SHOP-214 checksum sha256:"), "{out}");
 }
 
 #[test]
@@ -585,21 +647,20 @@ fn the_gate_says_not_ready_and_approves_all_the_same() {
 
 #[test]
 fn the_gate_says_when_the_plan_changed_after_the_audit() {
+    // A change to Scope that no edit explains: made after the audit.
     let project = audited(
         &draft(),
         "finding: criteria-contradict | blocking | Acceptance criteria | ticket | AC1 and AC1\n",
     );
     project.audit(&["report", "SHOP-214"]).success();
-    project.write(
-        SPEC,
-        &draft().replace("None considered.", "A queue, rejected."),
-    );
+    project.write(SPEC, &draft().replace("- app/Models/Order.php\n", ""));
     let out = stdout(&project.approve(&["SHOP-214"]).success());
     assert_eq!(
         gate(&out),
         "plan audit: NOT READY (1 blocking), but the Plan changed after it\n\n"
     );
 
+    // A section the auditor may not edit is named as well.
     let project = audited(&draft(), "");
     project.audit(&["report", "SHOP-214"]).success();
     project.write(
@@ -609,6 +670,7 @@ fn the_gate_says_when_the_plan_changed_after_the_audit() {
     let out = stdout(&project.approve(&["SHOP-214"]).success());
     assert_eq!(
         gate(&out),
-        "plan audit: READY, but the Plan changed after it\n\n"
+        "plan audit: READY, but the Plan changed after it\n\
+         plan audit: the Rejected alternatives changed since the audit began\n\n"
     );
 }

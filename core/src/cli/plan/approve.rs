@@ -241,9 +241,9 @@ fn approve(args: Args) -> Result<()> {
         print!("{invariants}");
         println!();
     }
-    // Advisory (plan-audit.md §8, D-4): whether an agent's audit of this version of the
-    // Plan found anything blocking. It refuses nothing.
-    println!("{}", plan_audit::gate_line(&root, pending.plan()));
+    // Advisory (plan-audit.md §8, D-4): what an agent's audit found, computed again from
+    // its files, and what changed since it began. It refuses nothing.
+    println!("{}", plan_audit::gate_lines(&root, pending.plan(), mode));
     println!();
     println!("Acceptance: {}", pending.acceptance());
     if pending.required_without_section() {

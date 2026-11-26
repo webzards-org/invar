@@ -44,8 +44,10 @@ pub enum Command {
     ///
     /// Validates the Plan, prints its acceptance criteria, every invariant of
     /// `BUSINESS_CONTEXT.md` marked named or NOT NAMED when they have ids, the line of
-    /// a Plan audit (READY or NOT READY, and whether for this version of the Plan, or
-    /// `not run`), which refuses nothing, and whether the ticket needs acceptance tests,
+    /// a Plan audit, computed again from its baseline and findings (READY or NOT READY,
+    /// for this version of the Plan or changed after it, `not run`, or `findings
+    /// unreadable`, and a line for each section changed since it began that the auditor
+    /// may not edit), which refuses nothing, and whether the ticket needs acceptance tests,
     /// then sets `Status: approved` and records
     /// `Approved-by` (`git config user.name`), `Approved-at` (today),
     /// `Approved-checksum` (the digest of the body and that decision) and
