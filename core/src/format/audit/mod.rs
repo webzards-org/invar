@@ -11,13 +11,6 @@
 //! kind of the closed list, so the agent cannot invent a gate of its own, nor take one
 //! away by renaming a kind.
 
-// `invar plan audit report` is its caller, in the next change. `expect` rather than
-// `allow`, so the compiler asks for this to go once it is used.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "plan audit report is not built yet")
-)]
-
 use std::fmt;
 
 use crate::diagnostics::Diagnostics;

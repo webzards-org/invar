@@ -1,8 +1,8 @@
-//! `invar plan audit begin | input` (#167, `contracts/formats/plan-audit.md`).
+//! `invar plan audit begin | input | report` (#167, `contracts/formats/plan-audit.md`).
 //!
 //! `begin` is the developer's, through `/invar:plan-audit`; `input` is what the
-//! plan-auditor reads. Neither decides anything about the Plan: the report does that,
-//! from the files, and only advises.
+//! plan-auditor reads; `report` is what the developer reads. None decides anything about
+//! the Plan: the report computes its line from the files, and only advises.
 
 use anyhow::{Context as _, Result};
 use clap::Subcommand;
@@ -40,6 +40,18 @@ pub enum Command {
     ///
     /// Nothing from the decision log. Refused before `begin`.
     Input {
+        /// A ticket id (`SHOP-214`), or the path of a Plan.
+        target: String,
+    },
+    /// Report the audit: the Plan's changes since `begin`, with the auditor's reasons,
+    /// `plan validate`, the findings, and READY or NOT READY computed from them.
+    ///
+    /// Refused, naming each, when anything but the text under `## Implementation
+    /// context` and `## Scope` changed, or the Plan is no longer a draft; nothing is
+    /// restored. Writes `.invar/out/<TICKET>-audit/report.txt`, which `plan approve`
+    /// reads its line from. Exits 0 for READY and NOT READY: it is an agent's
+    /// assessment, not a check.
+    Report {
         /// A ticket id (`SHOP-214`), or the path of a Plan.
         target: String,
     },
@@ -81,6 +93,12 @@ pub fn run(command: Command) -> Result<()> {
                 config.context.binding_limit,
             )?;
             print!("{text}");
+            Ok(())
+        }
+        Command::Report { target } => {
+            let (root, spec) = target::resolve(&target, &cwd)?;
+            let mode = Mode::of(&crate::cli::config(&root)?);
+            print!("{}", plan_audit::report(&root, &spec, mode)?.text);
             Ok(())
         }
     }

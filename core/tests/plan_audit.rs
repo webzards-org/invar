@@ -222,3 +222,283 @@ fn input_is_the_plan_the_context_and_the_rules_and_nothing_from_the_log() {
     assert!(!first.contains(".invar/decisions"), "{first}");
     assert_snapshot("plan-audit-input-shop-214.txt", &first);
 }
+
+// --- report -------------------------------------------------------------------------
+
+const FINDINGS: &str = ".invar/out/SHOP-214-audit/findings.md";
+const REPORT: &str = ".invar/out/SHOP-214-audit/report.txt";
+
+/// A project whose audit has begun, with `plan` as the Plan now and `findings`.
+fn audited(plan: &str, findings: &str) -> Project {
+    let project = Project::new(&draft());
+    project.audit(&["begin", "SHOP-214"]).success();
+    project.write(SPEC, plan);
+    project.write(FINDINGS, findings);
+    project
+}
+
+/// The draft with the two facts an auditor corrects.
+fn corrected() -> String {
+    draft()
+        .replace("canceled_at", "cancelled_at")
+        .replace("OrdersController.php", "OrderController.php")
+}
+
+const TWO_EDITS: &str = "\
+# SHOP-214
+edit: Scope | app/Http/Controllers/OrderController.php:1 | the controller is OrderController.php
+edit: Implementation context | database/migrations/2026_01_01_create_orders.php:18 | the column is `cancelled_at`
+";
+
+#[test]
+fn report_shows_each_edit_as_a_hunk_with_its_reason() {
+    let project = audited(&corrected(), TWO_EDITS);
+    let out = stdout(&project.audit(&["report", "SHOP-214"]).success());
+    assert!(
+        out.contains(
+            "changes:\n\
+             \x20 ## Scope\n\
+             \x20   -- app/Http/Controllers/OrdersController.php\n\
+             \x20   +- app/Http/Controllers/OrderController.php\n\
+             \x20     reason: the controller is OrderController.php \
+             (app/Http/Controllers/OrderController.php:1)\n\
+             \x20 ## Implementation context\n\
+             \x20   -- The order records the time in `canceled_at`.\n\
+             \x20   +- The order records the time in `cancelled_at`.\n\
+             \x20     reason: the column is `cancelled_at` \
+             (database/migrations/2026_01_01_create_orders.php:18)\n\
+             plan validate: ok\n"
+        ),
+        "{out}"
+    );
+    assert!(
+        out.starts_with(&format!("plan audit SHOP-214: {SPEC}\n\n")),
+        "{out}"
+    );
+    assert_eq!(project.read(REPORT).unwrap(), out);
+}
+
+#[test]
+fn an_edited_section_without_an_edit_entry_is_reported_and_an_extra_reason_too() {
+    let project = audited(
+        &draft().replace("canceled_at", "cancelled_at"),
+        "edit: Scope | app/Models/Order.php:1 | the model is Order.php\n",
+    );
+    let out = stdout(&project.audit(&["report", "SHOP-214"]).success());
+    assert!(
+        out.contains(
+            "  ## Scope\n\
+             \x20   reason with no change: the model is Order.php (app/Models/Order.php:1)\n\
+             \x20 ## Implementation context\n\
+             \x20   -- The order records the time in `canceled_at`.\n\
+             \x20   +- The order records the time in `cancelled_at`.\n\
+             \x20     edited without a reason\n"
+        ),
+        "{out}"
+    );
+}
+
+#[test]
+fn no_change_and_no_finding_is_ready() {
+    let project = audited(&draft(), "# nothing to correct\n");
+    let out = stdout(&project.audit(&["report", "SHOP-214"]).success());
+    assert!(
+        out.contains(
+            "changes:\n  none\nplan validate: ok\nblocking findings:\n  none\nnotes:\n  none\n"
+        ),
+        "{out}"
+    );
+    assert!(
+        out.ends_with(
+            "plan audit SHOP-214: READY\n\
+             this is an agent's assessment of the Plan, not a check; approving is yours.\n"
+        ),
+        "{out}"
+    );
+}
+
+#[test]
+fn one_blocking_finding_is_not_ready_and_notes_follow_it() {
+    let project = audited(
+        &draft(),
+        "finding: wording | note | Intent | ticket | \"own\" could mean the team's\n\
+         finding: criterion-cannot-pass | blocking | Acceptance criteria | app/Models/Order.php:12 | AC1 needs a customer, and orders | have none\n",
+    );
+    let out = stdout(&project.audit(&["report", "SHOP-214"]).success());
+    assert!(
+        out.contains(
+            "blocking findings:\n\
+             \x20 criterion-cannot-pass (Acceptance criteria, app/Models/Order.php:12): AC1 \
+             needs a customer, and orders | have none\n\
+             notes:\n\
+             \x20 wording (Intent, ticket): \"own\" could mean the team's\n\
+             body: sha256:"
+        ),
+        "{out}"
+    );
+    assert!(
+        out.ends_with(
+            "plan audit SHOP-214: NOT READY — 1 blocking finding(s)\n\
+             this is an agent's assessment of the Plan, not a check; approving is yours.\n"
+        ),
+        "{out}"
+    );
+}
+
+#[test]
+fn the_report_is_byte_identical_for_the_same_files() {
+    let project = audited(&corrected(), TWO_EDITS);
+    let first = stdout(&project.audit(&["report", "SHOP-214"]).success());
+    let second = stdout(&project.audit(&["report", "SHOP-214"]).success());
+    assert_eq!(first, second);
+    // And from another directory: paths are the project's, not the shell's.
+    let elsewhere = Command::cargo_bin("invar")
+        .unwrap()
+        .current_dir(project.root().join(".invar"))
+        .args(["plan", "audit", "report", "SHOP-214"])
+        .assert()
+        .success();
+    assert_eq!(stdout(&elsewhere), first);
+}
+
+#[test]
+fn the_report_includes_what_plan_validate_finds() {
+    // The auditor left Implementation context empty: reported, not refused.
+    let emptied = draft().replace(
+        "- AI_CONTEXT: controllers stay thin\n- The order records the time in `canceled_at`.\n",
+        "",
+    );
+    let project = audited(&emptied, "");
+    let out = stdout(&project.audit(&["report", "SHOP-214"]).success());
+    assert!(
+        out.contains(&format!("plan validate: 1 problem(s)\n  {SPEC}:")),
+        "{out}"
+    );
+    assert!(out.contains("Implementation context"), "{out}");
+    assert!(out.ends_with("approving is yours.\n"), "{out}");
+}
+
+#[test]
+fn the_body_line_is_the_digest_of_the_plan_now() {
+    let project = audited(&corrected(), TWO_EDITS);
+    let out = stdout(&project.audit(&["report", "SHOP-214"]).success());
+    let body = out
+        .lines()
+        .find_map(|line| line.strip_prefix("body: sha256:"))
+        .unwrap();
+    assert_eq!(body.len(), 64);
+    // Another body, another digest.
+    project.write(SPEC, &draft());
+    let again = stdout(&project.audit(&["report", "SHOP-214"]).success());
+    assert!(!again.contains(body), "{again}");
+}
+
+#[test]
+fn an_edit_of_the_acceptance_criteria_is_refused_and_named() {
+    let project = audited(
+        &corrected().replace(
+            "then it is cancelled.",
+            "then it is cancelled and refunded.",
+        ),
+        TWO_EDITS,
+    );
+    project
+        .audit(&["report", "SHOP-214"])
+        .failure()
+        .stdout("")
+        .stderr(contains("changed what an audit may not"))
+        .stderr(contains("`## Acceptance criteria` changed"))
+        .stderr(contains(format!("`git diff {SPEC}`")))
+        .stderr(contains("--restart"));
+    assert!(!project.exists(REPORT));
+    // Nothing is restored.
+    assert!(project.read(SPEC).unwrap().contains("and refunded"));
+}
+
+#[test]
+fn a_header_change_is_refused() {
+    let project = audited(&draft().replace("Module: orders", "Module: billing"), "");
+    project
+        .audit(&["report", "SHOP-214"])
+        .failure()
+        .stderr(contains("the header changed"));
+    assert!(!project.exists(REPORT));
+}
+
+#[test]
+fn a_plan_that_is_no_longer_a_draft_is_refused() {
+    let approved = draft()
+        .replace("Status: draft", "Status: approved")
+        .replace("Approved-by:", "Approved-by: rade")
+        .replace("Approved-at:", "Approved-at: 2026-10-05")
+        .replace(
+            "Approved-checksum:",
+            &format!("Approved-checksum: sha256:{}", "ab".repeat(32)),
+        );
+    let project = audited(&approved, "");
+    project
+        .audit(&["report", "SHOP-214"])
+        .failure()
+        .stderr(contains("no longer a draft"))
+        .stderr(contains("the header changed"));
+}
+
+#[test]
+fn a_section_removed_added_or_moved_is_refused() {
+    let removed = draft().replace("## Rejected alternatives\nNone considered.\n\n", "");
+    let project = audited(&removed, "");
+    project
+        .audit(&["report", "SHOP-214"])
+        .failure()
+        .stderr(contains(
+            "a section was removed or renamed: `## Rejected alternatives`",
+        ));
+
+    let added = format!("{}\n## Notes\nAn aside.\n", draft());
+    let project = audited(&added, "");
+    project
+        .audit(&["report", "SHOP-214"])
+        .failure()
+        .stderr(contains("a section was added: `## Notes`"));
+
+    // A heading slipped into Implementation context is a section added, not an edit.
+    let inside = draft().replace(
+        "- The order records",
+        "## Scope\n- app/Jobs/Refund.php\n\n- The order records",
+    );
+    let project = audited(&inside, "");
+    project
+        .audit(&["report", "SHOP-214"])
+        .failure()
+        .stderr(contains("moved or repeated"));
+}
+
+#[test]
+fn report_is_refused_before_begin_and_without_findings() {
+    let project = Project::new(&draft());
+    project
+        .audit(&["report", "SHOP-214"])
+        .failure()
+        .stderr(contains("no audit of SHOP-214 has begun"));
+    project.audit(&["begin", "SHOP-214"]).success();
+    project
+        .audit(&["report", "SHOP-214"])
+        .failure()
+        .stderr(contains("has written no findings"));
+}
+
+#[test]
+fn malformed_findings_are_refused_each_with_its_line() {
+    let project = audited(
+        &draft(),
+        "edit: Acceptance criteria | a.php:1 | reworded\n\
+         finding: wording | blocking | Intent | ticket | vague\n",
+    );
+    project
+        .audit(&["report", "SHOP-214"])
+        .failure()
+        .stderr(contains(format!("{FINDINGS}:1:")))
+        .stderr(contains(format!("{FINDINGS}:2:")))
+        .stderr(contains("not a blocking kind"));
+    assert!(!project.exists(REPORT));
+}

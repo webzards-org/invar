@@ -10,14 +10,6 @@
 //! message says what to change, not only what is wrong, because the output is
 //! read by an agent as often as by a person (M1-8).
 
-// `plan validate` (M1-8) prints it; `finish` has no caller in the binary
-// yet. `expect` rather than `allow`, so the compiler asks for this line to go
-// once it does.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "`finish` has no caller in the binary yet")
-)]
-
 use std::fmt;
 use std::path::Path;
 

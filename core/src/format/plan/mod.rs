@@ -129,6 +129,13 @@ impl Plan {
         }
     }
 
+    /// The Plan as far as it can be read, problems or not: `None` only when its header
+    /// is not complete. For the audit report, which compares a Plan an agent may have
+    /// left invalid with its baseline, and reports the problems instead of refusing.
+    pub fn read_anyway(text: &str, mode: Mode) -> Option<Self> {
+        analyze(text, mode, Unnumbered::IfApproved).plan
+    }
+
     /// Check a Plan's text without needing it to be valid: every problem, and
     /// what could be read of `Ticket` and `Status` despite them. This is
     /// `plan validate` (M1-8), which reports a header that disagrees with its
@@ -216,6 +223,53 @@ impl Plan {
     /// Every level-2 section, in file order — required and additional alike.
     pub fn sections(&self) -> &[Section] {
         &self.sections
+    }
+
+    /// The header exactly as written: the opening `---`, every header line and the
+    /// closing `---`, with a BOM when the file has one.
+    pub fn header_text(&self) -> String {
+        let mut out = String::new();
+        if self.bom {
+            out.push('\u{FEFF}');
+        }
+        self.opening.write_to(&mut out);
+        for line in &self.header_lines {
+            line.write_to(&mut out);
+        }
+        self.closing.write_to(&mut out);
+        out
+    }
+
+    /// Each section's heading and the text under it, in file order.
+    pub fn section_texts(&self) -> Vec<(&str, &str)> {
+        self.sections
+            .iter()
+            .map(|section| {
+                (
+                    section.heading.as_str(),
+                    &self.rest[section.content.clone()],
+                )
+            })
+            .collect()
+    }
+
+    /// The body without the text under each section: the headings, and whatever is
+    /// in no section. Two Plans with the same value have the same sections in the
+    /// same order, and differ at most in what the sections hold.
+    pub fn outside_sections(&self) -> String {
+        let mut out = String::new();
+        let mut cursor = self.body_start;
+        for section in &self.sections {
+            let content = section.content.clone();
+            if content.start > cursor {
+                out.push_str(&self.rest[cursor..content.start]);
+            }
+            cursor = cursor.max(content.end);
+        }
+        if cursor < self.rest.len() {
+            out.push_str(&self.rest[cursor..]);
+        }
+        out
     }
 
     /// The text under `## <heading>`, if the Plan has that section.

@@ -114,8 +114,8 @@ pub enum Command {
     Guard(guard::Args),
 
     /// Audit a draft Plan against the code, with an agent: `begin`, the developer's;
-    /// `input`, what the plan-auditor reads (`contracts/formats/plan-audit.md`).
-    /// Advisory: nothing waits for it.
+    /// `input`, what the plan-auditor reads; `report`, what changed and READY or NOT
+    /// READY (`contracts/formats/plan-audit.md`). Advisory: nothing waits for it.
     #[command(subcommand)]
     Audit(audit::Command),
 }

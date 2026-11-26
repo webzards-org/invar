@@ -17,10 +17,16 @@ use std::path::{Path, PathBuf};
 
 use crate::context::invariants::{self, Invariants};
 use crate::context::{self, ContextError, Kind};
+use crate::diagnostics::Diagnostics;
 use crate::format::audit::BLOCKING_KINDS;
 use crate::format::plan::{Mode, Plan, Status};
 use crate::fs::ProjectRoot;
 use crate::gate::validate::{self, Report as Validation};
+
+mod diff;
+mod report;
+
+pub use report::report;
 
 /// The files of one ticket's audit (§2).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,6 +261,28 @@ pub enum AuditError {
     NoTicket {
         spec: PathBuf,
     },
+    /// `baseline.md` is not a Plan any more.
+    BaselineUnreadable {
+        ticket: String,
+        baseline: PathBuf,
+    },
+    /// `report` before the auditor wrote `findings.md`.
+    NoFindings {
+        ticket: String,
+        findings: String,
+    },
+    /// `findings.md` is not in the form of §3; every problem, each at its line.
+    FindingsInvalid {
+        findings: String,
+        problems: Diagnostics,
+    },
+    /// The audit changed what it may not (§6); each, named. Nothing was restored.
+    Changed {
+        ticket: String,
+        spec: String,
+        baseline: String,
+        refusals: Vec<String>,
+    },
     Context(ContextError),
     Io {
         path: PathBuf,
@@ -301,6 +329,45 @@ impl fmt::Display for AuditError {
                     f,
                     "{} has no readable `Ticket` in its header",
                     spec.display()
+                )
+            }
+            Self::BaselineUnreadable { ticket, baseline } => write!(
+                f,
+                "{} is not a Plan any more, so there is nothing to compare with: begin the \
+                 audit again, /invar:plan-audit {ticket} --restart",
+                baseline.display()
+            ),
+            Self::NoFindings { ticket, findings } => write!(
+                f,
+                "the auditor has written no findings for {ticket} ({findings} does not exist): \
+                 it writes them before it answers, even when it found nothing"
+            ),
+            Self::FindingsInvalid { findings, problems } => write!(
+                f,
+                "{findings} is not in the form of plan-audit.md §3 ({} problem(s)), so there is \
+                 no report:\n{}",
+                problems.len(),
+                problems.render(Path::new(findings)).trim_end()
+            ),
+            Self::Changed {
+                ticket,
+                spec,
+                baseline,
+                refusals,
+            } => {
+                writeln!(
+                    f,
+                    "the audit of {ticket} changed what an audit may not, so there is no \
+                     report:"
+                )?;
+                for refusal in refusals {
+                    writeln!(f, "  - {refusal}")?;
+                }
+                write!(
+                    f,
+                    "Nothing was restored. `git diff {spec}` shows the change, and so does a \
+                     comparison with {baseline}; what to keep is yours. To audit the Plan as it \
+                     is now, /invar:plan-audit {ticket} --restart"
                 )
             }
             Self::Context(err) => err.fmt(f),
