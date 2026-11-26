@@ -26,6 +26,7 @@ mod fs;
 mod gate;
 mod git;
 mod init;
+mod plan_audit;
 mod pr_body;
 mod review_input;
 mod signature;

@@ -1401,3 +1401,18 @@ fn signing_a_configuration_change_from_a_shell_is_denied() {
     );
     guard(bash(&project.root(), "invar config check --base main")).code(0);
 }
+
+#[test]
+fn beginning_a_plan_audit_from_a_shell_is_denied_and_its_help_is_not() {
+    let project = Project::new(APPROVED);
+    let assert = guard(bash(&project.root(), "invar plan audit begin SHOP-214"))
+        .code(2)
+        .stderr(contains(
+            "`invar plan audit begin` is the developer's, not yours",
+        ));
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("`/invar:plan-audit SHOP-214`"), "{stdout}");
+    guard(bash(&project.root(), "invar plan audit begin --help")).code(0);
+    guard(bash(&project.root(), "invar plan audit input SHOP-214")).code(0);
+    guard(bash(&project.root(), "invar plan audit report SHOP-214")).code(0);
+}

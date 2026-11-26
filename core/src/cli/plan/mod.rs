@@ -8,6 +8,7 @@ use clap::Subcommand;
 use super::mode;
 
 mod approve;
+mod audit;
 mod check;
 mod guard;
 mod subagent_stop;
@@ -111,6 +112,12 @@ pub enum Command {
     /// is not seen. The boundary is CI, running its own released binary, and for
     /// approvals the signature of #154.
     Guard(guard::Args),
+
+    /// Audit a draft Plan against the code, with an agent: `begin`, the developer's;
+    /// `input`, what the plan-auditor reads (`contracts/formats/plan-audit.md`).
+    /// Advisory: nothing waits for it.
+    #[command(subcommand)]
+    Audit(audit::Command),
 }
 
 pub fn run(command: Command) -> Result<ExitCode> {
@@ -123,5 +130,6 @@ pub fn run(command: Command) -> Result<ExitCode> {
         Command::Approve(args) => done(approve::run(args)),
         Command::Check(args) => done(check::run(args)),
         Command::Guard(args) => guard::run(args),
+        Command::Audit(command) => done(audit::run(command)),
     }
 }

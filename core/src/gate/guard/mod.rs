@@ -652,7 +652,22 @@ const HUMAN_ONLY: &[HumanOnly] = &[
         words: &["config", "accept"],
         reason: config_accept_reason,
     },
+    HumanOnly {
+        words: &["plan", "audit", "begin"],
+        reason: plan_audit_begin_reason,
+    },
 ];
+
+fn plan_audit_begin_reason(target: &str) -> String {
+    format!(
+        "`invar plan audit begin` is the developer's, not yours: it records the Plan as the \
+         baseline an audit is compared with, and a baseline taken again after an edit would \
+         hide that edit from the report (plan-audit.md D-3). Do not run it, and do not write \
+         the baseline another way. If the Plan should be audited, say so and wait: the \
+         developer begins it with `/invar:plan-audit {target}`. {}",
+        mention("plan audit begin")
+    )
+}
 
 fn config_accept_reason(_: &str) -> String {
     format!(
