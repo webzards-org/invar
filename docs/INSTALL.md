@@ -72,9 +72,9 @@ the plugin.
 **Check that it works, in a session:**
 - `/plugin` lists `invar`, and the **Errors** tab is empty.
 - `/hooks` shows the invar hooks (`SessionStart`, `SubagentStart`, `SubagentStop`, `PreToolUse`).
-- `/agents` shows `planner`, `test-writer`, `coder` and `reviewer`.
-- `/invar:approve`, `/invar:relock`, `/invar:review`, `/invar:log`, `/invar:log-approve`
-  and `/invar:done` appear in the command list.
+- `/agents` shows `planner`, `plan-auditor`, `test-writer`, `coder` and `reviewer`.
+- `/invar:plan-audit`, `/invar:approve`, `/invar:relock`, `/invar:review`, `/invar:log`,
+  `/invar:log-approve` and `/invar:done` appear in the command list.
 
 ## Acceptance tests
 

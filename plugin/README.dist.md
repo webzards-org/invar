@@ -50,18 +50,21 @@ No hook approves a Plan, records a decision, unlocks a test or closes a cycle.
 ### Agents and skills
 
 - **Agents:** `planner` (writes the draft Plan; the only one that reads the
-  decision log), `test-writer` (writes and locks the acceptance tests), `coder`
-  (implements the approved Plan) and `reviewer` (an advisory report; changes
-  nothing).
+  decision log), `plan-auditor` (an optional check of a draft Plan against the
+  code: corrects names and paths in two of its sections, reports the rest),
+  `test-writer` (writes and locks the acceptance tests), `coder` (implements the
+  approved Plan) and `reviewer` (an advisory report; changes nothing).
 - **Skill:** `invar`, the cycle the main session follows.
 - **Slash commands for the developer:** `/invar:approve`, `/invar:relock`,
   `/invar:log-approve` and `/invar:done` record a person's decision: approving a
   Plan, unlocking a wrong test, recording a decision entry, closing the cycle.
-  `/invar:review` and `/invar:log` start the review and draft a decision entry.
-  All six have model invocation disabled, so only you can run them, and the
+  `/invar:plan-audit`, `/invar:review` and `/invar:log` start the audit of a draft
+  Plan, the review and the draft of a decision entry.
+  All seven have model invocation disabled, so only you can run them, and the
   `PreToolUse` hook denies the model the commands behind the four decisions
   (`invar plan approve`, `invar acceptance unlock`, `invar decision approve`,
-  `invar decision record`, `invar done`) when it tries them through `Bash`.
+  `invar decision record`, `invar done`), and `invar plan audit begin`, when it
+  tries them through `Bash`.
   `/invar:review` and `/invar:log` begin with a short shell snippet that finds
   the ticket's Plan under `.invar/plans/`; it only reads and prints.
 
@@ -89,6 +92,9 @@ During a cycle:
 - the planner writes the draft Plan, `.invar/plans/<TICKET>-<slug>/spec.md`, and
   `/invar:approve` writes the approval into its header (your `git config
   user.name`, the date, the checksum);
+- `/invar:plan-audit`, if you run it, writes `.invar/out/<TICKET>-audit/` (the
+  Plan as the audit began, the auditor's findings, the report), and the
+  plan-auditor may edit the draft Plan's *Implementation context* and *Scope*;
 - the test-writer writes test files under `acceptance.dir`, and
   `invar acceptance lock` writes an `invar-lock:` line with a digest into each;
 - the coder changes the application code inside the Plan's Scope;

@@ -177,7 +177,55 @@ will be held to:
 ```
 
 Want something changed? Say so, and the planner revises the draft. Nobody
-else edits it.
+else edits it, except the auditor below, which you start yourself.
+
+### Optional: audit the Plan against the code
+
+A Plan can be well-formed and still wrong: a column that does not exist, a path
+with a typo, a criterion that cannot pass. `plan validate` checks the form, not
+the facts. Before you approve, you can have another agent read the draft against
+the code:
+
+```
+/invar:plan-audit SHOP-214
+```
+
+It is worth it for a Plan that names a lot of code you have not read lately, or
+touches several invariants. It is never required: nothing waits for it.
+
+The **plan-auditor** runs on a different model from the planner, so the two are
+less likely to miss the same things. It sees the Plan, the code and the binding
+context, and never the planner's session or the decision log. It may change the
+draft in two sections only, and only facts with one right answer in the code,
+each with the `file:line` it read:
+
+- *Implementation context*: a class, method, route, column, config key or
+  mechanism named differently in the code, or a wrong `INV-<n>`;
+- *Scope*: a path that does not exist or is misspelled.
+
+It never changes the ticket, the intent, the answers, the rejected alternatives,
+the acceptance criteria, what Scope covers, or the header. Everything else it
+reports as a finding: a criterion that cannot pass, two that contradict, a sentence
+of the ticket no criterion covers, a criterion with no ground in the ticket, an
+invariant the ticket plainly touches that the Plan does not name, a fact it could
+not correct.
+
+Then Invar prints the report. Invar computes it; the agent does not write it. Each
+change is shown as a diff against the Plan as it was when the audit began, with the
+auditor's reason under it. After that come the result of `plan validate`, the
+findings, and one last line:
+
+```
+plan audit SHOP-214: NOT READY — 2 blocking finding(s)
+this is an agent's assessment of the Plan, not a check; approving is yours.
+```
+
+`READY` means only that the auditor reported no blocking finding. **It is not a
+check**, and a `NOT READY` blocks nothing. If the auditor changed anything outside
+the two sections, there is no report: it names the change and restores nothing,
+and `git diff` shows it. What to keep is up to you. To have the draft revised
+because of a finding, ask the planner, as for any change. To audit again after a
+revision, run `/invar:plan-audit SHOP-214 --restart`.
 
 ## 2. Approve
 
@@ -202,8 +250,15 @@ Read the `NOT NAMED` lines. Approving says that none of those invariants applies
 to this ticket. If one does, don't approve: tell the planner, which names it in
 the Plan's *Implementation context* and gives it a criterion that cites it
 (`- AC3 (INV-3): Given …`). `plan validate` already makes sure that every
-invariant the Plan names has such a criterion. It also records
-whether this ticket gets **locked acceptance tests**:
+invariant the Plan names has such a criterion.
+
+Then comes one line about the [audit](#optional-audit-the-plan-against-the-code):
+`plan audit: READY, for this version of the Plan`, with `NOT READY (2 blocking)` in
+place of `READY` when the auditor reported blocking findings, `…, but the Plan
+changed after it` when the Plan was edited after the report, or `plan audit: not
+run`. It refuses nothing, and the decision is yours either way.
+
+Approving also records whether this ticket gets **locked acceptance tests**:
 
 | You run | Acceptance tests |
 |---|---|
@@ -409,6 +464,8 @@ You never need them inside Claude Code. They are useful in a shell or in CI
 |---|---|
 | `invar plan validate <TICKET>` | Checks the Plan's form |
 | `invar plan check <TICKET>` | Checks that the Plan is approved and unchanged, and the locks |
+| `invar plan audit begin <TICKET> [--restart]` | What `/invar:plan-audit` runs: records a draft Plan as the baseline of an audit |
+| `invar plan audit report <TICKET>` | The audit's report: the changes since `begin` with their reasons, `plan validate`, the findings, READY or NOT READY |
 | `invar plan approve <TICKET> [--acceptance\|--no-acceptance] [--reapprove] [--commit <MESSAGE>\|--no-commit]` | The approval, as `/invar:approve` runs it; signed with `approval.signed` |
 | `invar cycle skip --reason <reason>` | What `/invar:skip` runs: a signed skip of the cycle, committed |
 | `invar config accept --reason <reason>` | What `/invar:config-accept` runs: a signed weakening of `invar.yaml`, committed |
