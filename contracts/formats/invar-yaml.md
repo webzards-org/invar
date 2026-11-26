@@ -1,6 +1,6 @@
 # Contract: `invar.yaml`
 
-**Version:** 2.8.0 — with `approval.signed` at the base, `Invar-Skip` and `Invar-Config` count only signed; see §11
+**Version:** 2.9.0 — a value added to `acceptance.fakes_allowed` weakens the checks; see §11
 **Status:** stable
 **Implements:** §6 (Config file), §13c (the review's base branch), §14.3; light
 mode L-2 and L-7 (`docs/TASKS-M1.md`); A-2, A-6 and A-7 (`docs/TASKS-AT.md`)
@@ -227,7 +227,7 @@ Reading the command runs nothing. `invar acceptance lock` is what executes it
 
 **`fakes_allowed`** is a list of non-empty strings, empty by default. The core does
 not interpret it and passes it on to the test-writer, so unknown values are accepted
-as they are.
+as they are. A value added to it weakens the checks (§3.9, D-21).
 
 `invar init` writes this section commented out (D-12).
 
@@ -396,6 +396,7 @@ the stronger value weakens nothing:
 | `acceptance.dir` changed | The locked files at the old path are no longer looked at |
 | `acceptance.run` changed | `lock` and `acceptance run` would run something else, which could pass anything |
 | `acceptance.required` from `true` to `false` | New tickets are approved without acceptance tests by default |
+| A value added to `acceptance.fakes_allowed` | The test-writer may fake one more thing, so the locked tests check less of the real code (D-21) |
 | `approval.signed` from `true` to `false` | Approvals are no longer signed, so an approval written by an agent looks like a person's |
 | A pattern removed from `cycle.required_paths`, the key or the section with it | Changes to those paths no longer need a cycle; `cycle check` reads the base's list, and this keeps the change from landing quietly |
 | `review.offer` from `true` to `false` | The main session stops offering the review before a pull request |
@@ -404,7 +405,8 @@ Adding a key or a pattern, or changing a value the other way, is never weakening
 key not in the list stays free to change. `git.base_branch` is not on the list, since no CI
 command reads it (§3.3.1); `config check` notes a change of it all the same. A whole `invar.yaml` removed is every weakening its
 keys allow. A change of `dir` or `run` is any change of its text, even one that names the
-same thing (`./tests/Acceptance`).
+same thing (`./tests/Acceptance`). A value of `fakes_allowed` is compared as text, so
+`HTTP` in place of `http` is a value added; removing a value, or reordering them, is not.
 
 **The boundary is CI.** `invar config check [--base <ref>]` reads `invar.yaml` at the base
 and at `HEAD`, with the base found by §3.3.1, as `cycle check` reads it (§3.8), and lists every weakening with its
@@ -681,6 +683,13 @@ remote, and only note the key. Putting `git.base_branch` on the weakening list i
 still let the branch name the base the list is read from. The local commands keep the key:
 there the developer runs them, and a wrong base costs them a wrong answer, not a check.
 
+**D-21 — Allowing a fake is weakening** (2.9.0). A locked test that fakes the mail or the
+queue does not check that the code sends the mail or queues the job. Each value added to
+`fakes_allowed` takes a part of the system out of what the tests can catch, and one edit
+does it, as one edit of `acceptance.dir` did (#157). Removing a value fakes less, so it is
+strengthening. The core still does not interpret the values; it only compares them, so a
+spelling it cannot know is another value (#172).
+
 ## 9. Open questions
 
 **OQ-1 — JSON Schema.** `contracts/README.md` lists a JSON Schema for
@@ -910,6 +919,20 @@ cycle:
 **Why:** a pattern names paths under the project root as they are.
 
 ## 11. Version history
+
+**2.9.0 — `acceptance.fakes_allowed` on the weakening list (#172).**
+
+- §3.9: a value added to `acceptance.fakes_allowed` is a weakening; removing or reordering
+  values is not. §3.6 points to it. New D-21.
+- `plan guard` denies a `Write` or `Edit` of `invar.yaml` that adds one, and `invar config
+  check` fails on one without an `Invar-Config` trailer, as for every other weakening.
+
+**Why:** the list omitted it, and allowing the tests to fake one more thing makes them check
+less, in one edit (#172).
+
+**Compatibility:** no key, value or default changes, so every valid file stays valid and
+reads as it did. A branch that adds a value to `fakes_allowed` now needs an `Invar-Config`
+trailer in CI, signed when `approval.signed` is on at the base.
 
 **2.8.0 — signed skips and configuration changes (#168).**
 

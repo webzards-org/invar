@@ -73,40 +73,8 @@ dependency bump or a one-line fix with an obvious outcome. The main session
 decides this and says so in one line ("Skipping the invar cycle: …"). If you
 disagree, say so.
 
-**When your project requires a cycle for some paths.** If `invar.yaml` lists
-`cycle.required_paths`, CI runs `invar cycle check`, and a pull request that
-changes one of those paths passes only when the change was made while a
-Plan was approved, and that cycle was closed with `/invar:done`, or with a
-skip you wrote. A change made after `done`, or before the approval, is not
-covered by the cycle. After a skipped change, the main
-session runs `invar cycle required` on the files it changed and tells you when
-one of them is required. If the change really needs no Plan, say why in a
-trailer on any commit of the branch:
-
-```bash
-git commit --amend --trailer "Invar-Skip: a comment typo in Order, no behavior"
-```
-
-The reason is printed in CI and read in review. The main session never writes
-it: the decision is yours. **With signed approvals** (`approval.signed: true` on
-the base), a bare trailer does not count: sign the skip instead, once the change
-is committed, with **`/invar:skip <reason>`**. It signs the required changes as
-they are, so a later change to one of them needs a new skip.
-
-**When you weaken a check on purpose.** If CI runs `invar config check`, a
-branch that removes the `acceptance:` section, changes `acceptance.dir` or
-`acceptance.run`, turns off `acceptance.required`, `approval.signed` or
-`review.offer`, or removes a pattern from `cycle.required_paths` fails until a
-commit says why:
-
-```bash
-git commit --amend --trailer "Invar-Config: the acceptance tests moved under tests/Feature"
-```
-
-Write it yourself. The agent cannot make those edits through its edit tools,
-and it does not write the trailer either. **With signed approvals**, sign it
-instead with **`/invar:config-accept <reason>`**; a later edit of `invar.yaml`
-needs a new one.
+Some teams also run checks in CI that look at this decision; see
+[Optional: CI checks (early)](#optional-ci-checks-early).
 
 ## 1. Plan
 
@@ -294,7 +262,7 @@ Two more choices, both off unless you ask for them:
   key, or the key does not sign, nothing is approved and the reason is printed.
   CI checks the signatures with `invar approval verify`. Setting it up, and
   what it proves and does not prove, is in
-  [INSTALL.md](INSTALL.md#optional-signed-approvals).
+  [INSTALL.md](INSTALL.md#signed-approvals).
 
 From now on the Plan is frozen. If anyone changes it, even by one character,
 `invar plan check` refuses and no agent starts. No agent edits an approved
@@ -370,8 +338,9 @@ pass, and runs your project's own checks. It answers in one of three ways:
   pass, and the main session offers to start the coder again with it; it offers
   no commit, review or `/invar:done` until the tests are green. A skipped test
   is not green, and neither is one that passed only on a retry. This run is
-  feedback in your session; the check you can rely on is your CI's (see
-  [Verify the locks in CI](INSTALL.md#optional-verify-the-locks-in-ci)).
+  feedback in your session. `invar done --results` makes the same check before it
+  closes the cycle, and CI can repeat it if your team runs the optional checks
+  ([Verify the locks in CI](INSTALL.md#verify-the-locks-in-ci)).
 - **`BLOCKED <reason>`**: the Plan cannot be implemented as approved (two
   criteria contradict each other, something it depends on does not exist).
   It never softens a criterion to get past it. You decide what follows: often
@@ -424,7 +393,8 @@ main session offers each step once:
 
 - The **locked acceptance tests**, in your test directory, each with its
   criterion's text and its lock line. They keep proving the behavior on every
-  later ticket, and CI (`invar acceptance verify`) notices if one changes.
+  later ticket, and `plan check` and `done` notice if one changes (so does
+  `invar acceptance verify` in CI, if you run it).
 - The **decision entry**, if you recorded one, in `.invar/decisions/`, with
   `acceptance: required` or `skipped` in its header.
 - The **PR description**, with the Plan in it.
@@ -465,7 +435,52 @@ rule of thumb:
   instruction or don't use the two on the same project.
 
 The difference in one line: a skill set teaches an agent good practice; Invar
-enforces it with checks on disk and in CI.
+enforces it with checks on disk.
+
+## Optional: CI checks (early)
+
+Everything above runs on your machine, and the cycle needs nothing more. A team
+may also run some checks in CI, on a binary the agent cannot change: that the
+locks are unchanged and the locked tests passed, that `invar.yaml` is not
+weakened, that required paths went through a cycle, and that approvals are
+signed. These are early; running the cycle in CI/CD is a later phase. How to set
+them up is in [`INSTALL.md`](INSTALL.md#optional-ci-checks-early). Two of them
+ask something of you:
+
+**Required paths.** If `invar.yaml` lists `cycle.required_paths` and CI runs
+`invar cycle check`, and a pull request that
+changes one of those paths passes only when the change was made while a
+Plan was approved, and that cycle was closed with `/invar:done`, or with a
+skip you wrote. A change made after `done`, or before the approval, is not
+covered by the cycle. After a skipped change, the main
+session runs `invar cycle required` on the files it changed and tells you when
+one of them is required. If the change really needs no Plan, say why in a
+trailer on any commit of the branch:
+
+```bash
+git commit --amend --trailer "Invar-Skip: a comment typo in Order, no behavior"
+```
+
+The reason is printed in CI and read in review. The main session never writes
+it: the decision is yours. **With signed approvals** (`approval.signed: true` on
+the base), a bare trailer does not count: sign the skip instead, once the change
+is committed, with **`/invar:skip <reason>`**. It signs the required changes as
+they are, so a later change to one of them needs a new skip.
+
+**A check weakened on purpose.** If CI runs `invar config check`, a branch that
+removes the `acceptance:` section, changes `acceptance.dir` or `acceptance.run`,
+turns off `acceptance.required`, `approval.signed` or `review.offer`, adds a
+value to `acceptance.fakes_allowed`, or removes a pattern from
+`cycle.required_paths` fails until a commit says why:
+
+```bash
+git commit --amend --trailer "Invar-Config: the acceptance tests moved under tests/Feature"
+```
+
+Write it yourself. The agent cannot make those edits through its edit tools,
+and it does not write the trailer either. **With signed approvals**, sign it
+instead with **`/invar:config-accept <reason>`**; a later edit of `invar.yaml`
+needs a new one.
 
 ## Commands you may run in a terminal
 

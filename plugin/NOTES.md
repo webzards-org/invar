@@ -2790,3 +2790,37 @@ what changes here.
 ### Iteration log
 
 (none yet)
+
+## 24. Which tools edit files — checked for #172
+
+The guard's `PreToolUse` matcher is `Write|Edit|Bash`. Whether Claude Code still has a
+`MultiEdit` tool, whose payload holds a list of edits, was checked on **2026-11-26 against
+Claude Code 2.1.332**, by a run, not from the docs:
+
+```bash
+mkdir /tmp/tools && cd /tmp/tools
+claude -p "Reply with OK" --output-format stream-json --verbose | head -n 3
+```
+
+The `system` message with `"subtype":"init"` lists the session's tools. The ones that write a
+file are **`Write`, `Edit` and `NotebookEdit`**. **There is no `MultiEdit`.** The name is
+still in the binary, only where permission rules are read: a rule written for `MultiEdit` is
+read as one for `Edit`, as rules for `Write` and `NotebookEdit` are. That is a leftover of
+the tool earlier versions had, not a tool a session can call.
+
+So nothing changes in the guard: the matcher stays `Write|Edit|Bash`, and `text_after` keeps
+the two payloads it knows (§11). `NotebookEdit` is not added: it edits cells of a `.ipynb`
+by `notebook_path`, and none of the files the guard protects is a notebook. Not exercised:
+whether it would write to a path that is not one.
+
+The run was in a hosted session that adds tools of its own to the list; the built-in file
+tools are the same in a terminal. Repeat the command after an upgrade of Claude Code.
+
+**The rule for a new tool that edits files.** When a version adds one, it is added to the
+matcher in `hooks/hooks.json`, and `text_after` in `core/src/gate/guard/mod.rs` learns its
+payload, so that every rule that judges "the file the call would leave" sees what the call
+would leave. Each guarded file gets a test in `core/tests/plan_guard.rs` for it: an approved
+Plan, a draft's approval values, a locked test (and a digest written into a lock line),
+`invar.yaml`, `.claude/settings.json`, and the audit's baseline and report. Until then a
+call through that tool is not seen by the guard at all, as a shell write is not, and only
+the checks on disk catch its result.

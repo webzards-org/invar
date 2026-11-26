@@ -99,8 +99,8 @@ Pest:
   writes or changes factories; a missing one is a `BLOCKED`.
 - **The acceptance directory in a test suite**, so your own CI runs these tests
   too: add `<directory>tests/Acceptance</directory>` to a `<testsuite>` in
-  `phpunit.xml`. `invar acceptance verify --results` in CI refuses a locked
-  file your suite did not run.
+  `phpunit.xml`. If you add the CI checks, `invar acceptance verify --results`
+  refuses a locked file your suite did not run.
 - **`AI_CONTEXT.md`, under `## Tests`**: how this project writes tests. The
   framework, the database, what may be faked (`Http::fake`, `Mail::fake`) and
   what never is (your own models, scopes and policies).
@@ -132,8 +132,10 @@ acceptance:
   the project and the temp directory mounted at the same paths, for example
   `["docker", "run", "--rm", "-v", "/tmp:/tmp", "-v", "/path/to/project:/path/to/project", "-w", "/path/to/project", "<image>", "vendor/bin/pest", "--colors=never", "--log-junit", "{report}", "{files}"]`.
 
-**3. Commit `invar.yaml`, and add the CI check** from
-[Verify the locks in CI](#optional-verify-the-locks-in-ci).
+**3. Commit `invar.yaml`.** On your machine, `invar plan check` and `invar done` now
+check every lock, and the guard keeps the agents' edit tools off locked files. To have
+CI check them too, see [Verify the locks in CI](#verify-the-locks-in-ci) under
+[Optional: CI checks (early)](#optional-ci-checks-early).
 
 ## For yourself only: install for every project
 
@@ -197,7 +199,17 @@ done
 
 The code they were built from is the tagged commit in this repository.
 
-## CI: install the released CLI
+## Optional: CI checks (early)
+
+Nothing in this section is needed for the cycle: everything above works on your machine,
+and that is where Invar is meant to be used today. Running the cycle in CI/CD is a later
+phase. These commands exist already, for teams that want them now. What CI adds is that the
+checks run on what will be merged, against the base branch, with a binary the agent on a
+developer's machine cannot have changed. What it needs is a checkout with full history
+(`fetch-depth: 0`), the pull request's target given as `--base`, and the attested release
+binary, installed as below.
+
+### CI: install the released CLI
 
 Every check below runs in CI, with a binary CI installs itself: **the release, checked with
 `gh attestation verify`**, never a binary committed to the repository or copied from a
@@ -219,7 +231,7 @@ steps:
   - name: Install invar
     env:
       GH_TOKEN: ${{ github.token }}
-      INVAR_VERSION: v0.2.0   # pin the release you checked
+      INVAR_VERSION: v0.3.0   # pin the release you checked
     run: |
       gh release download "$INVAR_VERSION" --repo webzards-org/invar --pattern invar-linux-x86_64
       gh attestation verify invar-linux-x86_64 --repo webzards-org/invar
@@ -256,12 +268,26 @@ change](#signing-a-skip-or-a-configuration-change)). If your pull requests targe
 `develop`, `--base origin/${{ github.base_ref }}` already says so. `git.base_branch` stays for the
 commands you run yourself (`plan check`, `done`, `review-input`).
 
-## Optional: verify the locks in CI
+### Protect the workflow
 
-A locked acceptance test is only worth something if CI notices when it changes. Run
-`invar acceptance verify` on every push. It runs no tests and needs no Plan and no git
-history, so a shallow checkout is enough and it still works after `invar done` has deleted
-the Plan:
+A pull request can edit the workflow file on its own branch, and its checks then run as the
+branch says, or not at all. A step that is not there cannot fail. Make each of these steps a
+**required status check** on the base branch (branch protection or a ruleset), so a pull
+request whose workflow drops one cannot be merged, and list `.github/workflows/` and
+`.invar/approvers` in **`CODEOWNERS`**, with review by code owners required, so a change to
+either is reviewed by the people who own the checks and the list of approvers:
+
+```text
+/.github/workflows/  @your-org/maintainers
+/.invar/approvers    @your-org/maintainers
+```
+
+### Verify the locks in CI
+
+On your machine, `invar plan check` and `invar done` already refuse a locked test that
+changed. In CI, `invar acceptance verify` checks every lock on every push, on CI's own
+binary. It runs no tests and needs no Plan and no git history, so a shallow checkout is
+enough and it still works after `invar done` has deleted the Plan:
 
 ```yaml
 - uses: actions/checkout@v4
@@ -274,7 +300,7 @@ It prints `verified <N> locked file(s)`, or fails with every problem: a locked f
 digest no longer matches, a malformed `invar-lock:` line, or a pending line nobody locked.
 With no `acceptance:` section in `invar.yaml` it warns and exits 0.
 
-### Check that the locked tests pass
+#### Check that the locked tests pass
 
 An unchanged test can still be red. Invar does not run your test suite: your test step
 does, and writes a JUnit report that `verify --results` reads. Every locked file must have
@@ -354,7 +380,7 @@ To close the cycle only when the ticket's locked tests passed, give `done` the s
 `invar done SHOP-214 --results junit.xml`, with `--report-root` as above when the tests ran in
 a container. On a red test it refuses and deletes nothing.
 
-## Optional: require a cycle for some paths
+### Require a cycle for some paths
 
 The main session may skip the cycle for trivial work, and nothing in Claude Code can be the
 check of that decision, because the session is what the check would hold. CI can be. List
@@ -423,7 +449,7 @@ Changes under `.invar/` never count. The plugin's guard denies an agent's `git c
 writes the trailer, but that is a scan of the command line: without signed approvals, nothing
 proves that a person wrote it. With them, the signature does.
 
-## Optional: refuse a weakened configuration
+### Refuse a weakened configuration
 
 Some keys of `invar.yaml` decide whether anything is checked: removing the `acceptance:`
 section makes `acceptance verify` warn and exit 0. `invar config check` compares
@@ -431,6 +457,8 @@ section makes `acceptance verify` warn and exit 0. `invar config check` compares
 
 - the `acceptance:` section removed, or `acceptance.dir` or `acceptance.run` changed, or
   `acceptance.required` turned from `true` to `false`;
+- a value added to `acceptance.fakes_allowed`, since the tests may then fake one more
+  thing (removing one passes);
 - `approval.signed` turned from `true` to `false`;
 - a pattern removed from `cycle.required_paths`;
 - `review.offer` turned from `true` to `false`.
@@ -455,7 +483,7 @@ configuration change](#signing-a-skip-or-a-configuration-change)). The plugin's 
 an agent's edit that weakens `invar.yaml`, and its commit that writes the trailer; both are
 conveniences, and this check is the boundary.
 
-## Optional: signed approvals
+### Signed approvals
 
 The checksum shows that a Plan has not changed since it was approved. It does not
 show who approved it: anything that can run `invar` can compute a checksum, and
@@ -569,7 +597,7 @@ on the base. The list is read each time the check runs: an open pull request's
 approvals with a new key count once the line is merged and CI runs again, and a
 key whose line is removed stops counting the same way.
 
-### Signing a skip or a configuration change
+#### Signing a skip or a configuration change
 
 With `approval.signed: true` on the base, two more decisions of yours are signed:
 a change to required paths without a cycle, and a change that weakens a check in
@@ -672,8 +700,8 @@ Enterprise Cloud): on a private repository the workflow stops at
 3. Tag and push:
 
    ```bash
-   git tag v0.2.0
-   git push origin v0.2.0
+   git tag v0.3.0
+   git push origin v0.3.0
    ```
 
 4. Check that the workflow ran, that `dist` holds
@@ -681,7 +709,7 @@ Enterprise Cloud): on a private repository the workflow stops at
    `invar-darwin-x86_64`, and that the release has the same three files and
    `SHA256SUMS`.
 5. Put that version's section of `CHANGELOG.md` into the release notes:
-   `gh release edit v0.2.0 --notes-file <file>`.
+   `gh release edit v0.3.0 --notes-file <file>`.
 
 Never commit a binary to `main`; `core/tests/plugin.rs` fails if one appears.
 

@@ -1208,6 +1208,11 @@ const WEAKENINGS: &[(&str, &str, &str)] = &[
         "",
         "cycle.required_paths: app/Models/** -> removed",
     ),
+    (
+        "  dir: tests/Acceptance",
+        "  fakes_allowed: [mail]\n  dir: tests/Acceptance",
+        "acceptance.fakes_allowed: mail -> added",
+    ),
     ("offer: true", "offer: false", "review.offer: true -> false"),
 ];
 
@@ -1259,6 +1264,32 @@ fn adding_strengthening_and_other_keys_of_invar_yaml_pass() {
         "review:\n",
         "context:\n  binding_limit: 5000\nreview:\n",
     ));
+}
+
+#[test]
+fn removing_a_fake_from_invar_yaml_passes_and_adding_one_is_denied() {
+    let project = Project::new(APPROVED);
+    let some = CONFIG.replace(
+        "  dir: tests/Acceptance",
+        "  fakes_allowed: [http, mail]\n  dir: tests/Acceptance",
+    );
+    fs::write(project.root().join("invar.yaml"), &some).unwrap();
+    let path = project.path("invar.yaml");
+    passes_silently(edit_with(&project.root(), &path, "[http, mail]", "[http]"));
+    passes_silently(write_with(
+        &project.root(),
+        &path,
+        &some.replace("[http, mail]", "[mail, http]"),
+    ));
+    denied_as_weakening(
+        edit_with(
+            &project.root(),
+            &path,
+            "[http, mail]",
+            "[http, mail, queue]",
+        ),
+        "acceptance.fakes_allowed: queue -> added",
+    );
 }
 
 #[test]

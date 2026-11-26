@@ -54,11 +54,50 @@ that predates AI agents:
 | Test-first, red before green    | A locked test must fail on an assertion before the code exists                                                                 |
 | Design by contract              | Business invariants are explicit, named and checked in review                                                                  |
 | Architecture decision records   | A decision log keeps _why_, after the ticket is gone                                                                           |
-| Verification, not trust         | Every boundary is checked on disk and in CI, never left to an instruction                                                      |
+| Verification, not trust         | Every boundary is a check on disk by the `invar` CLI, never left to an instruction                                             |
 
 **Invar recommends; the developer decides.** Approving a Plan, skipping tests,
 unlocking a test, recording a decision and closing a cycle are the developer's
 commands. The agent is refused when it tries to run them.
+
+## What protects the work on your machine
+
+The whole cycle runs where you work: in your Claude Code session, on your
+machine, with no server and no CI. Four things keep the target fixed while an
+agent writes the code:
+
+- **The gate.** `/invar:approve` records a checksum of the Plan you read.
+  `invar plan check` then refuses to start an agent on a Plan that changed by
+  one character, and `/invar:done` refuses to close it. When the invariants in
+  `BUSINESS_CONTEXT.md` have ids (`INV-1`), the gate lists every one the Plan
+  does not name, so approving says out loud that it does not apply.
+- **Locked tests.** The test-writer turns each criterion into a test that must
+  fail before the code exists. `invar acceptance lock` then writes a digest,
+  and the criteria the file covers (`ac=AC1,AC2`), into the file's lock line.
+  A locked test that changes is refused by `plan check` and `done`, and
+  `invar acceptance run` says per criterion whether the ticket's locked tests
+  pass, before the coder answers `DONE` and again after.
+- **The guard.** A hook on every `Write`, `Edit` and `Bash` call stops an agent
+  editing an approved Plan or a locked test, writing approval values into a
+  draft, weakening `invar.yaml`, removing the deny rule from
+  `.claude/settings.json` or rewriting a Plan audit's baseline, and running the
+  commands that are yours: approve, unlock, record, done.
+- **The Plan audit, optional.** `/invar:plan-audit <TICKET>` has a second agent
+  read the draft against the code before you approve. It corrects names and
+  paths, each with the `file:line` it read, and reports a criterion that cannot
+  pass or two that contradict. Invar computes the report; approving stays
+  yours.
+
+**What this guarantees, and where it stops.** These checks on disk catch an
+accidental or incidental change: a criterion relaxed along the way, a test
+edited until it passes, an approval value filled into a draft, a check turned
+off in `invar.yaml` in passing. They do not stop an agent that deliberately
+gets past them through its shell: anything that can run `invar` can compute a
+new digest, checksum or audit baseline, and the plugin, its hooks and its
+binary are files on the same machine. Invar makes an honest agent stop and a
+careless change visible; it does not make a determined one powerless. The
+[optional CI checks](#optional-ci-checks-early) repeat some of these checks
+where the agent cannot change the answer.
 
 ## How a ticket flows
 
@@ -197,6 +236,7 @@ recorded one.
 
   | Command                            | When                                                  |
   | ---------------------------------- | ----------------------------------------------------- |
+  | `/invar:plan-audit <TICKET>`       | Optional, before you approve                          |
   | `/invar:approve <TICKET>`          | You read the Plan and agree with it                   |
   | `/invar:relock <TICKET> <file>`    | The coder shows a locked test is wrong, and you agree |
   | `/invar:review <TICKET>`           | Optional, before the PR                               |
@@ -212,9 +252,44 @@ recorded one.
   text, so a CRLF checkout never invalidates an approval. `invar init` merges
   into your existing `.gitignore`, `.gitattributes` and
   `.claude/settings.json` without overwriting anything.
-- **Works in CI with no agent.** `invar acceptance verify` checks every locked
-  test on each push, and with `--results junit.xml`, that each one passed in
-  your own test run.
+
+## Optional: CI checks (early)
+
+The cycle needs no CI. For a team that wants some checks repeated where an
+agent cannot change the answer, four commands run in CI, with no agent, on the
+attested release binary, against the pull request's base:
+
+| Command                                          | What it adds                                                                                                        |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `invar acceptance verify [--results junit.xml]`  | Every lock is unchanged; with `--results`, every locked test passed in your own test run, each listed criterion too |
+| `invar config check --base <ref>`                | The branch does not weaken a check in `invar.yaml`, unless you said why in an `Invar-Config:` trailer               |
+| `invar cycle check --base <ref>`                 | Changes to the paths in `cycle.required_paths` went through a closed cycle, or you skipped it in an `Invar-Skip:` trailer |
+| `invar approval verify --base <ref>`             | With `approval.signed`, every approval on the branch is signed by a key in the base's `.invar/approvers`            |
+
+They exist and are tested, and may still change: running the cycle in CI/CD is
+a later phase. Setting them up, with `fetch-depth: 0`, `--base` and protection
+for the workflow file, is in
+[`docs/INSTALL.md`](docs/INSTALL.md#optional-ci-checks-early).
+
+**Signed approvals.** With `approval.signed: true`, `/invar:approve` signs the
+approval with your SSH signing key, and `/invar:skip` and
+`/invar:config-accept` sign a skipped cycle and a weakened check. What that
+guarantees, and what it does not: with `approval.signed: true` on the base
+branch, and `invar approval verify`, `invar cycle check` and `invar config
+check` run in CI on the attested release binary, a pull request passes only
+when every approval of a Plan on it, every skip of the cycle and every weakened
+check was signed by a key the base branch's `.invar/approvers` lists, over
+exactly what it covers, and when no approval was put back from earlier on the
+branch or from any branch git still reaches. Who signed is the record, not
+`Approved-by`. What it does not guarantee is that a person meant it: a
+signature shows that the key was used. A key the agent can use without you, a
+file with no passphrase or a key unlocked in `ssh-agent`, signs for the agent
+too, and then a signature proves no more than the checksum. A key that asks on
+each use, a security key's touch or a confirmation, can still be made to ask by
+the agent, and the prompt does not say what is being signed. On your machine
+the checks stay what they are above; a signature adds something only where CI
+checks it ([`docs/INSTALL.md`](docs/INSTALL.md#signed-approvals),
+`contracts/formats/approval-signature.md` §7).
 
 ## Principles
 
@@ -231,7 +306,7 @@ recorded one.
 
 ## Status
 
-Invar is at **0.1.x**, in beta, and under active development as a side
+Invar is at **0.3.0**, in beta, and under active development as a side
 project. Tell us how it went on your project with the
 [Beta feedback](https://github.com/webzards-org/invar/issues/new?template=2-beta-feedback.yml)
 form.
@@ -256,29 +331,12 @@ the wording of their output. Every change is listed in
   the test-writer writes tests, it does not set up your test environment
   ([`docs/INSTALL.md`](docs/INSTALL.md#acceptance-tests)). Without one, approve
   tickets with `--no-acceptance`.
-- On disk, the approval is a checksum. It catches a careless or accidental
-  change; it does not stop an agent with a shell that sets out to write an
-  approval itself, because anything that can run `invar` can compute one.
-  What signed approvals add, and what they do not, is below.
-
-**What signed approvals guarantee, and what they do not.** With
-`approval.signed: true` on the base branch, and `invar approval verify`,
-`invar cycle check` and `invar config check` run in CI on the attested release
-binary, a pull request passes only when every approval of a Plan on it, every
-skip of the cycle and every weakened check was signed by a key the base
-branch's `.invar/approvers` lists, over exactly what it covers, and when no
-approval was put back from earlier on the branch or from any branch git still
-reaches. Who signed is the record, not `Approved-by`. What it does not
-guarantee is that a person meant it: a signature shows that the key was used.
-A key the agent can use without you, a file with no passphrase or a key
-unlocked in `ssh-agent`, signs for the agent too, and then a signature proves
-no more than the checksum. A key that asks on each use, a security key's touch
-or a confirmation, can still be made to ask by the agent, and the prompt does
-not say what is being signed. Nothing outside CI is a guarantee: on your
-machine the hooks and the checksum catch mistakes, not an agent set on getting
-past them
-([`docs/INSTALL.md`](docs/INSTALL.md#optional-signed-approvals),
-`contracts/formats/approval-signature.md` §7).
+- On disk, the approval is a checksum and a lock is a digest. They catch a
+  careless or accidental change, not an agent with a shell that sets out to
+  write its own
+  ([what that means](#what-protects-the-work-on-your-machine)). What signed
+  approvals add, and what they do not, is under
+  [Optional: CI checks](#optional-ci-checks-early).
 - `AI_CONTEXT.md` and `BUSINESS_CONTEXT.md`, together and with the labels
   Invar adds, must stay under the binding limit: 9,000 characters by default,
   at most 10,000. Above it,
@@ -296,7 +354,7 @@ Every release binary has a build provenance attestation you can check with
 
 ## Documentation
 
-- [`docs/INSTALL.md`](docs/INSTALL.md): installing for a team or yourself, acceptance tests, CI
+- [`docs/INSTALL.md`](docs/INSTALL.md): installing for a team or yourself, acceptance tests, the optional CI checks
 - [`docs/USAGE.md`](docs/USAGE.md): one ticket, step by step
 - [`docs/DESIGN.md`](docs/DESIGN.md): the design document and its reasoning
 

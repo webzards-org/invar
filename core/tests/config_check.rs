@@ -194,6 +194,13 @@ fn each_weakening_fails_naming_its_base_and_head_values() {
             "cycle.required_paths: app/Models/** -> removed",
         ),
         (
+            CONFIG.replace(
+                "  dir: tests/Acceptance",
+                "  fakes_allowed: [mail]\n  dir: tests/Acceptance",
+            ),
+            "acceptance.fakes_allowed: mail -> added",
+        ),
+        (
             CONFIG.replace("offer: true", "offer: false"),
             "review.offer: true -> false",
         ),

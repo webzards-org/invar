@@ -1,7 +1,9 @@
 # How Invar works
 
 This document explains what Invar is made of, how a ticket moves through it,
-and why it is built the way it is. It describes what is built today (0.1.x).
+and why it is built the way it is. It describes what is built in 0.3.0. Invar
+is used on the developer's machine, in their Claude Code session; the checks
+that can also run in CI are an optional, early part (§12).
 For installing, see [`INSTALL.md`](INSTALL.md); for the step-by-step cycle,
 [`USAGE.md`](USAGE.md).
 
@@ -43,9 +45,9 @@ agents are replaceable; the method is what lasts.
 | **Test-first, red before green** | A locked test must fail on an assertion before the code exists |
 | **Design by contract** | Rules the application must never break are explicit, named and checked in review |
 | **Small batches** | A ticket too large for one cycle is split before it is planned |
-| **A human decides where it matters** | Approving, skipping tests, unlocking a test, recording a decision and closing a cycle are the developer's commands. Skipping the cycle on a path the team requires one for is a commit trailer the developer writes, which CI prints and checks |
+| **A human decides where it matters** | Approving, skipping tests, unlocking a test, recording a decision and closing a cycle are the developer's commands. Where a team runs the optional CI checks, skipping the cycle on a required path or weakening a check is a commit trailer the developer writes, or signs |
 | **Architecture decision records** | A decision log keeps *why* after the ticket is gone |
-| **Verification, not trust** | Every boundary is checked on disk and in CI |
+| **Verification, not trust** | Every boundary is a check on disk by the CLI; CI can repeat it with its own binary |
 
 **Invar recommends; the developer decides.** Where practice differs between
 teams (how tickets are split and tracked, whether a ticket gets acceptance
@@ -63,6 +65,7 @@ flowchart TB
     subgraph CC [Claude Code]
         Main[Main session<br/><i>dispatcher</i>]
         Planner[planner]
+        Auditor[plan-auditor<br/><i>optional</i>]
         TW[test-writer]
         Coder[coder]
         Rev[reviewer]
@@ -82,14 +85,14 @@ flowchart TB
         Cfg[(invar.yaml)]
     end
 
-    CI[[CI<br/><i>same CLI, no agent</i>]]
+    CI[[CI, optional<br/><i>same CLI, no agent</i>]]
 
     Dev <--> Main
     Dev -- slash commands --> Skills
-    Main --> Planner & TW & Coder & Rev
+    Main --> Planner & Auditor & TW & Coder & Rev
     Hooks --> CLI
     Skills --> CLI
-    Planner & TW & Coder & Rev -. run checks .-> CLI
+    Planner & Auditor & TW & Coder & Rev -. run checks .-> CLI
     CLI <--> Disk
     CI --> CLI
 ```
@@ -102,7 +105,7 @@ Four kinds of parts, each with one job:
   reads and writes plain files and never calls a model.
 - **Files in your repository** are the state: the Plan, the locks, the
   decision log, the context. Because the state is on disk, the same checks
-  run in CI where no agent exists.
+  can also run in CI, where no agent exists (§12).
 
 ## 4. The cycle in detail
 
@@ -124,10 +127,14 @@ flowchart TD
         V -- "form errors" --> Planner
     end
 
-    V -- valid --> Approve
+    V -- valid --> AuditQ{👤 audit first?}
+    AuditQ -- "/invar:plan-audit" --> Audit[plan-auditor<br/>corrects facts in two sections<br/>reports findings]
+    Audit --> Report[⚙ invar plan audit report<br/>diff, findings, READY / NOT READY]
+    Report --> Approve
+    AuditQ -- no --> Approve
 
     subgraph G1 [Gate]
-        Approve{{"👤 /invar:approve<br/>prints the criteria<br/>records name, date, checksum<br/>Acceptance: required or skipped"}}
+        Approve{{"👤 /invar:approve<br/>prints the criteria and every INV-n<br/>named or NOT NAMED, and the audit line<br/>records name, date, checksum<br/>Acceptance: required or skipped"}}
     end
 
     Approve -- required --> TW
@@ -168,7 +175,7 @@ flowchart TD
     end
 
     Done --> Merged([Merge])
-    Merged --> CIv[⚙ CI: invar acceptance verify --results<br/>on every later push]
+    Merged --> CIv[⚙ optional CI: acceptance verify --results<br/>on every later push]
 ```
 
 👤 a step only the developer can take · ⚙ a deterministic check by the CLI
@@ -192,13 +199,16 @@ drift from the ticket, and output that can be reviewed against one document.
 | Agent | Default model | Reads | Produces | Answers |
 |---|---|---|---|---|
 | **planner** | opus | ticket, `AI_CONTEXT.md`, `BUSINESS_CONTEXT.md`, decision log, the code the ticket touches | a draft Plan, or a proposed split | `QUESTIONS`, `SPLIT`, or the Plan's path |
+| **plan-auditor** | fable | the draft Plan, both context files, the code; never the planner's session or the log | corrections in two sections of the draft, and findings | findings in a fixed shape; Invar writes the report |
 | **test-writer** | opus | approved Plan, `AI_CONTEXT.md` | one outside-in test per criterion, locked | `LOCKED` or `BLOCKED` |
 | **coder** | sonnet | approved Plan, `AI_CONTEXT.md`, the code in Scope | the implementation | `DONE`, `BLOCKED`, `BLOCKED-TEST` |
 | **reviewer** | opus | Plan criteria, both context files, the branch diff | an advisory report | a report in a fixed shape |
 
 The defaults follow risk. The planner and the reviewer get a strong model
 because a weak Plan weakens the gate itself and the reviewer is the safety net
-for a missed invariant. The coder may run on a cheaper model because
+for a missed invariant. The plan-auditor, which only runs when you ask, runs on
+a different model from the planner, so the two are less likely to miss the
+same things. The coder may run on a cheaper model because
 everything it produces is checked on disk. The main session can choose
 another model per call, and tells you before the gate when the planner ran on
 anything other than its default. **No verdict depends on which model ran.**
@@ -264,6 +274,7 @@ the file look finished while the rules that matter stay unwritten.
   a check: Invar scaffolds the heading, and the team decides whether to use it.
 - **Invariants**: rules no ticket may break. *Every tenant-scoped query is
   filtered by account. Every state change by an operator notifies an admin.*
+  Each may start with an id, `- INV-1: …` (below).
 - **Regional / parameterized facts**: values that differ by country, tenant
   or plan: a payment provider, a billing cutoff, a time zone. When a ticket
   touches one, the planner **always asks**, because the right answer is not in
@@ -271,6 +282,17 @@ the file look finished while the rules that matter stay unwritten.
 
 A business *fact* belongs here. The technical convention derived from it
 (store timestamps in UTC, convert at display) belongs in `AI_CONTEXT.md`.
+
+**Invariant ids.** An id is `INV-` and a number, like an ADR number: never
+reused, and left unused when its rule is removed, since a Plan or a PR may cite
+it. With ids, a Plan names an invariant in its Implementation context as
+`- BUSINESS_CONTEXT INV-2: …`, and a criterion that covers it cites it,
+`- AC3 (INV-2): Given …`. `plan validate` refuses an id the file does not
+define, a named invariant no criterion cites, and a criterion citing one the
+Plan does not name. The ids are all or none: a file where only some invariants
+have one is an error. Without ids everything works as before, with one warning
+at the gate. What the ids buy is at the gate (§7): the developer sees which
+invariants the Plan leaves out, instead of having to remember them.
 
 ### How context is delivered
 
@@ -329,12 +351,44 @@ stateDiagram-v2
     approved --> [*]: 👤 /invar:done<br/>deleted in the same PR
 ```
 
+**At the gate.** `/invar:approve` prints the criteria once more. When the
+invariants have ids, it lists every one of them after the criteria, named in
+the Plan (with the criteria that cite it) or `NOT NAMED`, so approving says
+that the unnamed ones do not apply to this ticket. Then one line about the Plan
+audit, if there was one. None of it refuses anything: it puts what the approval
+means in front of the person who gives it.
+
 **Frozen by a checksum.** `invar plan approve` records who approved, when, and
 a SHA-256 digest of the Plan's body. From then on `plan check`, the coder's
 first step and `done` all refuse a Plan that changed by a single character.
 Text is canonicalized before hashing (UTF-8, BOM, line endings, trailing
 whitespace), so a Windows checkout with `core.autocrlf` never invalidates an
 approval.
+
+### The Plan audit, optional
+
+A Plan can be well-formed and still wrong: a column that does not exist, a path
+with a typo, a criterion that cannot pass. `plan validate` checks the form, not
+the facts. `/invar:plan-audit <TICKET>`, run by the developer before approval,
+has the plan-auditor read the draft against the code. It may change two
+sections only, and only facts with one right answer in the code, each with the
+`file:line` it read: names in *Implementation context* (including a wrong
+`INV-<n>`) and paths in *Scope*. Everything else is a finding, from a closed list
+of kinds: a criterion that cannot pass, criteria that contradict, a ticket
+sentence no criterion covers, an invariant the ticket touches that the Plan
+does not name.
+
+The agent never writes the report. `invar plan audit begin` records the Plan as
+a baseline, and `invar plan audit report` computes the report from the
+baseline, the findings and the Plan: each change as a diff with its reason,
+`plan validate`, the findings, and `READY` or `NOT READY — <n> blocking
+finding(s)`. An audit that changed any other section, or the header, gets no
+report. The gate's line is computed the same way, so it says when the Plan
+changed after the audit. `begin` is the developer's command, and the guard keeps
+the agents' edit tools off the baseline and the report, because a baseline
+taken again after an edit would hide that edit. `READY` is an agent's
+assessment, not a check: it blocks nothing, and approving stays a person's
+decision (`contracts/formats/plan-audit.md`).
 
 **In git, not in a temp folder.** The Plan is committed on the branch next to
 the code, which gives three things:
@@ -374,8 +428,9 @@ that decides whether it works.
 
    No manifest, no side files. The lock travels with the test, and so does
    the list of criteria it covers, under the same digest.
-4. The **coder** makes them pass and may not touch them. `plan check`, `done`
-   and CI all notice a changed locked file.
+4. The **coder** makes them pass and may not touch them. `plan check` and
+   `done` notice a changed locked file, and so does `acceptance verify` where
+   CI runs it.
 
 **When the test is wrong, a person decides.** The coder can show that a test
 asserts something its criterion does not say (`BLOCKED-TEST`). It changes
@@ -389,18 +444,23 @@ configure in `invar.yaml` and reads its JUnit report, which Pest, PHPUnit,
 pytest and Vitest all write. It never parses your test code and never
 replaces your runner.
 
-**Green is read, not run.** A lock proves a test did not change, not that it
-passes. Invar never runs your suite: your CI does, and `invar acceptance verify
---results junit.xml` reads its report. Every locked file must have run, with a
-test for each criterion its line lists, and every one of its tests must have
-passed; a skipped test, or one that passed
-only on a retry, is not accepted. In Claude Code, `invar acceptance run`
-runs the ticket's locked tests after the coder's `DONE`, so that a review is
-not spent on red tests. That is feedback; the CI check is the boundary.
+**Every criterion the file covers, and green.** A lock proves a test did not
+change, not that it passes. The `ac=` list says which criteria the file's
+tests covered when it was locked, and the digest covers the list, so taking a
+criterion off the line is a change like any other. A JUnit report is checked
+against it: every locked file must have run, with a test of each criterion its
+line lists, and every one of its tests must have passed; a skipped test, or one
+that passed only on a retry, is not accepted. `invar acceptance run` runs the
+ticket's locked tests after the coder's `DONE`, so that a review is not spent
+on red tests, and `invar done --results <report>` makes the same check before
+it closes the cycle. A file locked before the list existed keeps its digest and
+the weaker check (some test of it ran, and every one that ran passed) until it
+is locked again, with a note each time.
 
-**After the merge, the locks keep working.** `invar acceptance verify` needs
-no Plan and no git history, so CI checks every locked file on every push, long
-after the ticket is closed.
+**After the merge, the locks keep working.** A lock needs no Plan, so `plan
+check` and `done` keep checking every locked file on every later ticket. `invar
+acceptance verify` needs no git history either, so a team that runs it in CI,
+with `--results` on its own test report, checks them on every push.
 
 Acceptance tests are decided per ticket at approval (`--acceptance` /
 `--no-acceptance`, with a project default in `invar.yaml`), because not every
@@ -448,58 +508,100 @@ What you install is a Claude Code plugin. It carries:
 |---|---|
 | `invar` binary | Static builds for Linux x86_64 and macOS, picked by a small launcher |
 | Hooks | Each one a single CLI call (table below) |
-| Agents | planner, test-writer, coder, reviewer |
+| Agents | planner, plan-auditor, test-writer, coder, reviewer |
 | Protocol skill | The cycle as the main session runs it: when to use or skip it, dispatching, the gate, closing |
-| Developer skills | `/invar:approve`, `/invar:relock`, `/invar:review`, `/invar:log`, `/invar:log-approve`, `/invar:done` |
+| Developer skills | `/invar:plan-audit`, `/invar:approve`, `/invar:relock`, `/invar:review`, `/invar:log`, `/invar:log-approve`, `/invar:done`; for the optional CI checks, `/invar:skip` and `/invar:config-accept` |
 
 | Event | CLI call | Purpose |
 |---|---|---|
 | `SessionStart` | `context show --binding` | Both context files in every session |
 | `SubagentStart` (coder, test-writer) | `context show --conventions` | `AI_CONTEXT.md` only |
 | `SubagentStop` (planner) | `plan validate --all-drafts` | The planner sees what to fix in its Plan |
-| `PreToolUse` (`Write`, `Edit`, `Bash`) | `plan guard` | Denies edits to an approved Plan or a locked test, and denies the agent the developer's commands |
+| `PreToolUse` (`Write`, `Edit`, `Bash`) | `plan guard` | Denies edits to an approved Plan, a locked test, approval values in a draft, a weakening of `invar.yaml`, the deny rule in `.claude/settings.json` and a Plan audit's baseline and report, and denies the agent the developer's commands |
 
 **No logic in the plugin.** Hooks fire a command and pass its output back;
 prompts and skills contain no branching on configuration. Anything that
 decides is a CLI command, which is why the CLI behaves identically from a
-hook, a terminal or CI, and why the full set of checks runs in CI with no
-agent at all. Tests in `core/` fail if a script with logic, a binary or a hook
+hook, a terminal or CI, and why the checks can run in CI with no agent at
+all. Tests in `core/` fail if a script with logic, a binary or a hook
 that runs a developer-only command appears in the plugin.
 
 **The developer's commands run before the model sees them.** A skill such as
 `/invar:approve` runs its one CLI call itself, and the model cannot invoke the
 skill. The guard also denies the agent running `plan approve`,
-`decision approve`, `decision record` or `done` through the shell, and tells it
-to hand the step to you instead.
+`decision approve`, `decision record`, `done`, `acceptance unlock`, `plan audit
+begin`, `cycle skip` or `config accept` through the shell, and tells it to hand
+the step to you instead.
 
 ## 11. What is guaranteed, and how strongly
 
 Invar is honest about the strength of each mechanism, because a boundary you
 overestimate is worse than one you know the limits of.
 
+**On the developer's machine**, where the cycle runs:
+
 | Mechanism | Strength | What it means |
 |---|---|---|
-| Plan checksum, lock digests (`plan check`, `done`, `acceptance verify`) | **Boundary** | A changed Plan or locked test is refused, in Claude Code and in CI alike |
+| Plan checksum, lock digests and their `ac=` lists (`plan check`, `done`) | **Boundary** against accidents | A changed Plan or locked test is refused before an agent starts and before the cycle closes, whatever tool changed it |
 | Red-before-green at lock time | **Boundary** | A test that cannot fail is never locked |
-| Locked tests green (`acceptance verify --results` in CI, `done --results`) | **Boundary** | A locked test that did not run, failed, was skipped or passed only on a retry is refused, from the team's own report |
-| `acceptance run` after `DONE` | Convenience | Stops the main session offering a review of red tests. It runs in the agent's shell, so the CI check is what counts |
-| `plan guard` hook | Convenience | Saves the agent a wasted edit. It reads command lines, not a shell, so a script can get past it; the checksum still catches the result |
+| Locked tests green (`done --results`) | **Boundary** against accidents | A locked test that did not run, failed, was skipped or passed only on a retry is refused, from the team's own report |
+| Invariants at the gate (`INV-<n>`) | Visibility | The developer sees every invariant the Plan leaves out before approving. It refuses nothing |
+| `acceptance run` after `DONE` | Convenience | Stops the main session offering a review of red tests |
+| `plan guard` hook | Convenience | Saves the agent a wasted edit, and makes it hand the developer's commands back. It sees only the edit tools and reads command lines, not a shell, so a script gets past it; the checksum and the digests still catch the result |
+| Plan audit | Advisory | An agent's assessment of the draft, with a report the CLI computes. It never refuses an approval |
 | Separate agent contexts | Focus | Keeps each agent's view narrow. A determined agent could still read a file; nothing that reads it can change a verdict |
 | Deny rule on the decision log | Focus | Stops accidental reads. The log is advisory, so a leak costs focus, never correctness |
-| Required paths through a cycle (`cycle check` in CI) | **Boundary**, for the paths the team lists | A branch changing one passes when every commit that touched it was made while a closed cycle's Plan was approved, or with an `Invar-Skip:` trailer. The list is read from the base branch. Who wrote the trailer is not proven: the guard is a scan, and a signed skip comes with #154 |
 | Review | Advisory | An LLM judgement with false positives and misses. Information for the developer, never a gate |
 
-Nothing enforced inside a repository can make forgery impossible: an agent
-could in principle write an approval into a Plan header itself. What Invar
-guarantees is that the ordinary failure, an agent changing what was approved
-and carrying on, is **mechanically visible** rather than invisible. And an
-approval made by the wrong party leaves exactly the evidence the checks look
-at.
+**The local guarantee, and its limit.** Checks on disk catch an accidental or
+incidental change: a criterion relaxed along the way, a test edited until it
+passes, an approval value written into a draft, a check switched off in
+`invar.yaml` in passing. They do not stop an agent that deliberately rewrites a
+digest, a checksum, an audit baseline or the plugin through its shell: anything
+that can run `invar` can compute a digest, and the plugin's binary, its hooks
+and `.claude/settings.json` are files on the same machine. What Invar
+guarantees there is that the ordinary failure, an agent changing what was
+approved and carrying on, is **mechanically visible** rather than invisible,
+and that an approval made by the wrong party leaves exactly the evidence the
+checks look at. The optional CI checks (§12) move some of these checks to where
+the agent cannot reach.
 
 The rule that keeps this table honest: **no boundary moves out of an on-disk
 check into a hook or a prompt.**
 
-## 12. Principles behind the architecture
+## 12. The optional CI part
+
+These commands exist for teams that want the checks repeated where an agent
+cannot change the answer. They are early: running the cycle in CI/CD is a
+later phase. Each runs on CI's own binary, the release checked with `gh
+attestation verify`, against the pull request's target given as `--base`
+(never `git.base_branch`, which the branch could point at itself), and those
+that read history need `fetch-depth: 0`.
+
+| Command | What it checks | Who may let it through |
+|---|---|---|
+| `acceptance verify [--results <report>]` | Every lock unchanged; with `--results`, every locked test ran, each listed criterion too, and passed | Nobody: the developer relocks or fixes |
+| `config check` | `invar.yaml` on the branch does not weaken a check against the base: a closed list of keys (`invar-yaml.md` §3.9), from the `acceptance:` section removed to a value added to `acceptance.fakes_allowed` | The developer, with an `Invar-Config: <reason>` trailer |
+| `cycle check` | Changes to the paths in `cycle.required_paths`, read from the base, were made while a cycle closed on the branch had its Plan approved | The developer, with an `Invar-Skip: <reason>` trailer |
+| `approval verify` | With `approval.signed: true` on the base, every approval on the branch is signed by a key in the base's `.invar/approvers`, matches its Plan, and was not replayed from history | Nobody: the developer approves again |
+
+**Signed approvals.** With `approval.signed: true`, `plan approve` signs the
+approval with the developer's SSH signing key, over the ticket, the checksum
+and an `Approval-id` new on every approval, and writes `approval.sig` next to
+the Plan. With it on at the base, the two trailers count only when signed too
+(`/invar:skip`, `/invar:config-accept`). The approvers list and the switch are
+read from the base, so a branch cannot add its own approver or turn the check
+off for itself. A signature shows that a key was used, not that a person meant
+it: a key the agent can use without the developer signs for the agent too, and
+proves no more than the checksum (`contracts/formats/approval-signature.md`
+§7).
+
+**What CI still needs from the team.** A pull request can edit the workflow on
+its own branch. The steps have to be required status checks on the base, and
+`.github/workflows/` and `.invar/approvers` owned in `CODEOWNERS`, or a branch
+can drop the check that would refuse it ([`INSTALL.md`](INSTALL.md#protect-the-workflow)).
+
+## 13. Principles behind the architecture
 
 - **The CLI is the system; the plugin is a shell.** The CLI holds every
   decision; plugin APIs can change without touching a single verdict.
@@ -522,7 +624,7 @@ check into a hook or a prompt.**
 ## Further reading
 
 - [`USAGE.md`](USAGE.md): one ticket, every command, step by step
-- [`INSTALL.md`](INSTALL.md): setup for a team, acceptance tests, CI
+- [`INSTALL.md`](INSTALL.md): setup for a team, acceptance tests, the optional CI checks
 - [`contracts/formats/`](../contracts/formats/): the exact on-disk formats
 - [`plugin/NOTES.md`](../plugin/NOTES.md): what was verified against Claude
   Code, and why the plugin is built as it is

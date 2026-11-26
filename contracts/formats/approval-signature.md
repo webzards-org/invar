@@ -440,16 +440,17 @@ on the pull request, before it.
 
 ## 9. Version history
 
-**1.0.0** — initial version (#154).
+**1.0.0** — initial version (#154). Released in 0.3.0; it was changed in place
+before that release, as listed below. Any later change bumps the version.
 
-Not yet released, so changed in place during review (PR #162):
+Changed in place during review (PR #162):
 
 - §5, step 3: the deadline also kills what the signing program started, when
   there is no terminal, and the refusal never waits for it. Before, only the
   program was killed, and a helper holding its output open kept `plan approve`
   waiting until the helper exited, long past the 90 seconds.
 
-Not yet released, so changed in place again with the verifier (#168):
+Changed in place again with the verifier (#168):
 
 - §3: the statement is four lines; the fourth is `approval-id: <Approval-id>`,
   the new header key of `plan-header.md` 1.10.0, new on every signed approval.
@@ -471,8 +472,8 @@ Not yet released, so changed in place again with the verifier (#168):
   or in a `failed` entry at the base; the limit, a commit no ref reaches. §7
   says what that leaves.
 
-Not yet released, so changed in place again for signed skips and configuration
-changes (#168, its second PR):
+Changed in place again for signed skips and configuration changes (#168, its
+second PR):
 
 - §1, §2: the namespaces `invar-skip` and `invar-config`, and what a line
   without `namespaces=` accepts.
@@ -486,6 +487,7 @@ that the default pull-request checkout hides the branch from §6.2 (D-8). The
 review of PR #169 replayed an approval from a failed branch onto a new branch
 for the same ticket, and the branch-only rule passed it (D-7).
 
-**Compatibility:** none needed. 1.0.0 has not been released. An approval signed
-by a build of `main` from before this change has no `Approval-id`, and the
-verifier refuses it; approving it again signs the new statement.
+**Compatibility:** none needed. 1.0.0 was first released in 0.3.0, with every
+change above. An approval signed by a build of `main` from before them has no
+`Approval-id`, and the verifier refuses it; approving it again signs the new
+statement.
