@@ -1,6 +1,53 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-11-26
+
+Invar is used on the developer's machine: the gate, locked tests, the guard and
+the Plan audit. The CI commands are optional and early; running the cycle in
+CI/CD is a later phase.
+
+### Upgrading from 0.2.0
+
+Update the plugin as usual (`claude plugin marketplace update invar`, then
+`claude plugin update invar@invar`). Every Plan, lock line, decision entry and
+`invar.yaml` written by 0.2.0 reads as before; nothing has to be migrated.
+
+On your machine:
+
+- **Locked tests from before `ac=` keep the weaker check.** A lock line written
+  by 0.2.0 has no `ac=` list. It still verifies, and `--results` checks only
+  that some test of the file ran and every one that ran passed, with a note on
+  stderr, so a file whose tests ran only in part is not caught. Relocking
+  records the list: `/invar:relock <TICKET> <file>…` while the ticket's Plan is
+  approved, or a later ticket's Plan that lists the file under `## Acceptance
+  tests to change`.
+- **`INV-<n>` ids are optional.** Add them to the items under `## Invariants`
+  in `BUSINESS_CONTEXT.md` (`- INV-1: …`) and the gate lists which ones a Plan
+  leaves out. Number all of them or none: a file where only some invariants
+  have ids is an error. Without ids, everything works as before, with one
+  warning at the gate.
+- **The Plan audit is optional.** `/invar:plan-audit <TICKET>` before
+  `/invar:approve`; nothing waits for it.
+
+For teams that run the CI checks:
+
+- **The steps**: install the attested release (pin `INVAR_VERSION: v0.3.0`),
+  then `invar acceptance verify [--results <report>]`, `invar config check`,
+  `invar cycle check` and `invar approval verify`, as in `docs/INSTALL.md`
+  under "Optional: CI checks (early)".
+- **`--base origin/${{ github.base_ref }}`** on every step that compares with
+  the base, and **`fetch-depth: 0`** with `ref:` set to the pull request's head
+  for those that read history. Without `--base` they use `origin/HEAD`, else
+  `main`, and never `git.base_branch`.
+- **Signing**, if you turn `approval.signed` on: list who may sign in
+  `.invar/approvers` on the base branch, with `namespaces=` saying what each
+  key may sign (`invar-approval`, `invar-skip`, `invar-config`; a line without
+  it accepts all). With it on at the base, `Invar-Skip:` and `Invar-Config:`
+  count only signed (`/invar:skip`, `/invar:config-accept`).
+- **A value added to `acceptance.fakes_allowed` is now a weakening**, so a
+  branch that adds one needs an `Invar-Config:` trailer.
+- **Protect the workflow**: required status checks for the steps, and
+  `CODEOWNERS` for `.github/workflows/` and `.invar/approvers`.
 
 ### Added
 
@@ -158,6 +205,23 @@
 
 ### Changed
 
+- **A value added to `acceptance.fakes_allowed` weakens the checks.** The tests
+  may then fake one more thing, and check less of the real code. `plan guard`
+  denies an agent's `Write` or `Edit` of `invar.yaml` that adds one, and `invar
+  config check` fails a branch that does without an `Invar-Config:` trailer.
+  Removing or reordering values is not a weakening (#172). Contract
+  `invar-yaml.md` 2.9.0.
+- **The documentation leads with the local cycle.** The README says what the
+  gate, locked tests, the guard and the Plan audit protect on your machine, and
+  where that stops: checks on disk catch an accidental change, not an agent
+  that deliberately rewrites a digest, a baseline or the plugin through its
+  shell. Every CI command is under "Optional: CI checks (early)" in the README,
+  `docs/INSTALL.md` and `docs/USAGE.md`. `docs/INSTALL.md` pins `v0.3.0` and
+  says how to protect the workflow file, and `docs/DESIGN.md` describes 0.3.0
+  (#172).
+- **`approval-signature.md` 1.0.0 and `plan-audit.md` 1.0.0 are released**, with
+  the changes made in place before this release; any later change bumps their
+  version (#172).
 - **With `approval.signed` on at the base, a bare `Invar-Skip:` or
   `Invar-Config:` trailer no longer counts** in CI; sign it instead (#168).
 - **The README says what signed approvals guarantee, and what they do not**: a

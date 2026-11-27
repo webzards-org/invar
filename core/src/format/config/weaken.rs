@@ -43,6 +43,12 @@ pub fn weakenings(old: &Config, new: &Config) -> Vec<Weakening> {
             if old.required && !new.required {
                 push("acceptance.required", "true".into(), "false".into());
             }
+            // More that the tests may fake is less that they check (#172).
+            for fake in &new.fakes_allowed {
+                if !old.fakes_allowed.contains(fake) {
+                    push("acceptance.fakes_allowed", fake.clone(), "added".into());
+                }
+            }
         }
         (None, _) => {}
     }
@@ -118,6 +124,11 @@ mod tests {
                 "\"app/Models/**\", ",
                 "",
                 "cycle.required_paths: app/Models/** -> removed",
+            ),
+            (
+                "  dir: tests/Acceptance",
+                "  fakes_allowed: [mail]\n  dir: tests/Acceptance",
+                "acceptance.fakes_allowed: mail -> added",
             ),
             ("offer: true", "offer: false", "review.offer: true -> false"),
         ];
@@ -199,5 +210,35 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn each_fake_added_is_a_weakening_and_one_removed_is_not() {
+        let some = FULL.replace(
+            "  dir: tests/Acceptance",
+            "  fakes_allowed: [http, mail]\n  dir: tests/Acceptance",
+        );
+        assert_eq!(
+            keys(
+                &some,
+                &some.replace("[http, mail]", "[http, mail, queue, notification]")
+            ),
+            vec![
+                "acceptance.fakes_allowed: queue -> added",
+                "acceptance.fakes_allowed: notification -> added"
+            ]
+        );
+        // Removing one, or all of them, or reordering them, fakes less, not more.
+        assert!(keys(&some, &some.replace("[http, mail]", "[http]")).is_empty());
+        assert!(keys(&some, &some.replace("[http, mail]", "[]")).is_empty());
+        assert!(keys(&some, FULL).is_empty());
+        assert!(keys(&some, &some.replace("[http, mail]", "[mail, http]")).is_empty());
+        // A value is compared as text: another spelling is another value.
+        assert_eq!(
+            keys(&some, &some.replace("[http, mail]", "[HTTP, mail]")),
+            vec!["acceptance.fakes_allowed: HTTP -> added"]
+        );
+        // A new `acceptance` section is adding a check, whatever it allows.
+        assert!(keys("", &some).is_empty());
     }
 }

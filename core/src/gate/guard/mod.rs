@@ -63,6 +63,10 @@
 //! header is judged for approval values: `Status: approved` in its body is just text.
 //! Both judge the file the call would leave ([`text_after`]), because an `Edit`'s
 //! `new_string` need not name the key or the marker it fills.
+//!
+//! The hook's matcher is `Write|Edit|Bash`: Claude Code 2.1.332 has no `MultiEdit`
+//! (`plugin/NOTES.md` §24). A tool that edits files and is added later goes into the
+//! matcher, and its payload into [`text_after`], with a test for each guarded file.
 
 use std::io;
 use std::path::{Component, Path, PathBuf};

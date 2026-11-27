@@ -292,8 +292,10 @@ all, gets a line of its own, so that the gate says so even when the report would
 
 ## 10. Version history
 
-**1.0.0** — initial version (#167). Amended before release, after review: `plan guard`
-denies `Write` and `Edit` of `baseline.md` and `report.txt` (§2, §7.2, D-3), and the line of
-§8 is computed from the baseline, the findings and the Plan now instead of read from
+**1.0.0** — initial version (#167), released in 0.3.0. Amended in place before that
+release, after review: `plan guard` denies `Write` and `Edit` of `baseline.md` and
+`report.txt` (§2, §7.2, D-3), and the line of §8 is computed from the baseline, the findings and the Plan now instead of read from
 `report.txt`, with `findings unreadable`, "this version" as every change accounted for,
 and a line for each section changed that the auditor may not edit (D-4).
+
+Released in 0.3.0 as written here. Any later change bumps the version.
